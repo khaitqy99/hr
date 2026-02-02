@@ -26,8 +26,15 @@ export default defineConfig(({ mode }) => {
             manualChunks: (id) => {
               // Tách node_modules thành các chunks riêng biệt
               if (id.includes('node_modules')) {
-                // React và React DOM - chunk riêng vì được dùng nhiều
-                if (id.includes('react') || id.includes('react-dom')) {
+                // React core - giữ tất cả React-related packages cùng nhau
+                // React 19 yêu cầu react, react-dom, và scheduler phải cùng chunk
+                if (
+                  id.includes('react/') || 
+                  id.includes('react-dom/') || 
+                  id.includes('scheduler/') ||
+                  id.includes('/react/jsx-runtime') ||
+                  id.includes('/react/jsx-dev-runtime')
+                ) {
                   return 'react-vendor';
                 }
                 
