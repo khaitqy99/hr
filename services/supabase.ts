@@ -5,18 +5,42 @@ import type { Database } from '../types/supabase';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
+// Validate environment variables và log warning
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn('⚠️ Supabase credentials chưa được cấu hình. Vui lòng thêm VITE_SUPABASE_URL và VITE_SUPABASE_ANON_KEY vào file .env.local');
+  console.error(`
+⚠️ LỖI CẤU HÌNH SUPABASE
+
+Environment Variables chưa được cấu hình!
+
+Vui lòng thêm các biến sau vào Vercel Dashboard:
+- VITE_SUPABASE_URL
+- VITE_SUPABASE_ANON_KEY
+
+Hiện tại:
+- VITE_SUPABASE_URL: ${supabaseUrl ? '✅ Set' : '❌ Missing'}
+- VITE_SUPABASE_ANON_KEY: ${supabaseAnonKey ? '✅ Set' : '❌ Missing'}
+  `);
 }
 
+// Helper để check nếu Supabase đã được cấu hình
+export const isSupabaseConfigured = (): boolean => {
+  return !!(supabaseUrl && supabaseAnonKey);
+};
+
 // Tạo Supabase client
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true
+// Sử dụng fallback values để tránh crash khi import
+// App component sẽ check và hiển thị error UI nếu env vars missing
+export const supabase = createClient<Database>(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder-key',
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
   }
-});
+);
 
 // Helper function để kiểm tra kết nối
 export const checkSupabaseConnection = async (): Promise<boolean> => {

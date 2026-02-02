@@ -8,6 +8,7 @@ import Payroll from './components/Payroll';
 import LeaveRequest from './components/LeaveRequest';
 import EmployeeProfile from './components/EmployeeProfile';
 import SalaryManagement from './components/SalaryManagement';
+import EnvError from './components/EnvError';
 import { User, UserRole } from './types';
 import { getCurrentUser } from './services/db';
 import { sendOTP, verifyOTP } from './services/auth';
@@ -244,6 +245,15 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
 };
 
 const App: React.FC = () => {
+  // Kiểm tra environment variables
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  
+  // Hiển thị lỗi nếu thiếu environment variables
+  if (!supabaseUrl || !supabaseKey) {
+    return <EnvError />;
+  }
+
   const [user, setUser] = useState<User | null>(null);
   const [currentView, setCurrentView] = useState('dashboard');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
