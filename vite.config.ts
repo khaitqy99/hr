@@ -24,31 +24,15 @@ export default defineConfig(({ mode }) => {
         rollupOptions: {
           output: {
             manualChunks: (id) => {
-              // Tách node_modules thành các chunks riêng biệt
+              // Đơn giản hóa chunking để tránh lỗi React 19
+              // Chỉ chunk các libraries lớn nhất, để Vite tự động optimize React
               if (id.includes('node_modules')) {
-                // React core - giữ tất cả React-related packages cùng nhau
-                // React 19 yêu cầu react, react-dom, và scheduler phải cùng chunk
-                if (
-                  id.includes('react/') || 
-                  id.includes('react-dom/') || 
-                  id.includes('scheduler/') ||
-                  id.includes('/react/jsx-runtime') ||
-                  id.includes('/react/jsx-dev-runtime')
-                ) {
-                  return 'react-vendor';
-                }
-                
-                // Supabase - chunk riêng vì là core dependency
-                if (id.includes('@supabase')) {
-                  return 'supabase-vendor';
-                }
-                
-                // Recharts - chunk riêng vì chỉ dùng trong một số components
+                // Recharts - chunk riêng vì khá lớn và chỉ dùng trong một số components
                 if (id.includes('recharts')) {
                   return 'recharts-vendor';
                 }
                 
-                // Google GenAI - chunk riêng vì chỉ dùng khi cần AI
+                // Google GenAI - chunk riêng vì khá lớn và chỉ dùng khi cần AI
                 if (id.includes('@google/genai')) {
                   return 'genai-vendor';
                 }
@@ -58,12 +42,11 @@ export default defineConfig(({ mode }) => {
                   return 'appwrite-vendor';
                 }
                 
-                // Các vendor libraries khác
+                // Để tất cả các libraries khác (bao gồm React, React DOM, Supabase)
+                // được Vite tự động optimize vào vendor chunk
+                // Điều này đảm bảo React và React DOM luôn cùng chunk
                 return 'vendor';
               }
-              
-              // Có thể tách các components lớn thành chunks riêng nếu cần
-              // Ví dụ: if (id.includes('components/admin')) return 'admin-components';
             },
           },
         },
