@@ -38,14 +38,32 @@ export const sendOTP = async (email: string): Promise<{ success: boolean; error?
       };
     }
 
+    // Kiểm tra email có tồn tại trong bảng users không
+    const user = await getCurrentUser(normalizedEmail);
+    if (!user) {
+      return { 
+        success: false, 
+        error: 'Email này chưa được đăng ký trong hệ thống. Vui lòng liên hệ quản trị viên.' 
+      };
+    }
+
     // Gửi OTP qua Supabase Auth
+    // Cho phép Supabase tạo user trong auth.users nếu chưa có
+    // Sau đó trigger sẽ tự động liên kết với user trong bảng users
     const { error } = await supabase.auth.signInWithOtp({
       email: normalizedEmail,
       options: {
         // Email template sẽ được gửi với OTP
         emailRedirectTo: undefined,
-        // Đảm bảo chỉ gửi OTP, không phải magic link
-        shouldCreateUser: false, // Không tự động tạo user mới
+        // Cho phép tạo user trong auth.users nếu chưa có
+        // Trigger sẽ tự động liên kết với user trong bảng users
+        shouldCreateUser: true,
+        // Metadata để trigger có thể tạo user đúng trong bảng users
+        data: {
+          name: user.name,
+          role: user.role,
+          department: user.department,
+        },
       },
     });
 
