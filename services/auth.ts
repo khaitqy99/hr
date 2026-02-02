@@ -47,23 +47,31 @@ export const sendOTP = async (email: string): Promise<{ success: boolean; error?
       };
     }
 
-    // Gửi OTP qua Supabase Auth
-    // Cho phép Supabase tạo user trong auth.users nếu chưa có
-    // Sau đó trigger sẽ tự động liên kết với user trong bảng users
+    // Kiểm tra xem user đã có auth_user_id chưa (tức là đã có trong auth.users)
+    // Query trực tiếp để lấy auth_user_id
+    const { data: userData } = await supabase
+      .from('users')
+      .select('auth_user_id')
+      .eq('email', normalizedEmail)
+      .single();
+
+    // Nếu user chưa có auth_user_id, có nghĩa là chưa có trong auth.users
+    // Trong trường hợp này, cần tạo user trong auth.users trước
+    // Nhưng để tránh gửi confirmation email, ta sẽ báo lỗi và hướng dẫn admin
+    if (!userData || !userData.auth_user_id) {
+      return { 
+        success: false, 
+        error: 'Tài khoản chưa được kích hoạt trong hệ thống xác thực. Vui lòng liên hệ quản trị viên để kích hoạt tài khoản trước khi đăng nhập.' 
+      };
+    }
+
+    // User đã có trong auth.users, gửi OTP với shouldCreateUser: false
+    // Điều này sẽ gửi email OTP thay vì confirmation email
     const { error } = await supabase.auth.signInWithOtp({
       email: normalizedEmail,
       options: {
-        // Email template sẽ được gửi với OTP
         emailRedirectTo: undefined,
-        // Cho phép tạo user trong auth.users nếu chưa có
-        // Trigger sẽ tự động liên kết với user trong bảng users
-        shouldCreateUser: true,
-        // Metadata để trigger có thể tạo user đúng trong bảng users
-        data: {
-          name: user.name,
-          role: user.role,
-          department: user.department,
-        },
+        shouldCreateUser: false, // Không tạo user mới - sẽ gửi OTP
       },
     });
 
