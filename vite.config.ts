@@ -20,6 +20,46 @@ export default defineConfig(({ mode }) => {
             drop_debugger: isProduction,
           },
         },
+        chunkSizeWarningLimit: 1000, // Tăng limit để giảm cảnh báo (kb)
+        rollupOptions: {
+          output: {
+            manualChunks: (id) => {
+              // Tách node_modules thành các chunks riêng biệt
+              if (id.includes('node_modules')) {
+                // React và React DOM - chunk riêng vì được dùng nhiều
+                if (id.includes('react') || id.includes('react-dom')) {
+                  return 'react-vendor';
+                }
+                
+                // Supabase - chunk riêng vì là core dependency
+                if (id.includes('@supabase')) {
+                  return 'supabase-vendor';
+                }
+                
+                // Recharts - chunk riêng vì chỉ dùng trong một số components
+                if (id.includes('recharts')) {
+                  return 'recharts-vendor';
+                }
+                
+                // Google GenAI - chunk riêng vì chỉ dùng khi cần AI
+                if (id.includes('@google/genai')) {
+                  return 'genai-vendor';
+                }
+                
+                // Appwrite - chunk riêng (nếu có dùng)
+                if (id.includes('appwrite')) {
+                  return 'appwrite-vendor';
+                }
+                
+                // Các vendor libraries khác
+                return 'vendor';
+              }
+              
+              // Có thể tách các components lớn thành chunks riêng nếu cần
+              // Ví dụ: if (id.includes('components/admin')) return 'admin-components';
+            },
+          },
+        },
       },
       plugins: [
         react(),
