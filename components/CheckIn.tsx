@@ -18,8 +18,41 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
   // Camera State
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const [photo, setPhoto] = useState<string | null>(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+
+  const startCamera = async () => {
+    // Tránh gọi getUserMedia hai lần (Strict Mode hoặc re-mount) — camera đã active thì bỏ qua
+    if (streamRef.current?.active) {
+      if (videoRef.current) videoRef.current.srcObject = streamRef.current;
+      setIsCameraActive(true);
+      setCameraError(null);
+      return;
+    }
+    try {
+      setCameraError(null);
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 1280 }, aspectRatio: { ideal: 9/16 } } 
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        setIsCameraActive(true);
+      }
+    } catch (err) {
+      const e = err as DOMException;
+      console.error("Camera error:", err);
+      if (e?.name === 'NotReadableError' || e?.message?.includes('in use')) {
+        setCameraError('Camera đang được sử dụng bởi ứng dụng khác. Hãy đóng tab/ứng dụng dùng camera rồi thử lại.');
+      } else if (e?.name === 'NotAllowedError') {
+        setCameraError('Bạn chưa cho phép truy cập camera.');
+      } else {
+        setCameraError('Không thể bật camera. Vui lòng thử lại.');
+      }
+    }
+  };
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -46,27 +79,13 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
     };
   }, [user.id]);
 
-  const startCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 1280 }, aspectRatio: { ideal: 9/16 } } 
-      });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        setIsCameraActive(true);
-      }
-    } catch (err) {
-      console.error("Camera error:", err);
-      // Don't set global error yet, just log it. Some users might deny permission.
-    }
-  };
-
   const stopCamera = () => {
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach(track => track.stop());
-      setIsCameraActive(false);
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
     }
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setIsCameraActive(false);
   };
 
   const capturePhoto = () => {
@@ -204,10 +223,24 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
          {/* Overlay UI inside Camera */}
          <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-4">
             {/* Top Bar */}
-            <div className="flex justify-between items-start">
+            <div className="flex justify-between items-start flex-wrap gap-2">
                 <div className="bg-black/30 backdrop-blur-md text-white text-[10px] font-bold px-3 py-1 rounded-full border border-white/10">
                    Camera: {isCameraActive ? 'ON' : 'OFF'}
                 </div>
+                {cameraError && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <span className="bg-amber-500/90 text-white text-[10px] font-bold px-3 py-1.5 rounded-full max-w-[70%]">
+                            📷 {cameraError}
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => { setCameraError(null); startCamera(); }}
+                            className="pointer-events-auto bg-white/90 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-full hover:bg-white"
+                        >
+                            Thử lại
+                        </button>
+                    </div>
+                )}
                 {error && (
                     <div className="bg-red-500/90 text-white text-[10px] font-bold px-3 py-1 rounded-full animate-bounce">
                         ! {error}

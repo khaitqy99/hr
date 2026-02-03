@@ -320,7 +320,7 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
             }}
           />
           {navConfig.map((item, index) => (
-            <NavItem view={item.view} label={item.label} icon={item.icon} index={index} />
+            <NavItem key={item.view} view={item.view} label={item.label} icon={item.icon} index={index} />
           ))}
         </div>
       </nav>
