@@ -664,7 +664,6 @@ export const registerShift = async (shift: ShiftRegistration): Promise<void> => 
       const { error } = await supabase
         .from('shift_registrations')
         .insert({
-          id: shift.id,
           user_id: shift.userId,
           date: shift.date,
           shift: shift.shift,
