@@ -2,7 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { SystemConfig } from '../../types';
 import { getSystemConfigs, updateSystemConfig } from '../../services/db';
 
-const SystemConfigManagement: React.FC = () => {
+interface SystemConfigManagementProps {
+  onRegisterReload?: (handler: () => void | Promise<void>) => void;
+}
+
+const SystemConfigManagement: React.FC<SystemConfigManagementProps> = ({ onRegisterReload }) => {
   const [configs, setConfigs] = useState<SystemConfig[]>([]);
   const [editingConfig, setEditingConfig] = useState<SystemConfig | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -10,6 +14,12 @@ const SystemConfigManagement: React.FC = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (onRegisterReload) {
+      onRegisterReload(loadData);
+    }
+  }, [onRegisterReload]);
 
   const loadData = async () => {
     const configs = await getSystemConfigs();

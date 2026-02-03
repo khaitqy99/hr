@@ -4,6 +4,7 @@ import { getAllUsers, createUser } from '../../services/db';
 
 interface UsersManagementProps {
   onEditUser: (user: User) => void;
+  onRegisterReload?: (handler: () => void | Promise<void>) => void;
 }
 
 const defaultUserForm = {
@@ -13,7 +14,7 @@ const defaultUserForm = {
   employeeCode: '',
 };
 
-const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser }) => {
+const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegisterReload }) => {
   const [employees, setEmployees] = useState<User[]>([]);
   const [showUserForm, setShowUserForm] = useState(false);
   const [userForm, setUserForm] = useState(defaultUserForm);
@@ -23,6 +24,12 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser }) => {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (onRegisterReload) {
+      onRegisterReload(loadData);
+    }
+  }, [onRegisterReload]);
 
   const loadData = async () => {
     const users = await getAllUsers();

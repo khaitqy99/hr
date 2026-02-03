@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { getAllAttendance, getLeaveRequests, getShiftRegistrations, getAllUsers } from '../../services/db';
 
-const SettingsPanel: React.FC = () => {
+interface SettingsPanelProps {
+  onRegisterReload?: (handler: () => void | Promise<void>) => void;
+}
+
+const SettingsPanel: React.FC<SettingsPanelProps> = ({ onRegisterReload }) => {
   const [stats, setStats] = useState({
     totalUsers: 0,
     totalAttendance: 0,
@@ -12,6 +16,12 @@ const SettingsPanel: React.FC = () => {
   useEffect(() => {
     loadStats();
   }, []);
+
+  useEffect(() => {
+    if (onRegisterReload) {
+      onRegisterReload(loadStats);
+    }
+  }, [onRegisterReload]);
 
   const loadStats = async () => {
     const users = await getAllUsers();

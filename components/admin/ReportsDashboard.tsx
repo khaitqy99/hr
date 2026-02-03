@@ -2,7 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { User, UserRole, LeaveRequest, ShiftRegistration, AttendanceRecord, AttendanceType, EmployeeStatus } from '../../types';
 import { getAllUsers, getLeaveRequests, getShiftRegistrations, getAllAttendance } from '../../services/db';
 
-const ReportsDashboard: React.FC = () => {
+interface ReportsDashboardProps {
+  onRegisterReload?: (handler: () => void | Promise<void>) => void;
+}
+
+const ReportsDashboard: React.FC<ReportsDashboardProps> = ({ onRegisterReload }) => {
   const [employees, setEmployees] = useState<User[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [shiftRequests, setShiftRequests] = useState<ShiftRegistration[]>([]);
@@ -11,6 +15,12 @@ const ReportsDashboard: React.FC = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (onRegisterReload) {
+      onRegisterReload(loadData);
+    }
+  }, [onRegisterReload]);
 
   const loadData = async () => {
     const users = await getAllUsers();

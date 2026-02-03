@@ -1,8 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Notification, User, UserRole } from '../../types';
 import { getAllUsers, getAllNotifications, createNotification, deleteNotification } from '../../services/db';
+import { sendPushNotificationToUser, sendPushNotificationToAllEmployees } from '../../services/push-sender';
 
-const NotificationsManagement: React.FC = () => {
+interface NotificationsManagementProps {
+  onRegisterReload?: (handler: () => void | Promise<void>) => void;
+}
+
+const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onRegisterReload }) => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -16,6 +21,12 @@ const NotificationsManagement: React.FC = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (onRegisterReload) {
+      onRegisterReload(loadData);
+    }
+  }, [onRegisterReload]);
 
   const loadData = async () => {
     const users = await getAllUsers();
@@ -32,11 +43,13 @@ const NotificationsManagement: React.FC = () => {
     }
 
     try {
+      let createdNotifications: Notification[] = [];
+
       if (formData.userId === 'ALL') {
         // Send to all employees
         const employeesToNotify = employees.filter(e => e.role !== UserRole.ADMIN);
         for (const emp of employeesToNotify) {
-          await createNotification({
+          const notification = await createNotification({
             userId: emp.id,
             title: formData.title.trim(),
             message: formData.message.trim(),
@@ -44,10 +57,24 @@ const NotificationsManagement: React.FC = () => {
             timestamp: Date.now(),
             type: formData.type,
           });
+          createdNotifications.push(notification);
+        }
+
+        // Gửi push notification đến tất cả employees
+        try {
+          await sendPushNotificationToAllEmployees({
+            title: formData.title.trim(),
+            message: formData.message.trim(),
+            type: formData.type,
+            url: '/notifications',
+          });
+        } catch (pushError) {
+          console.error('Error sending push notifications:', pushError);
+          // Không throw error để không làm gián đoạn việc tạo notification
         }
       } else {
         // Send to specific user
-        await createNotification({
+        const notification = await createNotification({
           userId: formData.userId,
           title: formData.title.trim(),
           message: formData.message.trim(),
@@ -55,6 +82,21 @@ const NotificationsManagement: React.FC = () => {
           timestamp: Date.now(),
           type: formData.type,
         });
+        createdNotifications.push(notification);
+
+        // Gửi push notification đến user cụ thể
+        try {
+          await sendPushNotificationToUser(formData.userId, {
+            title: formData.title.trim(),
+            message: formData.message.trim(),
+            type: formData.type,
+            notificationId: notification.id,
+            url: '/notifications',
+          });
+        } catch (pushError) {
+          console.error('Error sending push notification:', pushError);
+          // Không throw error để không làm gián đoạn việc tạo notification
+        }
       }
 
       loadData();

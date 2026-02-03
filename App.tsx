@@ -7,6 +7,7 @@ import AdminPanel from './components/AdminPanel';
 import Payroll from './components/Payroll';
 import EmployeeProfile from './components/EmployeeProfile';
 import SalaryManagement from './components/SalaryManagement';
+import NotificationsPanel from './components/NotificationsPanel';
 import EnvError from './components/EnvError';
 import { User, UserRole } from './types';
 import { getCurrentUser } from './services/db';
@@ -563,6 +564,7 @@ const App: React.FC = () => {
       case 'checkin': return <CheckIn user={user} />;
       case 'shifts': return <ShiftRegister user={user} />;
       case 'payroll': return <Payroll user={user} />;
+      case 'notifications': return <NotificationsPanel user={user} />;
       case 'admin': 
         if (user.role !== UserRole.ADMIN) {
           // Redirect non-admin users

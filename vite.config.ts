@@ -51,6 +51,9 @@ export default defineConfig(({ mode }) => {
         VitePWA({
           registerType: 'autoUpdate',
           includeAssets: ['favicon.svg', 'icon-192.png', 'icon-512.png'],
+          strategies: 'injectManifest',
+          srcDir: 'public',
+          filename: 'sw.js',
           manifest: {
             name: 'HR Connect',
             short_name: 'HR Connect',
@@ -77,31 +80,12 @@ export default defineConfig(({ mode }) => {
               },
             ],
           },
-          workbox: {
+          injectManifest: {
             globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-            runtimeCaching: [
-              {
-                urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-                handler: 'CacheFirst',
-                options: {
-                  cacheName: 'google-fonts-cache',
-                  expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
-                  cacheableResponse: { statuses: [0, 200] },
-                },
-              },
-              {
-                urlPattern: /^https:\/\/cdn\.tailwindcss\.com\/.*/i,
-                handler: 'CacheFirst',
-                options: {
-                  cacheName: 'tailwind-cache',
-                  expiration: { maxEntries: 1, maxAgeSeconds: 60 * 60 * 24 * 365 },
-                  cacheableResponse: { statuses: [0, 200] },
-                },
-              },
-            ],
           },
           devOptions: {
             enabled: true,
+            type: 'classic', // Service workers không hỗ trợ ES modules tốt
           },
         }),
       ],

@@ -2,7 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { LeaveRequest, RequestStatus, User, UserRole } from '../../types';
 import { getLeaveRequests, updateLeaveRequestStatus, getAllUsers } from '../../services/db';
 
-const LeaveManagement: React.FC = () => {
+interface LeaveManagementProps {
+  onRegisterReload?: (handler: () => void | Promise<void>) => void;
+}
+
+const LeaveManagement: React.FC<LeaveManagementProps> = ({ onRegisterReload }) => {
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
   const [filter, setFilter] = useState<RequestStatus | 'ALL'>('PENDING');
@@ -10,6 +14,12 @@ const LeaveManagement: React.FC = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (onRegisterReload) {
+      onRegisterReload(loadData);
+    }
+  }, [onRegisterReload]);
 
   const loadData = async () => {
     const requests = await getLeaveRequests(undefined, UserRole.ADMIN);

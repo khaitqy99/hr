@@ -2,7 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { PayrollRecord, User } from '../../types';
 import { getAllPayrolls, getAllUsers } from '../../services/db';
 
-const PayrollManagement: React.FC = () => {
+interface PayrollManagementProps {
+  onRegisterReload?: (handler: () => void | Promise<void>) => void;
+}
+
+const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload }) => {
   const [payrollRecords, setPayrollRecords] = useState<PayrollRecord[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
   const [selectedMonth, setSelectedMonth] = useState('');
@@ -18,6 +22,16 @@ const PayrollManagement: React.FC = () => {
     };
     initData();
   }, []);
+
+  useEffect(() => {
+    if (onRegisterReload && selectedMonth) {
+      onRegisterReload(async () => {
+        await loadData(selectedMonth);
+        const users = await getAllUsers();
+        setEmployees(users);
+      });
+    }
+  }, [onRegisterReload, selectedMonth]);
 
   const loadData = async (month: string) => {
     const records = await getAllPayrolls(month);

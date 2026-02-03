@@ -26,6 +26,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
   const [activeTab, setActiveTab] = useState<Tab>('USERS');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const profileMenuRef = React.useRef<HTMLDivElement>(null);
+  const reloadHandlerRef = React.useRef<(() => void) | null>(null);
+  const [isReloading, setIsReloading] = React.useState(false);
 
   // Close menu when clicking outside
   React.useEffect(() => {
@@ -58,34 +60,54 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
     { id: 'SETTINGS', label: 'Hệ thống', icon: '🔧', category: 'config' },
   ];
 
+  const handleReload = async () => {
+    if (reloadHandlerRef.current) {
+      setIsReloading(true);
+      try {
+        await reloadHandlerRef.current();
+      } finally {
+        setIsReloading(false);
+      }
+    }
+  };
+
+  const registerReloadHandler = React.useCallback((handler: () => void | Promise<void>) => {
+    reloadHandlerRef.current = handler;
+  }, []);
+
+  // Reset reload handler when tab changes
+  React.useEffect(() => {
+    reloadHandlerRef.current = null;
+  }, [activeTab]);
+
   const renderContent = () => {
     switch (activeTab) {
       case 'USERS':
-        return <UsersManagement onEditUser={handleEditUser} />;
+        return <UsersManagement onEditUser={handleEditUser} onRegisterReload={registerReloadHandler} />;
       case 'ATTENDANCE':
-        return <AttendanceManagement />;
+        return <AttendanceManagement onRegisterReload={registerReloadHandler} />;
       case 'LEAVE':
-        return <LeaveManagement />;
+        return <LeaveManagement onRegisterReload={registerReloadHandler} />;
       case 'SHIFT':
-        return <ShiftManagement />;
+        return <ShiftManagement onRegisterReload={registerReloadHandler} />;
       case 'PAYROLL':
-        return <PayrollManagement />;
+        return <PayrollManagement onRegisterReload={registerReloadHandler} />;
       case 'REPORTS':
-        return <ReportsDashboard />;
+        return <ReportsDashboard onRegisterReload={registerReloadHandler} />;
       case 'DEPARTMENTS':
-        return <DepartmentsManagement />;
+        return <DepartmentsManagement onRegisterReload={registerReloadHandler} />;
       case 'HOLIDAYS':
-        return <HolidaysManagement />;
+        return <HolidaysManagement onRegisterReload={registerReloadHandler} />;
       case 'CONFIG':
-        return <SystemConfigManagement />;
+        return <SystemConfigManagement onRegisterReload={registerReloadHandler} />;
       case 'NOTIFICATIONS':
-        return <NotificationsManagement />;
+        return <NotificationsManagement onRegisterReload={registerReloadHandler} />;
       case 'EXPORT':
-        return <DataExportManagement />;
+        return <DataExportManagement onRegisterReload={registerReloadHandler} />;
       case 'SETTINGS':
-        return <SettingsPanel />;
+        return <SettingsPanel onRegisterReload={registerReloadHandler} />;
       default:
-        return <UsersManagement onEditUser={handleEditUser} />;
+        return <UsersManagement onEditUser={handleEditUser} onRegisterReload={registerReloadHandler} />;
     }
   };
 
@@ -174,6 +196,32 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
               </div>
             </div>
             <div className="flex items-center space-x-4">
+              <button
+                onClick={handleReload}
+                disabled={isReloading || !reloadHandlerRef.current}
+                className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                  isReloading || !reloadHandlerRef.current
+                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                    : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                }`}
+                title="Tải lại dữ liệu mới nhất"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={2}
+                  stroke="currentColor"
+                  className={`w-4 h-4 ${isReloading ? 'animate-spin' : ''}`}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
+                  />
+                </svg>
+                <span>{isReloading ? 'Đang tải...' : 'Tải lại'}</span>
+              </button>
               <div className="relative" ref={profileMenuRef}>
                 <button
                   onClick={() => setShowProfileMenu(!showProfileMenu)}

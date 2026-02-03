@@ -2,7 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { ShiftRegistration, RequestStatus, User, UserRole } from '../../types';
 import { getShiftRegistrations, updateShiftStatus, getAllUsers } from '../../services/db';
 
-const ShiftManagement: React.FC = () => {
+interface ShiftManagementProps {
+  onRegisterReload?: (handler: () => void | Promise<void>) => void;
+}
+
+const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) => {
   const [shiftRequests, setShiftRequests] = useState<ShiftRegistration[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
   const [filter, setFilter] = useState<RequestStatus | 'ALL'>('PENDING');
@@ -10,6 +14,12 @@ const ShiftManagement: React.FC = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (onRegisterReload) {
+      onRegisterReload(loadData);
+    }
+  }, [onRegisterReload]);
 
   const loadData = async () => {
     const shifts = await getShiftRegistrations(undefined, UserRole.ADMIN);

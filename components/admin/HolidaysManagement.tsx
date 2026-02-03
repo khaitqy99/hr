@@ -2,7 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Holiday } from '../../types';
 import { getHolidays, createHoliday, updateHoliday, deleteHoliday } from '../../services/db';
 
-const HolidaysManagement: React.FC = () => {
+interface HolidaysManagementProps {
+  onRegisterReload?: (handler: () => void | Promise<void>) => void;
+}
+
+const HolidaysManagement: React.FC<HolidaysManagementProps> = ({ onRegisterReload }) => {
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingHoliday, setEditingHoliday] = useState<Holiday | null>(null);
@@ -17,6 +21,12 @@ const HolidaysManagement: React.FC = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (onRegisterReload) {
+      onRegisterReload(loadData);
+    }
+  }, [onRegisterReload]);
 
   const loadData = async () => {
     const holidays = await getHolidays();

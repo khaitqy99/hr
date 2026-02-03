@@ -1,18 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Department, User } from '../../types';
-import { getAllUsers } from '../../services/db';
+import { getAllUsers, getDepartments, createDepartment, updateDepartment, deleteDepartment } from '../../services/db';
 
-const DEPARTMENTS_KEY = 'hr_connect_departments';
+interface DepartmentsManagementProps {
+  onRegisterReload?: (handler: () => void | Promise<void>) => void;
+}
 
-const getDepartments = (): Department[] => {
-  return JSON.parse(localStorage.getItem(DEPARTMENTS_KEY) || '[]');
-};
-
-const saveDepartments = (departments: Department[]) => {
-  localStorage.setItem(DEPARTMENTS_KEY, JSON.stringify(departments));
-};
-
-const DepartmentsManagement: React.FC = () => {
+const DepartmentsManagement: React.FC<DepartmentsManagementProps> = ({ onRegisterReload }) => {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -25,6 +19,12 @@ const DepartmentsManagement: React.FC = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (onRegisterReload) {
+      onRegisterReload(loadData);
+    }
+  }, [onRegisterReload]);
 
   const loadData = async () => {
     const departments = await getDepartments();

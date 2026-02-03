@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, AttendanceType, AttendanceStatus, OFFICE_LOCATION, AttendanceRecord } from '../types';
 import { saveAttendance, getAttendance } from '../services/db';
+import { uploadAttendancePhoto } from '../services/storage';
 
 interface CheckInProps {
   user: User;
@@ -123,31 +124,42 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
     if (!location) { setError("Cần vị trí GPS"); return; }
     if (!photo) { setError("Vui lòng chụp ảnh"); return; }
 
-    let status = AttendanceStatus.ON_TIME;
-    const hour = currentTime.getHours();
-    if (type === AttendanceType.CHECK_IN && hour > 9) status = AttendanceStatus.LATE;
-    if (type === AttendanceType.CHECK_OUT) {
-        if (hour < 17) status = AttendanceStatus.EARLY_LEAVE;
-        if (hour > 18) status = AttendanceStatus.OVERTIME;
-    }
-    const record: AttendanceRecord = { 
-      id: Date.now().toString(), 
-      userId: user.id, 
-      timestamp: Date.now(), 
-      type, 
-      location, 
-      status, 
-      synced: navigator.onLine,
-      photoUrl: photo 
-    };
+    setLoading(true);
+    setError(null);
+
     try {
+      // Upload ảnh lên Supabase Storage trước
+      const timestamp = Date.now();
+      const photoUrl = await uploadAttendancePhoto(photo, user.id, timestamp, type);
+
+      let status = AttendanceStatus.ON_TIME;
+      const hour = currentTime.getHours();
+      if (type === AttendanceType.CHECK_IN && hour > 9) status = AttendanceStatus.LATE;
+      if (type === AttendanceType.CHECK_OUT) {
+          if (hour < 17) status = AttendanceStatus.EARLY_LEAVE;
+          if (hour > 18) status = AttendanceStatus.OVERTIME;
+      }
+      
+      const record: AttendanceRecord = { 
+        id: timestamp.toString(), 
+        userId: user.id, 
+        timestamp, 
+        type, 
+        location, 
+        status, 
+        synced: navigator.onLine,
+        photoUrl // URL từ Storage hoặc base64 fallback
+      };
+      
       await saveAttendance(record);
       setLastRecord(record);
       setPhoto(null); // Reset after success
       startCamera(); // Restart camera for next action
     } catch (error) {
       console.error('Error saving attendance:', error);
-      alert('Lỗi khi lưu dữ liệu chấm công. Vui lòng thử lại.');
+      setError('Lỗi khi lưu dữ liệu chấm công. Vui lòng thử lại.');
+    } finally {
+      setLoading(false);
     }
   };
 

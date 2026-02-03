@@ -1,16 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import { AttendanceRecord, AttendanceType, AttendanceStatus, User, UserRole } from '../../types';
 import { getAllAttendance, deleteAttendance, getAllUsers } from '../../services/db';
+import { deleteAttendancePhoto } from '../../services/storage';
 
-const AttendanceManagement: React.FC = () => {
+interface AttendanceManagementProps {
+  onRegisterReload?: (handler: () => void | Promise<void>) => void;
+}
+
+const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterReload }) => {
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
   const [attendanceFilter, setAttendanceFilter] = useState<string>('ALL');
   const [selectedEmployeeForAttendance, setSelectedEmployeeForAttendance] = useState<string>('ALL');
+  const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (onRegisterReload) {
+      onRegisterReload(loadData);
+    }
+  }, [onRegisterReload]);
 
   const loadData = async () => {
     const records = await getAllAttendance();
@@ -114,6 +126,7 @@ const AttendanceManagement: React.FC = () => {
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Nhân viên</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Thời gian</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Vị trí</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Hình ảnh</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Trạng thái</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Thao tác</th>
                 </tr>
@@ -153,6 +166,26 @@ const AttendanceManagement: React.FC = () => {
                         )}
                       </td>
                       <td className="px-6 py-4">
+                        {record.photoUrl ? (
+                          <button
+                            onClick={() => setSelectedPhoto(record.photoUrl!)}
+                            className="w-16 h-16 rounded-lg overflow-hidden border-2 border-slate-200 hover:border-blue-500 transition-colors"
+                          >
+                            <img
+                              src={record.photoUrl}
+                              alt="Attendance photo"
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                // Fallback nếu ảnh không load được
+                                (e.target as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="64" height="64"%3E%3Crect fill="%23e2e8f0" width="64" height="64"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dy=".3em" fill="%2394a3b8" font-size="10"%3ELỗi%3C/text%3E%3C/svg%3E';
+                              }}
+                            />
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
                         <span className={`text-xs font-bold px-2 py-1 rounded-lg ${statusInfo.className}`}>
                           {statusInfo.label}
                         </span>
@@ -161,6 +194,10 @@ const AttendanceManagement: React.FC = () => {
                         <button
                           onClick={async () => {
                             if (confirm('Bạn có chắc muốn xóa bản ghi này?')) {
+                              // Xóa ảnh khỏi Storage nếu có
+                              if (record.photoUrl) {
+                                await deleteAttendancePhoto(record.photoUrl);
+                              }
                               await deleteAttendance(record.id);
                               loadData();
                             }
@@ -175,6 +212,31 @@ const AttendanceManagement: React.FC = () => {
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Photo Modal */}
+      {selectedPhoto && (
+        <div
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setSelectedPhoto(null)}
+        >
+          <div className="relative max-w-4xl max-h-[90vh] bg-white rounded-2xl overflow-hidden shadow-2xl">
+            <button
+              onClick={() => setSelectedPhoto(null)}
+              className="absolute top-4 right-4 z-10 w-10 h-10 bg-white/90 hover:bg-white rounded-full flex items-center justify-center shadow-lg transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <img
+              src={selectedPhoto}
+              alt="Attendance photo"
+              className="w-full h-full object-contain max-h-[90vh]"
+              onClick={(e) => e.stopPropagation()}
+            />
           </div>
         </div>
       )}

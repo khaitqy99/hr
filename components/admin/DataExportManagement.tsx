@@ -1,10 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { getAllUsers, getAllAttendance, getLeaveRequests, getShiftRegistrations, getAllPayrolls } from '../../services/db';
 import { UserRole } from '../../types';
 
-const DataExportManagement: React.FC = () => {
+interface DataExportManagementProps {
+  onRegisterReload?: (handler: () => void | Promise<void>) => void;
+}
+
+const DataExportManagement: React.FC<DataExportManagementProps> = ({ onRegisterReload }) => {
   const [exportType, setExportType] = useState<string>('USERS');
   const [isExporting, setIsExporting] = useState(false);
+
+  useEffect(() => {
+    // Component này không có loadData, nhưng vẫn đăng ký để nút reload không bị disable
+    if (onRegisterReload) {
+      onRegisterReload(async () => {
+        // Không làm gì vì component này chỉ export dữ liệu
+      });
+    }
+  }, [onRegisterReload]);
 
   const exportToCSV = (data: any[], filename: string) => {
     if (data.length === 0) {
