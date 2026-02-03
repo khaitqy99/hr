@@ -11,8 +11,8 @@ export interface PushSubscription {
   updatedAt: string;
 }
 
-// VAPID public key - cần được cấu hình từ environment variable
-// Để tạo VAPID keys, bạn có thể sử dụng: https://web-push-codelab.glitch.me/
+// VAPID public key - chỉ dùng từ environment variable
+// Phải set VITE_VAPID_PUBLIC_KEY trên Vercel (Settings > Environment Variables)
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY || '';
 
 /**
