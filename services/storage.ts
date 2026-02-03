@@ -51,12 +51,13 @@ export const uploadAttendancePhoto = async (
     const filename = `${userId}/${dateStr}_${timeStr}_${type}.jpg`;
 
     const blob: Blob = typeof photo === 'string' ? dataURLtoBlob(photo) : photo;
+    const file = new File([blob], filename.split('/').pop() || 'photo.jpg', { type: 'image/jpeg' });
 
-    // Upload trực tiếp Blob (binary), chỉ định rõ contentType để serve đúng MIME
-    console.log(`📤 Uploading photo (binary): ${filename}`);
+    // Upload ảnh chuẩn multipart (File có name + type đúng)
+    console.log(`📤 Uploading photo: ${filename}`);
     const { data, error } = await supabase.storage
       .from(ATTENDANCE_PHOTOS_BUCKET)
-      .upload(filename, blob, {
+      .upload(filename, file, {
         cacheControl: '3600',
         contentType: 'image/jpeg',
         upsert: false,
