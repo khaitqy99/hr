@@ -32,11 +32,6 @@ export default defineConfig(({ mode }) => {
                   return 'recharts-vendor';
                 }
                 
-                // Google GenAI - chunk riêng vì khá lớn và chỉ dùng khi cần AI
-                if (id.includes('@google/genai')) {
-                  return 'genai-vendor';
-                }
-                
                 // Appwrite - chunk riêng (nếu có dùng)
                 if (id.includes('appwrite')) {
                   return 'appwrite-vendor';
@@ -110,10 +105,7 @@ export default defineConfig(({ mode }) => {
           },
         }),
       ],
-      define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
-      },
+      define: {},
       envPrefix: 'VITE_', // Cho phép Vite load các biến môi trường bắt đầu bằng VITE_
       resolve: {
         alias: {

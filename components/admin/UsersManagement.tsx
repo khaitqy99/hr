@@ -182,6 +182,7 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser }) => {
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Nhân viên</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Email</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Phòng ban</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Vai trò</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Mã NV</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Lương</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Trạng thái</th>
@@ -193,7 +194,23 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser }) => {
                   <tr key={emp.id} className="hover:bg-sky-50/50 transition-colors">
                     <td className="px-6 py-4">
                       <div className="flex items-center space-x-3">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-100 to-cyan-100 flex items-center justify-center text-blue-600 font-bold text-sm">
+                        {emp.avatarUrl ? (
+                          <img 
+                            src={emp.avatarUrl} 
+                            alt={emp.name}
+                            className="w-10 h-10 rounded-full object-cover"
+                            onError={(e) => {
+                              // Fallback to initial if image fails to load
+                              const target = e.target as HTMLImageElement;
+                              target.style.display = 'none';
+                              const fallback = target.nextElementSibling as HTMLElement;
+                              if (fallback) fallback.style.display = 'flex';
+                            }}
+                          />
+                        ) : null}
+                        <div 
+                          className={`w-10 h-10 rounded-full bg-gradient-to-br from-blue-100 to-cyan-100 flex items-center justify-center text-blue-600 font-bold text-sm ${emp.avatarUrl ? 'hidden' : ''}`}
+                        >
                           {emp.name.charAt(0)}
                         </div>
                         <div>
@@ -207,6 +224,14 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser }) => {
                     </td>
                     <td className="px-6 py-4">
                       <p className="text-sm text-slate-700">{emp.department}</p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`text-xs font-bold px-2 py-1 rounded ${
+                        emp.role === UserRole.ADMIN ? 'bg-purple-100 text-purple-600' :
+                        'bg-slate-100 text-slate-600'
+                      }`}>
+                        {emp.role === UserRole.ADMIN ? 'Admin' : 'Nhân viên'}
+                      </span>
                     </td>
                     <td className="px-6 py-4">
                       <p className="text-sm text-slate-700">{emp.employeeCode || '-'}</p>

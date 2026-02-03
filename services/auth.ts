@@ -1,9 +1,11 @@
 import { supabase } from './supabase';
 import { User } from '../types';
-import { getCurrentUser } from './db';
+import { getCurrentUser, createOTPCode, verifyOTPCode } from './db';
+import { sendOTPEmail } from './email';
 
 /**
  * Kiểm tra email có tồn tại trong hệ thống không
+ * @deprecated Sử dụng getCurrentUser trực tiếp thay vì function này để tránh query nhiều lần
  */
 const checkEmailExists = async (email: string): Promise<boolean> => {
   try {
@@ -17,9 +19,19 @@ const checkEmailExists = async (email: string): Promise<boolean> => {
 
 /**
  * Gửi OTP đến email
- * Chỉ gửi OTP nếu email tồn tại trong hệ thống
+ * 
+ * LUỒNG HOẠT ĐỘNG:
+ * 1. Admin tạo user nhân viên trong bảng users (qua UsersManagement)
+ * 2. Nhân viên nhập email đã được tạo để đăng nhập
+ * 3. Hệ thống kiểm tra email có tồn tại trong bảng users không
+ * 4. Nếu có, tự tạo mã OTP 6 chữ số và lưu vào database (bảng otp_codes)
+ * 5. Gửi email chứa mã OTP qua Resend API
+ * 6. Nhân viên nhập mã OTP đúng để đăng nhập
+ * 
+ * CHỈ cho phép đăng nhập, KHÔNG cho phép đăng ký tự động
+ * KHÔNG sử dụng Supabase Auth OTP, tự quản lý OTP
  */
-export const sendOTP = async (email: string): Promise<{ success: boolean; error?: string }> => {
+export const sendOTP = async (email: string): Promise<{ success: boolean; error?: string; rateLimited?: boolean }> => {
   try {
     const normalizedEmail = email.trim().toLowerCase();
     
@@ -29,16 +41,8 @@ export const sendOTP = async (email: string): Promise<{ success: boolean; error?
       return { success: false, error: 'Email không hợp lệ' };
     }
 
-    // Kiểm tra email có tồn tại trong hệ thống không
-    const emailExists = await checkEmailExists(normalizedEmail);
-    if (!emailExists) {
-      return { 
-        success: false, 
-        error: 'Email này chưa được đăng ký trong hệ thống. Vui lòng liên hệ quản trị viên.' 
-      };
-    }
-
-    // Kiểm tra email có tồn tại trong bảng users không
+    // BƯỚC 1: Kiểm tra email có tồn tại trong bảng users không
+    // Chỉ cho phép đăng nhập nếu admin đã tạo user trước đó
     const user = await getCurrentUser(normalizedEmail);
     if (!user) {
       return { 
@@ -47,53 +51,64 @@ export const sendOTP = async (email: string): Promise<{ success: boolean; error?
       };
     }
 
-    // Kiểm tra xem user đã có auth_user_id chưa (tức là đã có trong auth.users)
-    // Query trực tiếp để lấy auth_user_id
-    const { data: userData } = await supabase
-      .from('users')
-      .select('auth_user_id')
-      .eq('email', normalizedEmail)
-      .single();
-
-    // Nếu user chưa có auth_user_id, có nghĩa là chưa có trong auth.users
-    // Trong trường hợp này, cần tạo user trong auth.users trước
-    // Nhưng để tránh gửi confirmation email, ta sẽ báo lỗi và hướng dẫn admin
-    if (!userData || !userData.auth_user_id) {
+    // BƯỚC 2: Tạo mã OTP và lưu vào database
+    const otpResult = await createOTPCode(normalizedEmail, 5); // OTP có hiệu lực 5 phút
+    if (!otpResult) {
       return { 
         success: false, 
-        error: 'Tài khoản chưa được kích hoạt trong hệ thống xác thực. Vui lòng liên hệ quản trị viên để kích hoạt tài khoản trước khi đăng nhập.' 
+        error: 'Không thể tạo mã OTP. Vui lòng thử lại.' 
       };
     }
 
-    // User đã có trong auth.users, gửi OTP với shouldCreateUser: false
-    // Điều này sẽ gửi email OTP thay vì confirmation email
-    const { error } = await supabase.auth.signInWithOtp({
-      email: normalizedEmail,
-      options: {
-        emailRedirectTo: undefined,
-        shouldCreateUser: false, // Không tạo user mới - sẽ gửi OTP
-      },
-    });
+    // BƯỚC 3: Gửi email chứa mã OTP qua Resend API (async - không đợi)
+    // Trả về success ngay để user không phải đợi lâu
+    // Email sẽ được gửi ở background
+    sendOTPEmail(normalizedEmail, otpResult.code, user.name)
+      .then((emailResult) => {
+        if (!emailResult.success) {
+          console.error('Failed to send OTP email:', emailResult.error);
+          // Có thể log vào database hoặc gửi notification cho admin
+        }
+      })
+      .catch((error) => {
+        console.error('Error sending OTP email:', error);
+      });
 
-    if (error) {
-      console.error('Error sending OTP:', error);
-      // Xử lý các lỗi cụ thể
-      if (error.message.includes('rate limit') || error.message.includes('too many')) {
-        return { success: false, error: 'Đã gửi quá nhiều yêu cầu. Vui lòng đợi vài phút rồi thử lại.' };
-      }
-      return { success: false, error: error.message || 'Không thể gửi OTP. Vui lòng thử lại.' };
-    }
-
+    // Trả về success ngay sau khi tạo OTP thành công
+    // User sẽ nhận được email trong vài giây
     return { success: true };
   } catch (error: any) {
     console.error('Error sending OTP:', error);
-    return { success: false, error: error.message || 'Không thể gửi OTP' };
+    const errorMessage = error?.message || error?.toString() || 'Không thể gửi OTP';
+    
+    // Xử lý lỗi rate limit từ Resend API
+    if (errorMessage.includes('rate limit') || 
+        errorMessage.includes('too many') || 
+        errorMessage.includes('429') ||
+        errorMessage.includes('rate limit exceeded')) {
+      return { 
+        success: false, 
+        error: 'Bạn đã gửi quá nhiều yêu cầu OTP. Vui lòng đợi vài phút rồi thử lại.',
+        rateLimited: true
+      };
+    }
+    
+    return { success: false, error: errorMessage };
   }
 };
 
 /**
  * Xác thực OTP và đăng nhập
- * CHỈ đăng nhập khi OTP khớp và email tồn tại trong hệ thống
+ * 
+ * LUỒNG HOẠT ĐỘNG:
+ * 1. Nhân viên nhập mã OTP đã nhận được từ email
+ * 2. Hệ thống kiểm tra email có tồn tại trong bảng users không
+ * 3. Xác thực OTP từ database (bảng otp_codes)
+ * 4. Nếu OTP đúng và chưa hết hạn, đánh dấu đã sử dụng
+ * 5. Lấy thông tin user từ bảng users và đăng nhập thành công
+ * 
+ * CHỈ cho phép đăng nhập khi OTP khớp và email tồn tại trong hệ thống
+ * KHÔNG sử dụng Supabase Auth OTP, tự quản lý OTP
  */
 export const verifyOTP = async (
   email: string,
@@ -108,60 +123,27 @@ export const verifyOTP = async (
       return { success: false, error: 'Mã OTP phải là 6 chữ số' };
     }
 
-    // Kiểm tra email có tồn tại trong hệ thống không (double check)
-    const emailExists = await checkEmailExists(normalizedEmail);
-    if (!emailExists) {
+    // BƯỚC 1: Kiểm tra email có tồn tại trong bảng users không
+    const user = await getCurrentUser(normalizedEmail);
+    if (!user) {
       return { 
         success: false, 
         error: 'Email này chưa được đăng ký trong hệ thống. Vui lòng liên hệ quản trị viên.' 
       };
     }
 
-    // Xác thực OTP với Supabase Auth
-    // Supabase sẽ kiểm tra OTP có khớp với email đã gửi không
-    const { data, error } = await supabase.auth.verifyOtp({
-      email: normalizedEmail,
-      token: normalizedToken,
-      type: 'email',
-    });
-
-    if (error) {
-      console.error('Error verifying OTP:', error);
-      
-      // Xử lý các lỗi cụ thể
-      if (error.message.includes('expired') || error.message.includes('invalid')) {
-        return { success: false, error: 'Mã OTP không hợp lệ hoặc đã hết hạn. Vui lòng yêu cầu mã mới.' };
-      }
-      if (error.message.includes('token')) {
-        return { success: false, error: 'Mã OTP không đúng. Vui lòng kiểm tra lại.' };
-      }
-      
-      return { success: false, error: error.message || 'Không thể xác thực OTP' };
-    }
-
-    // Kiểm tra Supabase đã xác thực OTP thành công
-    if (!data.user) {
-      return { success: false, error: 'Không thể xác thực người dùng. OTP có thể không hợp lệ.' };
-    }
-
-    // Kiểm tra session đã được tạo chưa
-    if (!data.session) {
-      return { success: false, error: 'Không thể tạo session. Vui lòng thử lại.' };
-    }
-
-    // Lấy thông tin user từ bảng users (đảm bảo user tồn tại)
-    const user = await getCurrentUser(normalizedEmail);
+    // BƯỚC 2: Xác thực OTP từ database
+    const isValidOTP = await verifyOTPCode(normalizedEmail, normalizedToken);
     
-    if (!user) {
-      // Nếu user không tồn tại trong bảng users, đăng xuất khỏi Supabase Auth
-      await supabase.auth.signOut();
+    if (!isValidOTP) {
       return { 
         success: false, 
-        error: 'Người dùng không tồn tại trong hệ thống. Vui lòng liên hệ quản trị viên.' 
+        error: 'Mã OTP không đúng hoặc đã hết hạn. Vui lòng yêu cầu mã mới.' 
       };
     }
 
-    // Đăng nhập thành công - OTP đã được xác thực và user tồn tại
+    // BƯỚC 3: Đăng nhập thành công - OTP đã được xác thực và user tồn tại
+    // OTP đã được đánh dấu là đã sử dụng trong hàm verifyOTPCode
     return { success: true, user };
   } catch (error: any) {
     console.error('Error verifying OTP:', error);

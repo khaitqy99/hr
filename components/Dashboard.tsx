@@ -41,6 +41,58 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     return { name: dayStr, hours: parseFloat(hours.toFixed(1)) };
   });
 
+  // Tính tổng giờ làm tuần này
+  const getWeekHours = () => {
+    const now = new Date();
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - now.getDay() + 1); // Thứ 2
+    startOfWeek.setHours(0, 0, 0, 0);
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    endOfWeek.setHours(23, 59, 59, 999);
+
+    const weekRecords = attendance.filter(r => 
+      r.timestamp >= startOfWeek.getTime() && r.timestamp <= endOfWeek.getTime()
+    );
+
+    let totalHours = 0;
+    const processedDays = new Set<string>();
+    
+    weekRecords.forEach(record => {
+      const recordDate = new Date(record.timestamp);
+      const dateStr = recordDate.toDateString();
+      
+      if (processedDays.has(dateStr)) return;
+      
+      const dayStart = new Date(recordDate);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(recordDate);
+      dayEnd.setHours(23, 59, 59, 999);
+      
+      const dayRecords = attendance.filter(r => 
+        r.timestamp >= dayStart.getTime() && r.timestamp <= dayEnd.getTime()
+      );
+      
+      const checkIn = dayRecords.find(r => r.type === AttendanceType.CHECK_IN);
+      const checkOut = dayRecords.find(r => r.type === AttendanceType.CHECK_OUT);
+      
+      if (checkIn && checkOut) {
+        const hours = (checkOut.timestamp - checkIn.timestamp) / (1000 * 60 * 60);
+        totalHours += hours;
+        processedDays.add(dateStr);
+      }
+    });
+
+    return parseFloat(totalHours.toFixed(1));
+  };
+
+  // Tính tỷ lệ đúng giờ
+  const getOnTimeRate = () => {
+    if (attendance.length === 0) return 0;
+    const onTimeCount = attendance.filter(r => r.status === 'ON_TIME').length;
+    return Math.round((onTimeCount / attendance.length) * 100);
+  };
+
   return (
     <div className="space-y-6">
       {/* Welcome Card - Ocean Gradient */}
@@ -96,14 +148,14 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
              <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mb-2">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
              </div>
-             <p className="text-2xl font-bold text-slate-800">40.5</p>
+             <p className="text-2xl font-bold text-slate-800">{getWeekHours()}</p>
              <p className="text-xs text-slate-400 font-medium">Giờ tuần này</p>
          </div>
          <div className="bg-white p-4 rounded-3xl shadow-sm border border-sky-50">
              <div className="w-10 h-10 rounded-full bg-cyan-50 text-cyan-600 flex items-center justify-center mb-2">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.746 3.746 0 011.043 3.296A3.745 3.745 0 0121 12z" /></svg>
              </div>
-             <p className="text-2xl font-bold text-slate-800">100%</p>
+             <p className="text-2xl font-bold text-slate-800">{getOnTimeRate()}%</p>
              <p className="text-xs text-slate-400 font-medium">Đúng giờ</p>
          </div>
       </div>

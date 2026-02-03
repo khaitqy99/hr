@@ -1,0 +1,7 @@
+# Supabase CLI Configuration
+# File này cấu hình cho Supabase CLI
+
+[functions.send-otp-email]
+# Cho phép gọi function mà không cần verify JWT
+# Lưu ý: Vẫn cần có authorization header với anon key
+verify_jwt = false

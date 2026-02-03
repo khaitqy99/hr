@@ -27,48 +27,38 @@ const DepartmentsManagement: React.FC = () => {
   }, []);
 
   const loadData = async () => {
-    // Note: getDepartments is not in db.ts, using localStorage fallback
-    const departments = JSON.parse(localStorage.getItem('hr_connect_departments') || '[]');
+    const departments = await getDepartments();
     setDepartments(departments);
     const users = await getAllUsers();
     setEmployees(users);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name.trim()) {
       alert('Tên phòng ban là bắt buộc');
       return;
     }
 
-    const allDepartments = getDepartments();
-    
-    if (editingDept) {
-      // Update
-      const index = allDepartments.findIndex(d => d.id === editingDept.id);
-      if (index !== -1) {
-        allDepartments[index] = {
-          ...editingDept,
+    try {
+      if (editingDept) {
+        // Update
+        await updateDepartment(editingDept.id, {
           name: formData.name.trim(),
           code: formData.code.trim() || undefined,
-        };
-        saveDepartments(allDepartments);
-        loadData();
-        resetForm();
+        });
+      } else {
+        // Create
+        await createDepartment({
+          name: formData.name.trim(),
+          code: formData.code.trim() || undefined,
+          isActive: true,
+        });
       }
-    } else {
-      // Create
-      const newDept: Department = {
-        id: 'dept-' + Date.now(),
-        name: formData.name.trim(),
-        code: formData.code.trim() || undefined,
-        isActive: true,
-        createdAt: Date.now(),
-      };
-      allDepartments.push(newDept);
-      saveDepartments(allDepartments);
       loadData();
       resetForm();
+    } catch (error: any) {
+      alert(error?.message || 'Có lỗi xảy ra');
     }
   };
 
@@ -90,11 +80,14 @@ const DepartmentsManagement: React.FC = () => {
     setShowForm(true);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm('Bạn có chắc muốn xóa phòng ban này?')) {
-      const allDepartments = getDepartments().filter(d => d.id !== id);
-      saveDepartments(allDepartments);
-      loadData();
+      try {
+        await deleteDepartment(id);
+        loadData();
+      } catch (error: any) {
+        alert(error?.message || 'Có lỗi xảy ra khi xóa phòng ban');
+      }
     }
   };
 

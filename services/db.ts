@@ -1,4 +1,4 @@
-import { User, UserRole, AttendanceRecord, LeaveRequest, Notification, RequestStatus, LeaveType, ShiftRegistration, PayrollRecord, ContractType, EmployeeStatus, AttendanceType } from '../types';
+import { User, UserRole, AttendanceRecord, LeaveRequest, Notification, RequestStatus, LeaveType, ShiftRegistration, PayrollRecord, ContractType, EmployeeStatus, AttendanceType, Department, Holiday, SystemConfig } from '../types';
 import { supabase } from './supabase';
 
 // Helper để check Supabase connection
@@ -15,6 +15,7 @@ const REQUESTS_KEY = 'hr_connect_requests';
 const SHIFTS_KEY = 'hr_connect_shifts';
 const NOTIFICATIONS_KEY = 'hr_connect_notifications';
 const PAYROLL_KEY = 'hr_connect_payroll';
+const OTP_CODES_KEY = 'hr_connect_otp_codes';
 
 // Initial Admin User Only
 const ADMIN_USER: User = {
@@ -33,15 +34,22 @@ export const initializeDB = async () => {
   if (isSupabaseAvailable()) {
     try {
       // Kiểm tra xem admin user đã tồn tại chưa
-      const { data: existingAdmin } = await supabase
+      const { data: existingAdmin, error: selectError } = await supabase
         .from('users')
         .select('id')
         .eq('email', ADMIN_USER.email)
-        .single();
+        .maybeSingle();
+
+      // Nếu có lỗi và không phải là "not found", log và return
+      if (selectError && selectError.code !== 'PGRST116') {
+        console.warn('⚠️ Lỗi khi kiểm tra admin user:', selectError);
+        // Không throw error, để app vẫn có thể chạy
+        return;
+      }
 
       if (!existingAdmin) {
         // Tạo admin user nếu chưa có
-        await supabase.from('users').insert({
+        const { error: insertError } = await supabase.from('users').insert({
           id: ADMIN_USER.id,
           name: ADMIN_USER.name,
           email: ADMIN_USER.email,
@@ -50,9 +58,24 @@ export const initializeDB = async () => {
           status: ADMIN_USER.status,
           contract_type: ADMIN_USER.contractType,
         });
+
+        // Xử lý lỗi 409 (Conflict) - user đã tồn tại
+        if (insertError) {
+          if (insertError.code === '23505' || insertError.code === 'PGRST409' || insertError.message?.includes('duplicate') || insertError.message?.includes('unique')) {
+            // User đã tồn tại, không cần làm gì
+            console.log('✅ Admin user đã tồn tại');
+          } else {
+            console.warn('⚠️ Lỗi khi tạo admin user:', insertError);
+          }
+        }
       }
-    } catch (error) {
-      console.warn('⚠️ Không thể khởi tạo Supabase, fallback về localStorage:', error);
+    } catch (error: any) {
+      // Xử lý lỗi 406 hoặc các lỗi khác
+      if (error?.code === 'PGRST406' || error?.status === 406) {
+        console.warn('⚠️ Lỗi 406 - Có thể do RLS policy hoặc Accept header. Thử lại với headers khác.');
+      } else {
+        console.warn('⚠️ Không thể khởi tạo Supabase, fallback về localStorage:', error);
+      }
     }
   } else {
     // Fallback to localStorage
@@ -150,7 +173,11 @@ export const createUser = async (data: Omit<User, 'id'> & { id?: string }): Prom
     try {
       // Check if email exists
       const existing = await getCurrentUser(data.email);
-      if (existing) throw new Error('Email đã tồn tại');
+      if (existing) {
+        // Nếu user đã tồn tại, trả về user đó thay vì throw error
+        console.warn('User already exists, returning existing user');
+        return existing;
+      }
 
       const { data: newUser, error } = await supabase
         .from('users')
@@ -173,7 +200,18 @@ export const createUser = async (data: Omit<User, 'id'> & { id?: string }): Prom
         .select()
         .single();
 
-      if (error) throw new Error(`Lỗi tạo user: ${error.message}`);
+      // Xử lý lỗi 409 Conflict (user đã tồn tại)
+      if (error) {
+        if (error.code === '23505' || error.message.includes('duplicate') || error.message.includes('unique')) {
+          // User đã tồn tại, lấy user đó
+          const existingUser = await getCurrentUser(data.email);
+          if (existingUser) {
+            console.warn('User already exists (409), returning existing user');
+            return existingUser;
+          }
+        }
+        throw new Error(`Lỗi tạo user: ${error.message}`);
+      }
       if (!newUser) throw new Error('Không thể tạo user');
 
       return {
@@ -489,8 +527,8 @@ export const getLeaveRequests = async (userId?: string, role?: UserRole): Promis
         .from('leave_requests')
         .select('*');
 
-      // If not admin/HR/Manager, filter by userId
-      if (userId && role !== UserRole.HR && role !== UserRole.ADMIN && role !== UserRole.MANAGER) {
+      // If not admin, filter by userId
+      if (userId && role !== UserRole.ADMIN) {
         query = query.eq('user_id', userId);
       }
 
@@ -516,7 +554,7 @@ export const getLeaveRequests = async (userId?: string, role?: UserRole): Promis
 
   // Fallback to localStorage
   const all = JSON.parse(localStorage.getItem(REQUESTS_KEY) || '[]');
-  if (role === UserRole.HR || role === UserRole.ADMIN || role === UserRole.MANAGER) {
+  if (role === UserRole.ADMIN) {
      return all.sort((a: LeaveRequest, b: LeaveRequest) => b.createdAt - a.createdAt);
   }
   return all.filter((r: LeaveRequest) => r.userId === userId).sort((a: LeaveRequest, b: LeaveRequest) => b.createdAt - a.createdAt);
@@ -586,8 +624,8 @@ export const getShiftRegistrations = async (userId?: string, role?: UserRole): P
         .from('shift_registrations')
         .select('*');
 
-      // If not admin/HR/Manager, filter by userId
-      if (userId && role !== UserRole.HR && role !== UserRole.ADMIN && role !== UserRole.MANAGER) {
+      // If not admin, filter by userId
+      if (userId && role !== UserRole.ADMIN) {
         query = query.eq('user_id', userId);
       }
 
@@ -614,7 +652,7 @@ export const getShiftRegistrations = async (userId?: string, role?: UserRole): P
 
   // Fallback to localStorage
   const all = JSON.parse(localStorage.getItem(SHIFTS_KEY) || '[]');
-  if (role === UserRole.HR || role === UserRole.ADMIN || role !== UserRole.MANAGER) {
+  if (role === UserRole.ADMIN) {
      return all.sort((a: ShiftRegistration, b: ShiftRegistration) => b.date - a.date);
   }
   return all.filter((r: ShiftRegistration) => r.userId === userId).sort((a: ShiftRegistration, b: ShiftRegistration) => b.date - a.date);
@@ -924,6 +962,707 @@ export const getNotifications = async (userId: string): Promise<Notification[]> 
   const all: Notification[] = JSON.parse(localStorage.getItem(NOTIFICATIONS_KEY) || '[]');
   const userNotifications = all.filter((n: Notification) => n.userId === userId);
   return userNotifications.sort((a: Notification, b: Notification) => b.timestamp - a.timestamp);
+};
+
+export const createNotification = async (notification: Omit<Notification, 'id'>): Promise<Notification> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .insert({
+          user_id: notification.userId,
+          title: notification.title,
+          message: notification.message,
+          read: notification.read || false,
+          timestamp: notification.timestamp,
+          type: notification.type,
+        })
+        .select()
+        .single();
+
+      if (error) throw new Error(`Lỗi tạo notification: ${error.message}`);
+      if (!data) throw new Error('Không thể tạo notification');
+
+      return {
+        id: data.id,
+        userId: data.user_id,
+        title: data.title,
+        message: data.message,
+        read: data.read,
+        timestamp: data.timestamp,
+        type: data.type as 'info' | 'warning' | 'success' | 'error',
+      };
+    } catch (error) {
+      console.error('Error creating notification in Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  const all: Notification[] = JSON.parse(localStorage.getItem(NOTIFICATIONS_KEY) || '[]');
+  const newNotification: Notification = {
+    ...notification,
+    id: 'notif-' + Date.now(),
+  };
+  all.push(newNotification);
+  localStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify(all));
+  return newNotification;
+};
+
+export const markNotificationAsRead = async (id: string): Promise<void> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ read: true })
+        .eq('id', id);
+
+      if (error) throw new Error(`Lỗi cập nhật notification: ${error.message}`);
+      return;
+    } catch (error) {
+      console.error('Error updating notification in Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  const all: Notification[] = JSON.parse(localStorage.getItem(NOTIFICATIONS_KEY) || '[]');
+  const idx = all.findIndex((n: Notification) => n.id === id);
+  if (idx >= 0) {
+    all[idx].read = true;
+    localStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify(all));
+  }
+};
+
+export const deleteNotification = async (id: string): Promise<void> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw new Error(`Lỗi xóa notification: ${error.message}`);
+      return;
+    } catch (error) {
+      console.error('Error deleting notification in Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  const all: Notification[] = JSON.parse(localStorage.getItem(NOTIFICATIONS_KEY) || '[]');
+  const filtered = all.filter((n: Notification) => n.id !== id);
+  localStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify(filtered));
+};
+
+export const getAllNotifications = async (): Promise<Notification[]> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .order('timestamp', { ascending: false });
+
+      if (error || !data) return [];
+
+      return data.map(notif => ({
+        id: notif.id,
+        userId: notif.user_id,
+        title: notif.title,
+        message: notif.message,
+        read: notif.read,
+        timestamp: notif.timestamp,
+        type: notif.type as 'info' | 'warning' | 'success' | 'error',
+      }));
+    } catch (error) {
+      console.error('Error getting all notifications from Supabase:', error);
+      return [];
+    }
+  }
+
+  // Fallback to localStorage
+  return JSON.parse(localStorage.getItem(NOTIFICATIONS_KEY) || '[]');
+};
+
+// ============ DEPARTMENTS ============
+
+export const getDepartments = async (): Promise<Department[]> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { data, error } = await supabase
+        .from('departments')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error || !data) return [];
+
+      return data.map(dept => ({
+        id: dept.id,
+        name: dept.name,
+        code: dept.code || undefined,
+        description: dept.description || undefined,
+        managerId: dept.manager_id || undefined,
+        createdAt: dept.created_at,
+        isActive: dept.is_active ?? true,
+      }));
+    } catch (error) {
+      console.error('Error getting departments from Supabase:', error);
+      return [];
+    }
+  }
+
+  // Fallback to localStorage
+  return JSON.parse(localStorage.getItem('hr_connect_departments') || '[]');
+};
+
+export const createDepartment = async (data: Omit<Department, 'id' | 'createdAt'>): Promise<Department> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { data: newDept, error } = await supabase
+        .from('departments')
+        .insert({
+          name: data.name,
+          code: data.code || null,
+          description: data.description || null,
+          manager_id: data.managerId || null,
+          is_active: data.isActive ?? true,
+          created_at: Date.now(),
+        })
+        .select()
+        .single();
+
+      if (error) throw new Error(`Lỗi tạo department: ${error.message}`);
+      if (!newDept) throw new Error('Không thể tạo department');
+
+      return {
+        id: newDept.id,
+        name: newDept.name,
+        code: newDept.code || undefined,
+        description: newDept.description || undefined,
+        managerId: newDept.manager_id || undefined,
+        createdAt: newDept.created_at,
+        isActive: newDept.is_active ?? true,
+      };
+    } catch (error) {
+      console.error('Error creating department in Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  const all: Department[] = JSON.parse(localStorage.getItem('hr_connect_departments') || '[]');
+  const newDepartment: Department = {
+    ...data,
+    id: 'dept-' + Date.now(),
+    createdAt: Date.now(),
+  };
+  all.push(newDepartment);
+  localStorage.setItem('hr_connect_departments', JSON.stringify(all));
+  return newDepartment;
+};
+
+export const updateDepartment = async (id: string, data: Partial<Department>): Promise<Department> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const updateData: any = {};
+      if (data.name !== undefined) updateData.name = data.name;
+      if (data.code !== undefined) updateData.code = data.code || null;
+      if (data.description !== undefined) updateData.description = data.description || null;
+      if (data.managerId !== undefined) updateData.manager_id = data.managerId || null;
+      if (data.isActive !== undefined) updateData.is_active = data.isActive;
+
+      const { data: updatedDept, error } = await supabase
+        .from('departments')
+        .update(updateData)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) throw new Error(`Lỗi cập nhật department: ${error.message}`);
+      if (!updatedDept) throw new Error('Không tìm thấy department');
+
+      return {
+        id: updatedDept.id,
+        name: updatedDept.name,
+        code: updatedDept.code || undefined,
+        description: updatedDept.description || undefined,
+        managerId: updatedDept.manager_id || undefined,
+        createdAt: updatedDept.created_at,
+        isActive: updatedDept.is_active ?? true,
+      };
+    } catch (error) {
+      console.error('Error updating department in Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  const all: Department[] = JSON.parse(localStorage.getItem('hr_connect_departments') || '[]');
+  const idx = all.findIndex((d: Department) => d.id === id);
+  if (idx === -1) throw new Error('Không tìm thấy department');
+  all[idx] = { ...all[idx], ...data };
+  localStorage.setItem('hr_connect_departments', JSON.stringify(all));
+  return all[idx];
+};
+
+export const deleteDepartment = async (id: string): Promise<void> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { error } = await supabase
+        .from('departments')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw new Error(`Lỗi xóa department: ${error.message}`);
+      return;
+    } catch (error) {
+      console.error('Error deleting department in Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  const all: Department[] = JSON.parse(localStorage.getItem('hr_connect_departments') || '[]');
+  const filtered = all.filter((d: Department) => d.id !== id);
+  localStorage.setItem('hr_connect_departments', JSON.stringify(filtered));
+};
+
+// ============ HOLIDAYS ============
+
+export const getHolidays = async (): Promise<Holiday[]> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { data, error } = await supabase
+        .from('holidays')
+        .select('*')
+        .order('date', { ascending: true });
+
+      if (error || !data) return [];
+
+      return data.map(holiday => ({
+        id: holiday.id,
+        name: holiday.name,
+        date: holiday.date,
+        type: holiday.type as 'NATIONAL' | 'COMPANY' | 'REGIONAL',
+        isRecurring: holiday.is_recurring ?? false,
+        description: holiday.description || undefined,
+        createdAt: holiday.created_at,
+      }));
+    } catch (error) {
+      console.error('Error getting holidays from Supabase:', error);
+      return [];
+    }
+  }
+
+  // Fallback to localStorage
+  return JSON.parse(localStorage.getItem('hr_connect_holidays') || '[]');
+};
+
+export const createHoliday = async (data: Omit<Holiday, 'id' | 'createdAt'>): Promise<Holiday> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { data: newHoliday, error } = await supabase
+        .from('holidays')
+        .insert({
+          name: data.name,
+          date: data.date,
+          type: data.type,
+          is_recurring: data.isRecurring ?? false,
+          description: data.description || null,
+          created_at: Date.now(),
+        })
+        .select()
+        .single();
+
+      if (error) throw new Error(`Lỗi tạo holiday: ${error.message}`);
+      if (!newHoliday) throw new Error('Không thể tạo holiday');
+
+      return {
+        id: newHoliday.id,
+        name: newHoliday.name,
+        date: newHoliday.date,
+        type: newHoliday.type as 'NATIONAL' | 'COMPANY' | 'REGIONAL',
+        isRecurring: newHoliday.is_recurring ?? false,
+        description: newHoliday.description || undefined,
+        createdAt: newHoliday.created_at,
+      };
+    } catch (error) {
+      console.error('Error creating holiday in Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  const all: Holiday[] = JSON.parse(localStorage.getItem('hr_connect_holidays') || '[]');
+  const newHoliday: Holiday = {
+    ...data,
+    id: 'holiday-' + Date.now(),
+    createdAt: Date.now(),
+  };
+  all.push(newHoliday);
+  localStorage.setItem('hr_connect_holidays', JSON.stringify(all));
+  return newHoliday;
+};
+
+export const updateHoliday = async (id: string, data: Partial<Holiday>): Promise<Holiday> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const updateData: any = {};
+      if (data.name !== undefined) updateData.name = data.name;
+      if (data.date !== undefined) updateData.date = data.date;
+      if (data.type !== undefined) updateData.type = data.type;
+      if (data.isRecurring !== undefined) updateData.is_recurring = data.isRecurring;
+      if (data.description !== undefined) updateData.description = data.description || null;
+
+      const { data: updatedHoliday, error } = await supabase
+        .from('holidays')
+        .update(updateData)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) throw new Error(`Lỗi cập nhật holiday: ${error.message}`);
+      if (!updatedHoliday) throw new Error('Không tìm thấy holiday');
+
+      return {
+        id: updatedHoliday.id,
+        name: updatedHoliday.name,
+        date: updatedHoliday.date,
+        type: updatedHoliday.type as 'NATIONAL' | 'COMPANY' | 'REGIONAL',
+        isRecurring: updatedHoliday.is_recurring ?? false,
+        description: updatedHoliday.description || undefined,
+        createdAt: updatedHoliday.created_at,
+      };
+    } catch (error) {
+      console.error('Error updating holiday in Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  const all: Holiday[] = JSON.parse(localStorage.getItem('hr_connect_holidays') || '[]');
+  const idx = all.findIndex((h: Holiday) => h.id === id);
+  if (idx === -1) throw new Error('Không tìm thấy holiday');
+  all[idx] = { ...all[idx], ...data };
+  localStorage.setItem('hr_connect_holidays', JSON.stringify(all));
+  return all[idx];
+};
+
+export const deleteHoliday = async (id: string): Promise<void> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { error } = await supabase
+        .from('holidays')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw new Error(`Lỗi xóa holiday: ${error.message}`);
+      return;
+    } catch (error) {
+      console.error('Error deleting holiday in Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  const all: Holiday[] = JSON.parse(localStorage.getItem('hr_connect_holidays') || '[]');
+  const filtered = all.filter((h: Holiday) => h.id !== id);
+  localStorage.setItem('hr_connect_holidays', JSON.stringify(filtered));
+};
+
+// ============ SYSTEM CONFIGS ============
+
+export const getSystemConfigs = async (): Promise<SystemConfig[]> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { data, error } = await supabase
+        .from('system_configs')
+        .select('*')
+        .order('category', { ascending: true });
+
+      if (error || !data) return [];
+
+      return data.map(config => ({
+        id: config.id,
+        key: config.key,
+        value: config.value,
+        description: config.description || undefined,
+        category: config.category as 'ATTENDANCE' | 'PAYROLL' | 'GENERAL' | 'NOTIFICATION',
+        updatedAt: config.updated_at,
+        updatedBy: config.updated_by || undefined,
+      }));
+    } catch (error) {
+      console.error('Error getting system configs from Supabase:', error);
+      return [];
+    }
+  }
+
+  // Fallback to localStorage
+  const saved = localStorage.getItem('hr_connect_system_configs');
+  if (saved) {
+    return JSON.parse(saved);
+  }
+  // Return default configs if not found
+  return [];
+};
+
+export const updateSystemConfig = async (id: string, value: string, updatedBy?: string): Promise<SystemConfig> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { data: updatedConfig, error } = await supabase
+        .from('system_configs')
+        .update({
+          value,
+          updated_at: Date.now(),
+          updated_by: updatedBy || null,
+        })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) throw new Error(`Lỗi cập nhật config: ${error.message}`);
+      if (!updatedConfig) throw new Error('Không tìm thấy config');
+
+      return {
+        id: updatedConfig.id,
+        key: updatedConfig.key,
+        value: updatedConfig.value,
+        description: updatedConfig.description || undefined,
+        category: updatedConfig.category as 'ATTENDANCE' | 'PAYROLL' | 'GENERAL' | 'NOTIFICATION',
+        updatedAt: updatedConfig.updated_at,
+        updatedBy: updatedConfig.updated_by || undefined,
+      };
+    } catch (error) {
+      console.error('Error updating system config in Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  const all: SystemConfig[] = JSON.parse(localStorage.getItem('hr_connect_system_configs') || '[]');
+  const idx = all.findIndex((c: SystemConfig) => c.id === id);
+  if (idx === -1) throw new Error('Không tìm thấy config');
+  all[idx] = { ...all[idx], value, updatedAt: Date.now(), updatedBy };
+  localStorage.setItem('hr_connect_system_configs', JSON.stringify(all));
+  return all[idx];
+};
+
+export const createSystemConfig = async (data: Omit<SystemConfig, 'id' | 'updatedAt'>): Promise<SystemConfig> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { data: newConfig, error } = await supabase
+        .from('system_configs')
+        .insert({
+          key: data.key,
+          value: data.value,
+          description: data.description || null,
+          category: data.category,
+          updated_at: Date.now(),
+          updated_by: data.updatedBy || null,
+        })
+        .select()
+        .single();
+
+      if (error) throw new Error(`Lỗi tạo config: ${error.message}`);
+      if (!newConfig) throw new Error('Không thể tạo config');
+
+      return {
+        id: newConfig.id,
+        key: newConfig.key,
+        value: newConfig.value,
+        description: newConfig.description || undefined,
+        category: newConfig.category as 'ATTENDANCE' | 'PAYROLL' | 'GENERAL' | 'NOTIFICATION',
+        updatedAt: newConfig.updated_at,
+        updatedBy: newConfig.updated_by || undefined,
+      };
+    } catch (error) {
+      console.error('Error creating system config in Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  const all: SystemConfig[] = JSON.parse(localStorage.getItem('hr_connect_system_configs') || '[]');
+  const newConfig: SystemConfig = {
+    ...data,
+    id: 'config-' + Date.now(),
+    updatedAt: Date.now(),
+  };
+  all.push(newConfig);
+  localStorage.setItem('hr_connect_system_configs', JSON.stringify(all));
+  return newConfig;
+};
+
+// ============ OTP CODES ============
+
+interface OTPCode {
+  id: string;
+  email: string;
+  code: string;
+  expiresAt: number;
+  used: boolean;
+  createdAt: number;
+}
+
+/**
+ * Tạo mã OTP và lưu vào database
+ */
+export const createOTPCode = async (email: string, expiresInMinutes: number = 5): Promise<{ code: string; expiresAt: number } | null> => {
+  // Tạo mã OTP 6 chữ số ngẫu nhiên
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = Date.now() + expiresInMinutes * 60 * 1000;
+
+  if (isSupabaseAvailable()) {
+    try {
+      const { data, error } = await supabase
+        .from('otp_codes')
+        .insert({
+          email: email.toLowerCase(),
+          code: code,
+          expires_at: new Date(expiresAt).toISOString(),
+          used: false,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error creating OTP code:', error);
+        return null;
+      }
+
+      return {
+        code: code,
+        expiresAt: expiresAt,
+      };
+    } catch (error) {
+      console.error('Error creating OTP code in Supabase:', error);
+      return null;
+    }
+  }
+
+  // Fallback to localStorage
+  const otpCodes: OTPCode[] = JSON.parse(localStorage.getItem(OTP_CODES_KEY) || '[]');
+  const newOTP: OTPCode = {
+    id: 'otp_' + Date.now(),
+    email: email.toLowerCase(),
+    code: code,
+    expiresAt: expiresAt,
+    used: false,
+    createdAt: Date.now(),
+  };
+  otpCodes.push(newOTP);
+  // Xóa các OTP đã hết hạn
+  const validOTPs = otpCodes.filter(otp => otp.expiresAt > Date.now());
+  localStorage.setItem(OTP_CODES_KEY, JSON.stringify(validOTPs));
+
+  return {
+    code: code,
+    expiresAt: expiresAt,
+  };
+};
+
+/**
+ * Xác thực mã OTP
+ */
+export const verifyOTPCode = async (email: string, code: string): Promise<boolean> => {
+  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedCode = code.trim();
+
+  if (isSupabaseAvailable()) {
+    try {
+      // Tìm OTP chưa dùng và chưa hết hạn
+      // Select cả expires_at để kiểm tra lại trong code
+      const { data, error } = await supabase
+        .from('otp_codes')
+        .select('id, expires_at')
+        .eq('email', normalizedEmail)
+        .eq('code', normalizedCode)
+        .eq('used', false)
+        .gt('expires_at', new Date().toISOString())
+        .limit(1)
+        .maybeSingle();
+
+      if (error || !data) {
+        return false;
+      }
+
+      // Kiểm tra lại expiration một lần nữa để đảm bảo chắc chắn
+      // Chuyển expires_at từ ISO string sang timestamp để so sánh chính xác
+      const expiresAt = new Date(data.expires_at).getTime();
+      const now = Date.now();
+      
+      if (expiresAt <= now) {
+        // OTP đã hết hạn
+        return false;
+      }
+
+      // Đánh dấu OTP đã được sử dụng
+      // Sử dụng function mark_otp_as_used để bypass RLS nếu cần
+      const { data: updateResult, error: updateError } = await supabase
+        .rpc('mark_otp_as_used', { p_otp_id: data.id });
+
+      if (updateError) {
+        // Fallback: Thử UPDATE trực tiếp nếu function không tồn tại
+        console.warn('Function mark_otp_as_used không khả dụng, thử UPDATE trực tiếp:', updateError);
+        const { error: directUpdateError } = await supabase
+          .from('otp_codes')
+          .update({ used: true })
+          .eq('id', data.id);
+
+        if (directUpdateError) {
+          console.error('Error marking OTP as used:', directUpdateError);
+          return false;
+        }
+      } else if (updateResult === false) {
+        // Function trả về false nghĩa là OTP không hợp lệ hoặc đã được dùng
+        console.warn('OTP không hợp lệ hoặc đã được sử dụng');
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error verifying OTP code:', error);
+      return false;
+    }
+  }
+
+  // Fallback to localStorage
+  const otpCodes: OTPCode[] = JSON.parse(localStorage.getItem(OTP_CODES_KEY) || '[]');
+  const otp = otpCodes.find(
+    otp =>
+      otp.email === normalizedEmail &&
+      otp.code === normalizedCode &&
+      !otp.used &&
+      otp.expiresAt > Date.now()
+  );
+
+  if (otp) {
+    // Đánh dấu đã sử dụng
+    otp.used = true;
+    localStorage.setItem(OTP_CODES_KEY, JSON.stringify(otpCodes));
+    return true;
+  }
+
+  return false;
+};
+
+/**
+ * Xóa các mã OTP đã hết hạn
+ */
+export const cleanupExpiredOTPs = async (): Promise<void> => {
+  if (isSupabaseAvailable()) {
+    try {
+      await supabase.rpc('cleanup_expired_otps');
+    } catch (error) {
+      console.error('Error cleaning up expired OTPs:', error);
+    }
+  } else {
+    // Fallback to localStorage
+    const otpCodes: OTPCode[] = JSON.parse(localStorage.getItem(OTP_CODES_KEY) || '[]');
+    const validOTPs = otpCodes.filter(otp => otp.expiresAt > Date.now());
+    localStorage.setItem(OTP_CODES_KEY, JSON.stringify(validOTPs));
+  }
 };
 
 // Initialize database on module load

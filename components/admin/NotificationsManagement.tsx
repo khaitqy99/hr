@@ -1,16 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Notification, User, UserRole } from '../../types';
-import { getAllUsers } from '../../services/db';
-
-const NOTIFICATIONS_KEY = 'hr_connect_notifications';
-
-const getNotifications = (): Notification[] => {
-  return JSON.parse(localStorage.getItem(NOTIFICATIONS_KEY) || '[]');
-};
-
-const saveNotifications = (notifications: Notification[]) => {
-  localStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify(notifications));
-};
+import { getAllUsers, getAllNotifications, createNotification, deleteNotification } from '../../services/db';
 
 const NotificationsManagement: React.FC = () => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -28,55 +18,51 @@ const NotificationsManagement: React.FC = () => {
   }, []);
 
   const loadData = async () => {
-    // Note: getNotifications requires userId, this component needs to be fixed
-    // For now, just load employees
     const users = await getAllUsers();
     setEmployees(users);
-    setNotifications([]); // TODO: Fix notifications loading
+    const allNotifications = await getAllNotifications();
+    setNotifications(allNotifications);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.title.trim() || !formData.message.trim()) {
       alert('Tiêu đề và nội dung là bắt buộc');
       return;
     }
 
-    const allNotifications = getNotifications();
-    
-    if (formData.userId === 'ALL') {
-      // Send to all employees
-      const employeesToNotify = employees.filter(e => e.role !== UserRole.ADMIN);
-      employeesToNotify.forEach(emp => {
-        const notification: Notification = {
-          id: 'notif-' + Date.now() + '-' + emp.id,
-          userId: emp.id,
+    try {
+      if (formData.userId === 'ALL') {
+        // Send to all employees
+        const employeesToNotify = employees.filter(e => e.role !== UserRole.ADMIN);
+        for (const emp of employeesToNotify) {
+          await createNotification({
+            userId: emp.id,
+            title: formData.title.trim(),
+            message: formData.message.trim(),
+            read: false,
+            timestamp: Date.now(),
+            type: formData.type,
+          });
+        }
+      } else {
+        // Send to specific user
+        await createNotification({
+          userId: formData.userId,
           title: formData.title.trim(),
           message: formData.message.trim(),
           read: false,
           timestamp: Date.now(),
           type: formData.type,
-        };
-        allNotifications.push(notification);
-      });
-    } else {
-      // Send to specific user
-      const notification: Notification = {
-        id: 'notif-' + Date.now() + '-' + formData.userId,
-        userId: formData.userId,
-        title: formData.title.trim(),
-        message: formData.message.trim(),
-        read: false,
-        timestamp: Date.now(),
-        type: formData.type,
-      };
-      allNotifications.push(notification);
-    }
+        });
+      }
 
-    saveNotifications(allNotifications);
-    loadData();
-    resetForm();
-    alert('Gửi thông báo thành công!');
+      loadData();
+      resetForm();
+      alert('Gửi thông báo thành công!');
+    } catch (error: any) {
+      alert(error?.message || 'Có lỗi xảy ra khi gửi thông báo');
+    }
   };
 
   const resetForm = () => {
@@ -89,11 +75,14 @@ const NotificationsManagement: React.FC = () => {
     setShowForm(false);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm('Bạn có chắc muốn xóa thông báo này?')) {
-      const allNotifications = getNotifications().filter(n => n.id !== id);
-      saveNotifications(allNotifications);
-      loadData();
+      try {
+        await deleteNotification(id);
+        loadData();
+      } catch (error: any) {
+        alert(error?.message || 'Có lỗi xảy ra khi xóa thông báo');
+      }
     }
   };
 

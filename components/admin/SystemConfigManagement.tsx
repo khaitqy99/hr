@@ -1,32 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { SystemConfig } from '../../types';
-
-const CONFIG_KEY = 'hr_connect_system_config';
-
-const getConfigs = (): SystemConfig[] => {
-  const defaultConfigs: SystemConfig[] = [
-    { id: 'office-lat', key: 'office_latitude', value: '10.040675858019696', description: 'Vĩ độ văn phòng', category: 'ATTENDANCE', updatedAt: Date.now() },
-    { id: 'office-lng', key: 'office_longitude', value: '105.78463187148355', description: 'Kinh độ văn phòng', category: 'ATTENDANCE', updatedAt: Date.now() },
-    { id: 'office-radius', key: 'office_radius_meters', value: '200', description: 'Bán kính cho phép chấm công (mét)', category: 'ATTENDANCE', updatedAt: Date.now() },
-    { id: 'work-start', key: 'work_start_time', value: '08:00', description: 'Giờ bắt đầu làm việc', category: 'ATTENDANCE', updatedAt: Date.now() },
-    { id: 'work-end', key: 'work_end_time', value: '17:00', description: 'Giờ kết thúc làm việc', category: 'ATTENDANCE', updatedAt: Date.now() },
-    { id: 'work-hours', key: 'work_hours_per_day', value: '8', description: 'Số giờ làm việc mỗi ngày', category: 'ATTENDANCE', updatedAt: Date.now() },
-    { id: 'standard-days', key: 'standard_work_days', value: '27', description: 'Số ngày công tiêu chuẩn mỗi tháng', category: 'PAYROLL', updatedAt: Date.now() },
-    { id: 'insurance-rate', key: 'social_insurance_rate', value: '10.5', description: 'Tỷ lệ khấu trừ BHXH (%)', category: 'PAYROLL', updatedAt: Date.now() },
-    { id: 'ot-rate', key: 'overtime_rate', value: '1.5', description: 'Hệ số tính lương làm thêm giờ', category: 'PAYROLL', updatedAt: Date.now() },
-  ];
-  
-  const saved = localStorage.getItem(CONFIG_KEY);
-  if (saved) {
-    return JSON.parse(saved);
-  }
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(defaultConfigs));
-  return defaultConfigs;
-};
-
-const saveConfigs = (configs: SystemConfig[]) => {
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(configs));
-};
+import { getSystemConfigs, updateSystemConfig } from '../../services/db';
 
 const SystemConfigManagement: React.FC = () => {
   const [configs, setConfigs] = useState<SystemConfig[]>([]);
@@ -37,8 +11,9 @@ const SystemConfigManagement: React.FC = () => {
     loadData();
   }, []);
 
-  const loadData = () => {
-    setConfigs(getConfigs());
+  const loadData = async () => {
+    const configs = await getSystemConfigs();
+    setConfigs(configs);
   };
 
   const handleEdit = (config: SystemConfig) => {
@@ -46,21 +21,16 @@ const SystemConfigManagement: React.FC = () => {
     setEditValue(config.value);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!editingConfig) return;
     
-    const allConfigs = getConfigs();
-    const index = allConfigs.findIndex(c => c.id === editingConfig.id);
-    if (index !== -1) {
-      allConfigs[index] = {
-        ...allConfigs[index],
-        value: editValue,
-        updatedAt: Date.now(),
-      };
-      saveConfigs(allConfigs);
+    try {
+      await updateSystemConfig(editingConfig.id, editValue);
       loadData();
       setEditingConfig(null);
       setEditValue('');
+    } catch (error: any) {
+      alert(error?.message || 'Có lỗi xảy ra khi cập nhật cấu hình');
     }
   };
 

@@ -178,7 +178,23 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                       {/* Employee Card */}
               <div className="bg-white p-5 rounded-3xl shadow-sm border border-sky-50">
                 <div className="flex items-center space-x-4 mb-4">
-                  <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-100 to-cyan-100 flex items-center justify-center text-blue-600 font-bold text-xl">
+                  {employee.avatarUrl ? (
+                    <img 
+                      src={employee.avatarUrl} 
+                      alt={employee.name}
+                      className="w-16 h-16 rounded-full object-cover"
+                      onError={(e) => {
+                        // Fallback to initial if image fails to load
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = 'none';
+                        const fallback = target.nextElementSibling as HTMLElement;
+                        if (fallback) fallback.style.display = 'flex';
+                      }}
+                    />
+                  ) : null}
+                  <div 
+                    className={`w-16 h-16 rounded-full bg-gradient-to-br from-blue-100 to-cyan-100 flex items-center justify-center text-blue-600 font-bold text-xl ${employee.avatarUrl ? 'hidden' : ''}`}
+                  >
                     {employee.name.charAt(0)}
                   </div>
                   <div className="flex-1">
@@ -268,8 +284,6 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                       <label className="block text-xs font-bold text-slate-500 mb-1">Vai trò</label>
                       <select value={editForm.role} onChange={e => setEditForm(f => ({ ...f, role: e.target.value as UserRole }))} className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm">
                         <option value={UserRole.EMPLOYEE}>Nhân viên</option>
-                        <option value={UserRole.MANAGER}>Trưởng nhóm</option>
-                        <option value={UserRole.HR}>HR</option>
                         <option value={UserRole.ADMIN}>Admin</option>
                       </select>
                     </div>
@@ -341,9 +355,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                         <div className="flex justify-between">
                           <span className="text-xs text-slate-500">Vai trò:</span>
                           <span className="text-sm font-medium text-slate-800">
-                            {employee.role === UserRole.EMPLOYEE ? 'Nhân viên' : 
-                             employee.role === UserRole.MANAGER ? 'Trưởng nhóm' :
-                             employee.role === UserRole.HR ? 'HR' : 'Admin'}
+                            {employee.role === UserRole.ADMIN ? 'Admin' : 'Nhân viên'}
                           </span>
                         </div>
                       </div>

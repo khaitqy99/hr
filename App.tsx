@@ -5,7 +5,6 @@ import CheckIn from './components/CheckIn';
 import ShiftRegister from './components/ShiftRegister';
 import AdminPanel from './components/AdminPanel';
 import Payroll from './components/Payroll';
-import LeaveRequest from './components/LeaveRequest';
 import EmployeeProfile from './components/EmployeeProfile';
 import SalaryManagement from './components/SalaryManagement';
 import EnvError from './components/EnvError';
@@ -29,26 +28,65 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
   const [otpSent, setOtpSent] = useState(false);
   const [otpExpiresAt, setOtpExpiresAt] = useState<number | null>(null);
   const [timeRemaining, setTimeRemaining] = useState<number>(0);
+  // Rate limiting states
+  const [lastOTPRequestTime, setLastOTPRequestTime] = useState<number | null>(null);
+  const [rateLimitUntil, setRateLimitUntil] = useState<number | null>(null);
+  const [rateLimitCountdown, setRateLimitCountdown] = useState<number>(0);
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    // Kiểm tra rate limit phía client (tối thiểu 10 giây giữa các request để tránh spam)
+    const now = Date.now();
+    if (lastOTPRequestTime && (now - lastOTPRequestTime) < 10000) {
+      const remaining = Math.ceil((10000 - (now - lastOTPRequestTime)) / 1000);
+      setError(`Vui lòng đợi ${remaining} giây trước khi gửi lại OTP.`);
+      return;
+    }
+
+    // Không block cứng nhắc - chỉ cảnh báo nếu đang trong thời gian rate limit
+    // Cho phép thử lại để kiểm tra xem Supabase còn rate limit không
+    if (rateLimitUntil && now < rateLimitUntil) {
+      const remaining = Math.ceil((rateLimitUntil - now) / 1000);
+      // Chỉ cảnh báo, không block - để Supabase quyết định
+      console.warn(`Rate limit warning: ${remaining} seconds remaining`);
+    }
+
     setLoading(true);
+    setLastOTPRequestTime(now);
 
     try {
       const result = await sendOTP(email);
       if (result.success) {
         setOtpSent(true);
         setStep('otp');
-        // OTP có hiệu lực trong 60 giây
-        const expiresAt = Date.now() + 60 * 1000;
+        // OTP có hiệu lực trong 5 phút (300 giây)
+        const expiresAt = Date.now() + 5 * 60 * 1000;
         setOtpExpiresAt(expiresAt);
-        setTimeRemaining(60);
+        setTimeRemaining(300);
+        // Reset rate limit khi thành công
+        setRateLimitUntil(null);
+        setLastOTPRequestTime(null);
       } else {
+        // Nếu bị rate limit từ server, set countdown 5 phút (300 giây)
+        // Supabase có thể rate limit lâu hơn 60 giây
+        if (result.rateLimited) {
+          const rateLimitEnd = Date.now() + 5 * 60 * 1000; // 5 phút
+          setRateLimitUntil(rateLimitEnd);
+          setRateLimitCountdown(300);
+        }
         setError(result.error || 'Không thể gửi OTP. Vui lòng thử lại.');
       }
     } catch (err: any) {
-      setError(err.message || 'Có lỗi xảy ra. Vui lòng thử lại.');
+      const errorMessage = err.message || 'Có lỗi xảy ra. Vui lòng thử lại.';
+      // Kiểm tra nếu lỗi là rate limit - set 5 phút
+      if (errorMessage.includes('rate limit') || errorMessage.includes('429') || errorMessage.includes('rate limit exceeded')) {
+        const rateLimitEnd = Date.now() + 5 * 60 * 1000; // 5 phút
+        setRateLimitUntil(rateLimitEnd);
+        setRateLimitCountdown(300);
+      }
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -84,22 +122,58 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
 
   const handleResendOTP = async () => {
     setError(null);
+
+    // Kiểm tra rate limit phía client (tối thiểu 10 giây giữa các request để tránh spam)
+    const now = Date.now();
+    if (lastOTPRequestTime && (now - lastOTPRequestTime) < 10000) {
+      const remaining = Math.ceil((10000 - (now - lastOTPRequestTime)) / 1000);
+      setError(`Vui lòng đợi ${remaining} giây trước khi gửi lại OTP.`);
+      return;
+    }
+
+    // Không block cứng nhắc - chỉ cảnh báo nếu đang trong thời gian rate limit
+    // Cho phép thử lại để kiểm tra xem Supabase còn rate limit không
+    if (rateLimitUntil && now < rateLimitUntil) {
+      const remaining = Math.ceil((rateLimitUntil - now) / 1000);
+      // Chỉ cảnh báo, không block - để Supabase quyết định
+      console.warn(`Rate limit warning: ${remaining} seconds remaining`);
+    }
+
     setLoading(true);
+    setLastOTPRequestTime(now);
+
     try {
       const result = await sendOTP(email);
       if (result.success) {
         setOtpSent(true);
         setError(null);
         setOtp(''); // Reset OTP input
-        // Reset timer
-        const expiresAt = Date.now() + 60 * 1000;
+        // Reset timer - OTP có hiệu lực trong 5 phút (300 giây)
+        const expiresAt = Date.now() + 5 * 60 * 1000;
         setOtpExpiresAt(expiresAt);
-        setTimeRemaining(60);
+        setTimeRemaining(300);
+        // Reset rate limit khi thành công
+        setRateLimitUntil(null);
+        setLastOTPRequestTime(null);
       } else {
+        // Nếu bị rate limit từ server, set countdown 5 phút (300 giây)
+        // Supabase có thể rate limit lâu hơn 60 giây
+        if (result.rateLimited) {
+          const rateLimitEnd = Date.now() + 5 * 60 * 1000; // 5 phút
+          setRateLimitUntil(rateLimitEnd);
+          setRateLimitCountdown(300);
+        }
         setError(result.error || 'Không thể gửi lại OTP. Vui lòng thử lại.');
       }
     } catch (err: any) {
-      setError(err.message || 'Có lỗi xảy ra. Vui lòng thử lại.');
+      const errorMessage = err.message || 'Có lỗi xảy ra. Vui lòng thử lại.';
+      // Kiểm tra nếu lỗi là rate limit - set 5 phút
+      if (errorMessage.includes('rate limit') || errorMessage.includes('429') || errorMessage.includes('rate limit exceeded')) {
+        const rateLimitEnd = Date.now() + 5 * 60 * 1000; // 5 phút
+        setRateLimitUntil(rateLimitEnd);
+        setRateLimitCountdown(300);
+      }
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -120,6 +194,50 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
       return () => clearInterval(interval);
     }
   }, [step, otpExpiresAt]);
+
+  // Timer countdown cho rate limit
+  useEffect(() => {
+    if (rateLimitUntil) {
+      const interval = setInterval(() => {
+        const now = Date.now();
+        const remaining = Math.max(0, Math.ceil((rateLimitUntil - now) / 1000));
+        setRateLimitCountdown(remaining);
+        
+        if (remaining === 0) {
+          // Khi countdown hết, reset rate limit để cho phép thử lại
+          setRateLimitUntil(null);
+          clearInterval(interval);
+        }
+      }, 1000);
+
+      return () => clearInterval(interval);
+    } else {
+      // Reset countdown khi không còn rate limit
+      setRateLimitCountdown(0);
+    }
+  }, [rateLimitUntil]);
+
+  // Reset rate limit state khi component mount lại hoặc khi email thay đổi
+  useEffect(() => {
+    // Kiểm tra xem rate limit đã hết chưa khi component mount
+    if (rateLimitUntil && Date.now() >= rateLimitUntil) {
+      setRateLimitUntil(null);
+      setRateLimitCountdown(0);
+    }
+  }, [email]);
+
+  // Helper function để format thời gian từ giây sang dạng "X phút Y giây"
+  const formatTimeRemaining = (seconds: number): string => {
+    if (seconds < 60) {
+      return `${seconds} giây`;
+    }
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    if (remainingSeconds === 0) {
+      return `${minutes} phút`;
+    }
+    return `${minutes} phút ${remainingSeconds} giây`;
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-blue-900 via-blue-800 to-sky-900 relative overflow-hidden">
@@ -155,8 +273,17 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
                       />
                   </div>
                   {error && (
-                    <div className="text-red-300 text-sm text-center bg-red-500/20 px-4 py-2 rounded-lg">
+                    <div className={`text-sm text-center px-4 py-2 rounded-lg ${
+                      error.includes('rate limit') || error.includes('quá nhiều') 
+                        ? 'text-yellow-300 bg-yellow-500/20 border border-yellow-500/30' 
+                        : 'text-red-300 bg-red-500/20'
+                    }`}>
                       {error}
+                      {(error.includes('rate limit') || error.includes('quá nhiều')) && (
+                        <div className="mt-2 text-xs text-yellow-200">
+                          💡 <strong>Lưu ý:</strong> Nếu bạn đã nhận được mã OTP từ email trước đó, bạn vẫn có thể sử dụng mã đó để đăng nhập. Chỉ cần nhập email và mã OTP đã nhận được.
+                        </div>
+                      )}
                     </div>
                   )}
                   <button
@@ -166,6 +293,15 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
                   >
                       {loading ? 'Đang gửi OTP...' : 'Gửi mã OTP'}
                   </button>
+                  {rateLimitUntil && Date.now() < rateLimitUntil && (
+                    <div className="text-xs text-yellow-300 text-center mt-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
+                      <p className="font-semibold mb-1">⚠️ Rate Limit đang hoạt động</p>
+                      <p>Vui lòng đợi {Math.floor(rateLimitCountdown / 60)} phút {rateLimitCountdown % 60} giây.</p>
+                      <p className="mt-2 text-yellow-200">
+                        💡 <strong>Mẹo:</strong> Nếu bạn đã nhận được mã OTP từ email trước đó, bạn có thể sử dụng mã đó ngay bây giờ mà không cần gửi lại.
+                      </p>
+                    </div>
+                  )}
               </form>
             ) : (
               <form onSubmit={handleOTPSubmit} className="space-y-4">
@@ -185,7 +321,7 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
                       </p>
                       {timeRemaining > 0 && (
                         <p className="text-xs text-yellow-300 text-center mt-1">
-                          ⏱️ Mã OTP còn hiệu lực trong <span className="font-bold">{timeRemaining}s</span>
+                          ⏱️ Mã OTP còn hiệu lực trong <span className="font-bold">{formatTimeRemaining(timeRemaining)}</span>
                         </p>
                       )}
                       {timeRemaining === 0 && otpExpiresAt && (
@@ -208,7 +344,7 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
                     <p className="font-semibold mb-1">📧 Lưu ý:</p>
                     <ul className="list-disc list-inside space-y-1 text-blue-300/80">
                       <li>Mã OTP phải khớp với mã đã được gửi đến email của bạn</li>
-                      <li>Mã OTP có hiệu lực trong 60 giây</li>
+                      <li>Mã OTP có hiệu lực trong 5 phút</li>
                       <li>Mỗi mã OTP chỉ sử dụng được một lần</li>
                     </ul>
                   </div>
@@ -233,7 +369,7 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
                         disabled={loading}
                         className="flex-1 py-3 rounded-xl text-sm font-medium text-blue-200 bg-white/5 hover:bg-white/10 border border-white/10 transition-all disabled:opacity-50"
                     >
-                        Gửi lại OTP
+                        {loading ? 'Đang gửi...' : 'Gửi lại OTP'}
                     </button>
                   </div>
               </form>
@@ -259,9 +395,25 @@ const App: React.FC = () => {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
 
   // Sync URL with view
-  const updateViewAndURL = (newView: string, replace: boolean = false) => {
+  const updateViewAndURL = (newView: string, replace: boolean = false, userOverride?: User | null) => {
     setCurrentView(newView);
-    const path = newView === 'admin' ? '/admin' : '/';
+    let path = '/';
+    
+    // Sử dụng userOverride nếu có, nếu không thì dùng state user
+    const currentUser = userOverride !== undefined ? userOverride : user;
+    
+    // Chỉ có /admin và /employee, / chỉ dành cho login
+    if (!currentUser) {
+      path = '/'; // Chưa login thì ở trang login
+    } else if (newView === 'admin') {
+      path = '/admin';
+    } else if (currentUser.role === UserRole.ADMIN) {
+      path = '/admin';
+    } else {
+      // EMPLOYEE dùng /employee
+      path = '/employee';
+    }
+    
     if (replace) {
       window.history.replaceState({ view: newView }, '', path);
     } else {
@@ -273,15 +425,38 @@ const App: React.FC = () => {
   useEffect(() => {
     const handlePopState = (e: PopStateEvent) => {
       const path = window.location.pathname;
+      
+      // Nếu chưa login, chỉ cho phép ở /
+      if (!user) {
+        if (path !== '/') {
+          window.history.replaceState({}, '', '/');
+        }
+        return;
+      }
+      
+      // Nếu đã login nhưng ở /, redirect về URL phù hợp với role
+      if (path === '/') {
+        updateViewAndURL('dashboard', true);
+        return;
+      }
+      
+      // Chỉ có /admin và /employee
       if (path === '/admin') {
-        if (user?.role === UserRole.ADMIN) {
+        if (user.role === UserRole.ADMIN) {
           setCurrentView('admin');
         } else {
-          // Redirect non-admin users away from /admin
+          updateViewAndURL('dashboard', true);
+        }
+      } else if (path === '/employee') {
+        // EMPLOYEE dùng /employee
+        if (user.role === UserRole.EMPLOYEE) {
+          setCurrentView('dashboard');
+        } else {
           updateViewAndURL('dashboard', true);
         }
       } else {
-        setCurrentView('dashboard');
+        // URL không hợp lệ, redirect về URL phù hợp
+        updateViewAndURL('dashboard', true);
       }
     };
 
@@ -293,24 +468,52 @@ const App: React.FC = () => {
   useEffect(() => {
     const path = window.location.pathname;
     const savedUser = localStorage.getItem('current_user');
+    
     if (savedUser) {
-      const user = JSON.parse(savedUser);
-      setUser(user);
+      const parsedUser = JSON.parse(savedUser);
+      setUser(parsedUser);
       
-      // Sync view with URL
-      if (path === '/admin' && user.role === UserRole.ADMIN) {
-        setCurrentView('admin');
-      } else {
-        // Redirect to home if not admin or wrong URL
-        if (path === '/admin' && user.role !== UserRole.ADMIN) {
-          updateViewAndURL('dashboard', true);
-        } else if (path !== '/admin') {
+      // Nếu đã login nhưng ở /, redirect về URL phù hợp với role
+      if (path === '/') {
+        let redirectPath = '/';
+        if (parsedUser.role === UserRole.ADMIN) {
+          redirectPath = '/admin';
+          setCurrentView('admin');
+        } else {
+          // EMPLOYEE, HR, MANAGER đều dùng /employee
+          redirectPath = '/employee';
           setCurrentView('dashboard');
-          updateViewAndURL('dashboard', true);
         }
+        window.history.replaceState({ view: 'dashboard' }, '', redirectPath);
+        return;
+      }
+      
+      // Kiểm tra URL có khớp với role không
+      const isValidRoute = 
+        (path === '/admin' && parsedUser.role === UserRole.ADMIN) ||
+        (path === '/employee' && parsedUser.role === UserRole.EMPLOYEE);
+      
+      if (isValidRoute) {
+        if (path === '/admin') {
+          setCurrentView('admin');
+        } else {
+          setCurrentView('dashboard');
+        }
+      } else {
+        // URL không khớp với role, redirect về URL đúng
+        let redirectPath = '/';
+        if (parsedUser.role === UserRole.ADMIN) {
+          redirectPath = '/admin';
+          setCurrentView('admin');
+        } else {
+          // EMPLOYEE, HR, MANAGER đều dùng /employee
+          redirectPath = '/employee';
+          setCurrentView('dashboard');
+        }
+        window.history.replaceState({ view: 'dashboard' }, '', redirectPath);
       }
     } else {
-      // No user, ensure URL is root
+      // Chưa login, chỉ cho phép ở /
       if (path !== '/') {
         window.history.replaceState({}, '', '/');
       }
@@ -320,11 +523,13 @@ const App: React.FC = () => {
   const handleLogin = async (foundUser: User) => {
     setUser(foundUser);
     localStorage.setItem('current_user', JSON.stringify(foundUser));
-    // Admin mặc định vào trang quản lý, HR mặc định vào dashboard như nhân viên
+    // Redirect đến URL phù hợp với role sau khi login
+    // Truyền foundUser vào updateViewAndURL để tránh race condition với setUser
     if (foundUser.role === UserRole.ADMIN) {
-      updateViewAndURL('admin', true); // Replace để xóa login khỏi history
+      updateViewAndURL('admin', true, foundUser);
     } else {
-      updateViewAndURL('dashboard', true); // Đảm bảo URL đúng
+      // EMPLOYEE, HR, MANAGER đều dùng /employee
+      updateViewAndURL('dashboard', true, foundUser); // Sẽ tự động redirect đến /employee
     }
   };
 
@@ -333,8 +538,22 @@ const App: React.FC = () => {
     await signOut();
     setUser(null);
     localStorage.removeItem('current_user');
-    updateViewAndURL('dashboard', true);
+    // Sau khi logout, về trang login (/)
+    window.history.replaceState({}, '', '/');
+    setCurrentView('dashboard');
   };
+
+  // Đảm bảo user đã login không thể ở /
+  useEffect(() => {
+    if (user && window.location.pathname === '/') {
+      // User đã login nhưng ở /, redirect về URL phù hợp với role
+      if (user.role === UserRole.ADMIN) {
+        updateViewAndURL('admin', true);
+      } else {
+        updateViewAndURL('dashboard', true);
+      }
+    }
+  }, [user]);
 
   if (!user) return <LoginScreen onLogin={handleLogin} />;
 
@@ -343,13 +562,6 @@ const App: React.FC = () => {
       case 'dashboard': return <Dashboard user={user} />;
       case 'checkin': return <CheckIn user={user} />;
       case 'shifts': return <ShiftRegister user={user} />;
-      case 'leave': 
-        // Only admin can access leave management (via AdminPanel), redirect non-admin users
-        if (user.role !== UserRole.ADMIN) {
-          updateViewAndURL('dashboard', true);
-          return <Dashboard user={user} />;
-        }
-        return <LeaveRequest user={user} />;
       case 'payroll': return <Payroll user={user} />;
       case 'admin': 
         if (user.role !== UserRole.ADMIN) {

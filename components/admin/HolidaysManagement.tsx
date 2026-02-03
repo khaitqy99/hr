@@ -1,15 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Holiday } from '../../types';
-
-const HOLIDAYS_KEY = 'hr_connect_holidays';
-
-const getHolidays = (): Holiday[] => {
-  return JSON.parse(localStorage.getItem(HOLIDAYS_KEY) || '[]');
-};
-
-const saveHolidays = (holidays: Holiday[]) => {
-  localStorage.setItem(HOLIDAYS_KEY, JSON.stringify(holidays));
-};
+import { getHolidays, createHoliday, updateHoliday, deleteHoliday } from '../../services/db';
 
 const HolidaysManagement: React.FC = () => {
   const [holidays, setHolidays] = useState<Holiday[]>([]);
@@ -27,51 +18,44 @@ const HolidaysManagement: React.FC = () => {
     loadData();
   }, []);
 
-  const loadData = () => {
-    setHolidays(getHolidays().sort((a, b) => a.date - b.date));
+  const loadData = async () => {
+    const holidays = await getHolidays();
+    setHolidays(holidays.sort((a, b) => a.date - b.date));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name.trim() || !formData.date) {
       alert('Tên và ngày là bắt buộc');
       return;
     }
 
-    const allHolidays = getHolidays();
-    const dateTimestamp = new Date(formData.date).setHours(0, 0, 0, 0);
-    
-    if (editingHoliday) {
-      // Update
-      const index = allHolidays.findIndex(h => h.id === editingHoliday.id);
-      if (index !== -1) {
-        allHolidays[index] = {
-          ...editingHoliday,
+    try {
+      const dateTimestamp = new Date(formData.date).setHours(0, 0, 0, 0);
+      
+      if (editingHoliday) {
+        // Update
+        await updateHoliday(editingHoliday.id, {
           name: formData.name.trim(),
           date: dateTimestamp,
           type: formData.type,
           isRecurring: formData.isRecurring,
           description: formData.description.trim() || undefined,
-        };
-        saveHolidays(allHolidays);
-        loadData();
-        resetForm();
+        });
+      } else {
+        // Create
+        await createHoliday({
+          name: formData.name.trim(),
+          date: dateTimestamp,
+          type: formData.type,
+          isRecurring: formData.isRecurring,
+          description: formData.description.trim() || undefined,
+        });
       }
-    } else {
-      // Create
-      const newHoliday: Holiday = {
-        id: 'holiday-' + Date.now(),
-        name: formData.name.trim(),
-        date: dateTimestamp,
-        type: formData.type,
-        isRecurring: formData.isRecurring,
-        description: formData.description.trim() || undefined,
-        createdAt: Date.now(),
-      };
-      allHolidays.push(newHoliday);
-      saveHolidays(allHolidays);
       loadData();
       resetForm();
+    } catch (error: any) {
+      alert(error?.message || 'Có lỗi xảy ra');
     }
   };
 
@@ -100,11 +84,14 @@ const HolidaysManagement: React.FC = () => {
     setShowForm(true);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm('Bạn có chắc muốn xóa ngày lễ này?')) {
-      const allHolidays = getHolidays().filter(h => h.id !== id);
-      saveHolidays(allHolidays);
-      loadData();
+      try {
+        await deleteHoliday(id);
+        loadData();
+      } catch (error: any) {
+        alert(error?.message || 'Có lỗi xảy ra khi xóa ngày lễ');
+      }
     }
   };
 

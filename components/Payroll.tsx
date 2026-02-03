@@ -7,14 +7,56 @@ interface PayrollProps {
 }
 
 const Payroll: React.FC<PayrollProps> = ({ user }) => {
-  const [selectedMonth, setSelectedMonth] = useState('06-2024');
+  // Set default month to current month
+  const getCurrentMonth = () => {
+    const now = new Date();
+    return `${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+  };
+
+  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
   const [data, setData] = useState<PayrollRecord | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
+
+  // Generate month options (current month and 5 previous months)
+  const generateMonthOptions = () => {
+    const months: string[] = [];
+    const now = new Date();
+    for (let i = 0; i < 6; i++) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthStr = `${String(date.getMonth() + 1).padStart(2, '0')}-${date.getFullYear()}`;
+      months.push(monthStr);
+    }
+    return months;
+  };
 
   useEffect(() => {
     const loadPayroll = async () => {
-      const records = await getPayroll(user.id, selectedMonth);
-      if (records.length > 0) setData(records[0]);
-      else setData(null);
+      setIsLoading(true);
+      try {
+        // Load all records to get available months
+        const allRecords = await getPayroll(user.id);
+        const months = [...new Set(allRecords.map(r => r.month))].sort((a, b) => {
+          const [aMonth, aYear] = a.split('-').map(Number);
+          const [bMonth, bYear] = b.split('-').map(Number);
+          if (aYear !== bYear) return bYear - aYear;
+          return bMonth - aMonth;
+        });
+        setAvailableMonths(months.length > 0 ? months : generateMonthOptions());
+
+        // Load data for selected month
+        const records = await getPayroll(user.id, selectedMonth);
+        if (records.length > 0) {
+          setData(records[0]);
+        } else {
+          setData(null);
+        }
+      } catch (error) {
+        console.error('Error loading payroll:', error);
+        setData(null);
+      } finally {
+        setIsLoading(false);
+      }
     };
     loadPayroll();
   }, [user.id, selectedMonth]);
@@ -23,7 +65,54 @@ const Payroll: React.FC<PayrollProps> = ({ user }) => {
     return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
   };
 
-  if (!data) return <div className="p-8 text-center text-slate-400">Đang tải dữ liệu lương...</div>;
+  const formatMonthDisplay = (month: string) => {
+    const [m, y] = month.split('-');
+    return `Tháng ${m}/${y}`;
+  };
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="p-8 text-center text-slate-400">
+        <div className="animate-pulse">Đang tải dữ liệu lương...</div>
+      </div>
+    );
+  }
+
+  // Show no data message
+  if (!data) {
+    return (
+      <div className="space-y-6 fade-up">
+        {/* Header Selector */}
+        <div className="flex justify-between items-center bg-white p-4 rounded-3xl shadow-sm border border-sky-50">
+          <div>
+            <h2 className="text-lg font-bold text-slate-800">Bảng lương</h2>
+            <p className="text-xs text-slate-400 font-medium">Chi tiết thu nhập</p>
+          </div>
+          <select 
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            className="bg-sky-50 text-blue-700 font-bold text-sm px-4 py-2 rounded-xl border-none outline-none focus:ring-2 focus:ring-blue-200"
+          >
+            {availableMonths.map(month => (
+              <option key={month} value={month}>{formatMonthDisplay(month)}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* No Data Message */}
+        <div className="bg-white rounded-3xl shadow-sm border border-sky-50 p-12 text-center">
+          <div className="text-6xl mb-4">💰</div>
+          <h3 className="text-lg font-bold text-slate-700 mb-2">Chưa có dữ liệu lương</h3>
+          <p className="text-sm text-slate-500">
+            Chưa có bảng lương cho tháng {formatMonthDisplay(selectedMonth)}.
+            <br />
+            Vui lòng liên hệ bộ phận HR để được hỗ trợ.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // Tính toán lại để đảm bảo chính xác: basicSalary + overtimePay + allowance + bonus - deductions
   const basicSalary = (data.baseSalary / 27) * data.actualWorkDays;
@@ -52,16 +141,16 @@ const Payroll: React.FC<PayrollProps> = ({ user }) => {
             onChange={(e) => setSelectedMonth(e.target.value)}
             className="bg-sky-50 text-blue-700 font-bold text-sm px-4 py-2 rounded-xl border-none outline-none focus:ring-2 focus:ring-blue-200"
         >
-            <option value="06-2024">Tháng 06/2024</option>
-            <option value="05-2024">Tháng 05/2024</option>
-            <option value="04-2024">Tháng 04/2024</option>
+            {availableMonths.map(month => (
+              <option key={month} value={month}>{formatMonthDisplay(month)}</option>
+            ))}
         </select>
       </div>
 
       {/* Net Salary Card */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-800 to-slate-900 p-6 text-white shadow-xl shadow-slate-200">
          <div className="relative z-10 text-center">
-            <p className="text-slate-400 text-xs font-semibold uppercase tracking-widest mb-2">Thực nhận tháng {selectedMonth}</p>
+            <p className="text-slate-400 text-xs font-semibold uppercase tracking-widest mb-2">Thực nhận {formatMonthDisplay(selectedMonth)}</p>
             <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-200 to-cyan-200">
                 {formatCurrency(displayNetSalary)}
             </h1>
