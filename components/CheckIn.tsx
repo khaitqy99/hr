@@ -15,11 +15,12 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
   const [lastRecord, setLastRecord] = useState<AttendanceRecord | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   
-  // Camera State
+  // Camera State - lưu Blob để upload trực tiếp (không qua base64/JSON)
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const [photo, setPhoto] = useState<string | null>(null);
+  const [photo, setPhoto] = useState<Blob | null>(null);
+  const photoUrlRef = useRef<string | null>(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
 
@@ -76,6 +77,10 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
       clearInterval(timer);
       stopCamera();
       screen.orientation?.unlock?.();
+      if (photoUrlRef.current) {
+        URL.revokeObjectURL(photoUrlRef.current);
+        photoUrlRef.current = null;
+      }
     };
   }, [user.id]);
 
@@ -92,29 +97,32 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
     if (videoRef.current && canvasRef.current) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      // Set canvas dimensions to match video
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
-      
       const context = canvas.getContext('2d');
       if (context) {
-        // Gương: lật ngang để ảnh giống preview lúc chụp
         context.translate(canvas.width, 0);
         context.scale(-1, 1);
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        setPhoto(dataUrl);
-        // stopCamera(); // Optional: stop camera after capture to save battery
+        // Tạo Blob trực tiếp từ canvas, không qua base64
+        canvas.toBlob((blob) => {
+          if (blob) {
+            if (photoUrlRef.current) URL.revokeObjectURL(photoUrlRef.current);
+            photoUrlRef.current = URL.createObjectURL(blob);
+            setPhoto(blob);
+          }
+        }, 'image/jpeg', 0.8);
       }
     }
   };
 
   const retakePhoto = () => {
-    setPhoto(null);
-    if (!isCameraActive) {
-        startCamera();
+    if (photoUrlRef.current) {
+      URL.revokeObjectURL(photoUrlRef.current);
+      photoUrlRef.current = null;
     }
+    setPhoto(null);
+    if (!isCameraActive) startCamera();
   };
 
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -172,8 +180,12 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
       
       await saveAttendance(record);
       setLastRecord(record);
-      setPhoto(null); // Reset after success
-      startCamera(); // Restart camera for next action
+      if (photoUrlRef.current) {
+        URL.revokeObjectURL(photoUrlRef.current);
+        photoUrlRef.current = null;
+      }
+      setPhoto(null);
+      startCamera();
     } catch (error) {
       console.error('Error saving attendance:', error);
       setError('Lỗi khi lưu dữ liệu chấm công. Vui lòng thử lại.');
@@ -207,8 +219,8 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
       {/* Camera Preview Card */}
       <div className="flex-1 relative bg-slate-900 rounded-[2rem] overflow-hidden shadow-xl shadow-blue-200/50 border-4 border-white mx-0 sm:mx-2 min-h-[60vh] sm:min-h-0">
          {/* Camera Video / Photo Display */}
-         {photo ? (
-             <img src={photo} alt="Captured" className="absolute inset-0 w-full h-full object-contain" />
+         {photo && photoUrlRef.current ? (
+             <img src={photoUrlRef.current} alt="Captured" className="absolute inset-0 w-full h-full object-contain" />
          ) : (
              <video 
                 ref={videoRef} 

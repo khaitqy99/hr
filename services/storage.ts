@@ -7,57 +7,59 @@ import { supabase, isSupabaseConfigured } from './supabase';
 const ATTENDANCE_PHOTOS_BUCKET = 'chamcong';
 
 /**
- * Convert base64 data URL thành File object
+ * Convert base64 data URL thành Blob (fallback khi cần)
  */
-const dataURLtoFile = (dataurl: string, filename: string): File => {
+const dataURLtoBlob = (dataurl: string): Blob => {
   const arr = dataurl.split(',');
   const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
   const bstr = atob(arr[1]);
-  let n = bstr.length;
-  const u8arr = new Uint8Array(n);
-  while (n--) {
-    u8arr[n] = bstr.charCodeAt(n);
-  }
-  return new File([u8arr], filename, { type: mime });
+  const u8arr = new Uint8Array(bstr.length);
+  for (let i = 0; i < bstr.length; i++) u8arr[i] = bstr.charCodeAt(i);
+  return new Blob([u8arr], { type: mime });
 };
 
 /**
- * Upload ảnh chấm công lên Supabase Storage
- * @param photoDataUrl Base64 data URL của ảnh
+ * Upload ảnh chấm công lên Supabase Storage (binary trực tiếp, không JSON)
+ * @param photo Blob ảnh từ canvas hoặc base64 data URL (fallback)
  * @param userId ID của user
  * @param timestamp Timestamp của lần chấm công
  * @param type Loại chấm công (CHECK_IN hoặc CHECK_OUT)
  * @returns Public URL của ảnh đã upload
  */
 export const uploadAttendancePhoto = async (
-  photoDataUrl: string,
+  photo: Blob | string,
   userId: string,
   timestamp: number,
   type: 'CHECK_IN' | 'CHECK_OUT'
 ): Promise<string> => {
+  const blobToDataUrl = (b: Blob): Promise<string> =>
+    new Promise((resolve) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result as string);
+      r.readAsDataURL(b);
+    });
+
   if (!isSupabaseConfigured()) {
-    // Fallback: return data URL nếu Supabase chưa được cấu hình
     console.warn('⚠️ Supabase chưa được cấu hình, sử dụng base64 fallback');
-    return photoDataUrl;
+    return typeof photo === 'string' ? photo : blobToDataUrl(photo);
   }
 
   try {
-    // Tạo tên file: userId_timestamp_type.jpg
     const date = new Date(timestamp);
-    const dateStr = date.toISOString().split('T')[0]; // YYYY-MM-DD
-    const timeStr = date.toTimeString().split(' ')[0].replace(/:/g, '-'); // HH-MM-SS
+    const dateStr = date.toISOString().split('T')[0];
+    const timeStr = date.toTimeString().split(' ')[0].replace(/:/g, '-');
     const filename = `${userId}/${dateStr}_${timeStr}_${type}.jpg`;
-    
-    // Convert base64 thành File
-    const file = dataURLtoFile(photoDataUrl, filename);
 
-    // Upload lên Supabase Storage
-    console.log(`📤 Uploading photo: ${filename}`);
+    const blob: Blob = typeof photo === 'string' ? dataURLtoBlob(photo) : photo;
+
+    // Upload trực tiếp Blob (binary), chỉ định rõ contentType để serve đúng MIME
+    console.log(`📤 Uploading photo (binary): ${filename}`);
     const { data, error } = await supabase.storage
       .from(ATTENDANCE_PHOTOS_BUCKET)
-      .upload(filename, file, {
+      .upload(filename, blob, {
         cacheControl: '3600',
-        upsert: false, // Không ghi đè file cũ
+        contentType: 'image/jpeg',
+        upsert: false,
       });
 
     if (error) {
@@ -67,9 +69,8 @@ export const uploadAttendancePhoto = async (
         statusCode: error.statusCode,
         error: error.error,
       });
-      // Fallback về base64 nếu upload thất bại
       console.warn('⚠️ Falling back to base64 data URL');
-      return photoDataUrl;
+      return typeof photo === 'string' ? photo : blobToDataUrl(photo);
     }
 
     console.log('✅ Photo uploaded successfully:', data?.path);
@@ -81,15 +82,14 @@ export const uploadAttendancePhoto = async (
 
     if (!urlData?.publicUrl) {
       console.error('❌ Error getting public URL');
-      return photoDataUrl;
+      return typeof photo === 'string' ? photo : blobToDataUrl(photo);
     }
 
     console.log('✅ Public URL generated:', urlData.publicUrl);
     return urlData.publicUrl;
   } catch (error) {
     console.error('Error in uploadAttendancePhoto:', error);
-    // Fallback về base64 nếu có lỗi
-    return photoDataUrl;
+    return typeof photo === 'string' ? photo : blobToDataUrl(photo);
   }
 };
 
