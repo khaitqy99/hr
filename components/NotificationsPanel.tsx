@@ -1,17 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Notification, User } from '../types';
 import { getNotifications, markNotificationAsRead } from '../services/db';
-import {
-  isPushNotificationSupported,
-  isPushSupportedOnOrigin,
-  getNotificationPermission,
-  requestNotificationPermission,
-  subscribeToPushNotifications,
-  unsubscribeFromPushNotifications,
-  getUserPushSubscriptions,
-  togglePushNotifications,
-  resetPushAndServiceWorker,
-} from '../services/push-notifications';
 
 interface NotificationsPanelProps {
   user: User;
@@ -20,86 +9,13 @@ interface NotificationsPanelProps {
 const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user }) => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
-  const [pushEnabled, setPushEnabled] = useState(false);
-  const [pushLoading, setPushLoading] = useState(false);
-  const [pushSupported, setPushSupported] = useState(false);
-  const [pushError, setPushError] = useState<string | null>(null);
 
   useEffect(() => {
     loadNotifications();
-    checkPushSupport();
-    loadPushStatus();
     // Reload notifications every 30 seconds
     const interval = setInterval(loadNotifications, 30000);
     return () => clearInterval(interval);
   }, [user.id]);
-
-  const checkPushSupport = () => {
-    setPushSupported(isPushNotificationSupported());
-  };
-
-  const loadPushStatus = async () => {
-    if (!pushSupported) return;
-    
-    try {
-      const subscriptions = await getUserPushSubscriptions(user.id);
-      const permission = await getNotificationPermission();
-      setPushEnabled(subscriptions.length > 0 && permission === 'granted');
-    } catch (error) {
-      console.error('Error loading push status:', error);
-    }
-  };
-
-  const handleTogglePush = async () => {
-    if (!pushSupported) {
-      alert('Trình duyệt của bạn không hỗ trợ push notifications');
-      return;
-    }
-
-    setPushError(null);
-    setPushLoading(true);
-    try {
-      if (pushEnabled) {
-        await unsubscribeFromPushNotifications(user.id);
-        setPushEnabled(false);
-        alert('Đã tắt thông báo đẩy');
-      } else {
-        const permission = await getNotificationPermission();
-        if (permission !== 'granted') {
-          const newPermission = await requestNotificationPermission();
-          if (newPermission !== 'granted') {
-            alert('Cần quyền thông báo để nhận thông báo đẩy. Vui lòng bật trong cài đặt trình duyệt.');
-            setPushLoading(false);
-            return;
-          }
-        }
-
-        await subscribeToPushNotifications(user.id);
-        setPushEnabled(true);
-        setPushError(null);
-        alert('Đã bật thông báo đẩy thành công!');
-      }
-    } catch (error: any) {
-      const msg = error?.message || 'Có lỗi xảy ra khi thay đổi cài đặt thông báo đẩy';
-      console.error('Error toggling push notifications:', error);
-      setPushError(msg);
-      alert(msg);
-    } finally {
-      setPushLoading(false);
-    }
-  };
-
-  const handleResetPushAndRetry = async () => {
-    setPushError(null);
-    setPushLoading(true);
-    try {
-      await resetPushAndServiceWorker();
-      window.location.reload();
-    } catch (e) {
-      setPushError('Không thể reset. Thử đóng trình duyệt và mở lại.');
-      setPushLoading(false);
-    }
-  };
 
   const loadNotifications = async () => {
     try {
@@ -216,52 +132,6 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user }) => {
           )}
         </div>
         <div className="flex items-center space-x-3 flex-wrap gap-2">
-          {pushSupported && (
-            <>
-              <button
-                onClick={handleTogglePush}
-                disabled={pushLoading}
-                className={`px-4 py-2 text-sm font-medium rounded-xl transition-colors flex items-center space-x-2 ${
-                  pushEnabled
-                    ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                } ${pushLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-              {pushLoading ? (
-                <>
-                  <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  <span>Đang xử lý...</span>
-                </>
-              ) : (
-                <>
-                  {pushEnabled ? (
-                    <>
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-1.915 0-3.423.9-4.415 2.243l-.896 1.341-.896-1.341C10.975 2.9 9.467 2 7.552 2H7.4z" />
-                      </svg>
-                      <span>Đã bật</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
-                      </svg>
-                      <span>Bật thông báo đẩy</span>
-                    </>
-                  )}
-                </>
-              )}
-            </button>
-              {!isPushSupportedOnOrigin() && !pushEnabled && (
-                <span className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded-lg">
-                  Chỉ khả dụng trên HTTPS (vd: hr.y99.info)
-                </span>
-              )}
-            </>
-          )}
           {unreadCount > 0 && (
             <button
               onClick={handleMarkAllAsRead}
@@ -272,21 +142,6 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user }) => {
           )}
         </div>
       </div>
-
-      {/* Push error + reset */}
-      {pushError && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <p className="text-sm text-amber-800 flex-1">{pushError}</p>
-          <button
-            type="button"
-            onClick={handleResetPushAndRetry}
-            disabled={pushLoading}
-            className="flex-shrink-0 px-4 py-2 text-sm font-medium text-amber-800 bg-amber-100 rounded-xl hover:bg-amber-200 transition-colors disabled:opacity-50"
-          >
-            Xóa cache SW và tải lại
-          </button>
-        </div>
-      )}
 
       {/* Notifications List */}
       {notifications.length === 0 ? (

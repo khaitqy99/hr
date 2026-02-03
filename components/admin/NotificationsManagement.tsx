@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Notification, User, UserRole } from '../../types';
 import { getAllUsers, getAllNotifications, createNotification, deleteNotification } from '../../services/db';
-import { sendPushNotificationToUser, sendPushNotificationToAllEmployees } from '../../services/push-sender';
 
 interface NotificationsManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
@@ -59,19 +58,6 @@ const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onReg
           });
           createdNotifications.push(notification);
         }
-
-        // Gửi push notification đến tất cả employees
-        try {
-          await sendPushNotificationToAllEmployees({
-            title: formData.title.trim(),
-            message: formData.message.trim(),
-            type: formData.type,
-            url: '/notifications',
-          });
-        } catch (pushError) {
-          console.error('Error sending push notifications:', pushError);
-          // Không throw error để không làm gián đoạn việc tạo notification
-        }
       } else {
         // Send to specific user
         const notification = await createNotification({
@@ -83,20 +69,6 @@ const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onReg
           type: formData.type,
         });
         createdNotifications.push(notification);
-
-        // Gửi push notification đến user cụ thể
-        try {
-          await sendPushNotificationToUser(formData.userId, {
-            title: formData.title.trim(),
-            message: formData.message.trim(),
-            type: formData.type,
-            notificationId: notification.id,
-            url: '/notifications',
-          });
-        } catch (pushError) {
-          console.error('Error sending push notification:', pushError);
-          // Không throw error để không làm gián đoạn việc tạo notification
-        }
       }
 
       loadData();
