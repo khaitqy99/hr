@@ -52,6 +52,7 @@ export const uploadAttendancePhoto = async (
     const file = dataURLtoFile(photoDataUrl, filename);
 
     // Upload lên Supabase Storage
+    console.log(`📤 Uploading photo: ${filename}`);
     const { data, error } = await supabase.storage
       .from(ATTENDANCE_PHOTOS_BUCKET)
       .upload(filename, file, {
@@ -60,10 +61,18 @@ export const uploadAttendancePhoto = async (
       });
 
     if (error) {
-      console.error('Error uploading photo:', error);
+      console.error('❌ Error uploading photo:', error);
+      console.error('   Error details:', {
+        message: error.message,
+        statusCode: error.statusCode,
+        error: error.error,
+      });
       // Fallback về base64 nếu upload thất bại
+      console.warn('⚠️ Falling back to base64 data URL');
       return photoDataUrl;
     }
+
+    console.log('✅ Photo uploaded successfully:', data?.path);
 
     // Lấy public URL
     const { data: urlData } = supabase.storage
@@ -71,10 +80,11 @@ export const uploadAttendancePhoto = async (
       .getPublicUrl(filename);
 
     if (!urlData?.publicUrl) {
-      console.error('Error getting public URL');
+      console.error('❌ Error getting public URL');
       return photoDataUrl;
     }
 
+    console.log('✅ Public URL generated:', urlData.publicUrl);
     return urlData.publicUrl;
   } catch (error) {
     console.error('Error in uploadAttendancePhoto:', error);

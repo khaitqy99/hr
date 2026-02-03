@@ -3,6 +3,26 @@ import { AttendanceRecord, AttendanceType, AttendanceStatus, User, UserRole } fr
 import { getAllAttendance, deleteAttendance, getAllUsers } from '../../services/db';
 import { deleteAttendancePhoto } from '../../services/storage';
 
+/**
+ * Kiểm tra xem photoUrl có phải là base64 data URL không
+ */
+const isBase64DataUrl = (url: string): boolean => {
+  return url.startsWith('data:image/');
+};
+
+/**
+ * Kiểm tra xem photoUrl có phải là URL hợp lệ không
+ */
+const isValidUrl = (url: string): boolean => {
+  try {
+    if (isBase64DataUrl(url)) return true;
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
 interface AttendanceManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
 }
@@ -13,6 +33,8 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
   const [attendanceFilter, setAttendanceFilter] = useState<string>('ALL');
   const [selectedEmployeeForAttendance, setSelectedEmployeeForAttendance] = useState<string>('ALL');
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
+  /** ID các bản ghi có ảnh không tải được (URL lỗi / bucket private / bản ghi cũ) */
+  const [failedPhotoIds, setFailedPhotoIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     loadData();
@@ -25,10 +47,23 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
   }, [onRegisterReload]);
 
   const loadData = async () => {
+    setFailedPhotoIds(new Set());
     const records = await getAllAttendance();
     const users = await getAllUsers();
     setAttendanceRecords(records);
     setEmployees(users);
+    
+    // Debug: Log thông tin về ảnh
+    const recordsWithPhotos = records.filter(r => r.photoUrl);
+    console.log(`📊 Loaded ${records.length} attendance records, ${recordsWithPhotos.length} with photos`);
+    recordsWithPhotos.forEach(r => {
+      const isBase64 = isBase64DataUrl(r.photoUrl!);
+      const isValid = isValidUrl(r.photoUrl!);
+      console.log(`  Record ${r.id}: photoUrl type=${isBase64 ? 'base64' : 'URL'}, valid=${isValid}, length=${r.photoUrl?.length || 0}`);
+      if (!isBase64 && r.photoUrl) {
+        console.log(`    URL: ${r.photoUrl.substring(0, 100)}...`);
+      }
+    });
   };
 
   const getFilteredData = () => {
@@ -167,20 +202,68 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
                       </td>
                       <td className="px-6 py-4">
                         {record.photoUrl ? (
-                          <button
-                            onClick={() => setSelectedPhoto(record.photoUrl!)}
-                            className="w-16 h-16 rounded-lg overflow-hidden border-2 border-slate-200 hover:border-blue-500 transition-colors"
-                          >
-                            <img
-                              src={record.photoUrl}
-                              alt="Attendance photo"
-                              className="w-full h-full object-cover"
-                              onError={(e) => {
-                                // Fallback nếu ảnh không load được
-                                (e.target as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="64" height="64"%3E%3Crect fill="%23e2e8f0" width="64" height="64"/%3E%3Ctext x="50%25" y="50%25" text-anchor="middle" dy=".3em" fill="%2394a3b8" font-size="10"%3ELỗi%3C/text%3E%3C/svg%3E';
-                              }}
-                            />
-                          </button>
+                          (() => {
+                            const photoUrl = record.photoUrl;
+                            const isBase64 = isBase64DataUrl(photoUrl);
+                            const isValid = isValidUrl(photoUrl);
+                            const hasFailed = failedPhotoIds.has(record.id);
+
+                            // Nếu URL không hợp lệ hoặc đã fail
+                            if (!isValid || hasFailed) {
+                              return (
+                                <div
+                                  className="w-16 h-16 rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 flex items-center justify-center text-[10px] text-slate-400 text-center leading-tight px-1"
+                                  title={
+                                    !isValid
+                                      ? 'URL ảnh không hợp lệ'
+                                      : 'Ảnh không tải được (có thể do bản ghi cũ hoặc bucket chưa public)'
+                                  }
+                                >
+                                  {!isValid ? 'URL lỗi' : 'Không tải được'}
+                                </div>
+                              );
+                            }
+
+                            // Base64: hiển thị trực tiếp (không cần check error)
+                            if (isBase64) {
+                              return (
+                                <button
+                                  onClick={() => setSelectedPhoto(photoUrl)}
+                                  className="w-16 h-16 rounded-lg overflow-hidden border-2 border-slate-200 hover:border-blue-500 transition-colors"
+                                >
+                                  <img
+                                    src={photoUrl}
+                                    alt="Attendance photo"
+                                    className="w-full h-full object-cover"
+                                  />
+                                </button>
+                              );
+                            }
+
+                            // HTTP URL: hiển thị và check error
+                            return (
+                              <button
+                                onClick={() => setSelectedPhoto(photoUrl)}
+                                className="w-16 h-16 rounded-lg overflow-hidden border-2 border-slate-200 hover:border-blue-500 transition-colors"
+                              >
+                                <img
+                                  src={photoUrl}
+                                  alt="Attendance photo"
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    console.warn(`Failed to load photo for record ${record.id}:`, photoUrl);
+                                    setFailedPhotoIds((prev) => new Set(prev).add(record.id));
+                                  }}
+                                  onLoad={() => {
+                                    // Log success để debug
+                                    if (photoUrl.includes('supabase.co')) {
+                                      console.log(`Successfully loaded photo for record ${record.id}`);
+                                    }
+                                  }}
+                                />
+                              </button>
+                            );
+                          })()
                         ) : (
                           <span className="text-xs text-slate-400">-</span>
                         )}

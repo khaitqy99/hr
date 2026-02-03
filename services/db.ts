@@ -490,10 +490,10 @@ export const calculateAttendanceStats = async (userId: string, month: string): P
 export const saveAttendance = async (record: AttendanceRecord): Promise<void> => {
   if (isSupabaseAvailable()) {
     try {
+      // Bảng attendance_records dùng id UUID (default uuid_generate_v4()), không truyền id từ client
       const { error } = await supabase
         .from('attendance_records')
         .insert({
-          id: record.id,
           user_id: record.userId,
           timestamp: record.timestamp,
           type: record.type,
