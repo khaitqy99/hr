@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Notification, User, UserRole } from '../../types';
+import type { Notification, User } from '../../types';
+import { UserRole } from '../../types';
 import { getAllUsers, getAllNotifications, createNotification, deleteNotification } from '../../services/db';
 
 interface NotificationsManagementProps {

@@ -100,12 +100,10 @@ export interface LeaveRequest {
   createdAt: number;
 }
 
+/** Chỉ hỗ trợ ca CUSTOM (9 tiếng) và OFF. Ca cố định đã bỏ. */
 export enum ShiftTime {
-  MORNING = 'MORNING',     // 08:00 - 12:00
-  AFTERNOON = 'AFTERNOON', // 13:00 - 17:00
-  EVENING = 'EVENING',     // 18:00 - 22:00
-  CUSTOM = 'CUSTOM',       // Tùy chỉnh giờ vào/ra
-  OFF = 'OFF'              // Ngày nghỉ / lịch off (để backward compatibility)
+  CUSTOM = 'CUSTOM',  // Ca làm: giờ vào tùy chọn, bắt buộc 9 tiếng
+  OFF = 'OFF'        // Ngày nghỉ / lịch off
 }
 
 // Các loại nghỉ và trạng thái

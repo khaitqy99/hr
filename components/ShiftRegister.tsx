@@ -7,6 +7,9 @@ interface ShiftRegisterProps {
   user: User;
 }
 
+// Ca CUSTOM bắt buộc 9 tiếng
+const CUSTOM_SHIFT_HOURS = 9;
+
 // Các mốc giờ cho dropdown (30 phút một mốc, từ 05:00 đến 23:30)
 const TIME_OPTIONS: string[] = (() => {
   const opts: string[] = [];
@@ -16,6 +19,16 @@ const TIME_OPTIONS: string[] = (() => {
   }
   return opts;
 })();
+
+/** Giờ ra = giờ vào + 9 tiếng (cùng ngày, tối đa 23:59) */
+function startTimePlus9Hours(startTime: string): string {
+  const [h, m] = startTime.split(':').map(Number);
+  let totalMinutes = h * 60 + m + CUSTOM_SHIFT_HOURS * 60;
+  if (totalMinutes >= 24 * 60) totalMinutes = 23 * 60 + 59;
+  const eh = Math.floor(totalMinutes / 60);
+  const em = totalMinutes % 60;
+  return `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
+}
 
 const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
   const [shifts, setShifts] = useState<ShiftRegistration[]>([]);
@@ -212,13 +225,15 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
   };
 
   const updateCustomTime = (dateStr: string, field: 'startTime' | 'endTime', value: string) => {
-    setDateCustomTimes({
-      ...dateCustomTimes,
-      [dateStr]: {
-        ...dateCustomTimes[dateStr],
-        [field]: value
-      }
-    });
+    const prev = dateCustomTimes[dateStr] || { startTime: '', endTime: '' };
+    if (field === 'startTime') {
+      setDateCustomTimes({
+        ...dateCustomTimes,
+        [dateStr]: { startTime: value, endTime: startTimePlus9Hours(value) }
+      });
+    } else {
+      setDateCustomTimes({ ...dateCustomTimes, [dateStr]: { ...prev, [field]: value } });
+    }
   };
 
   const getShiftTime = (dateStr: string): string => {
@@ -226,9 +241,8 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
       const offType = dateOffTypes[dateStr];
       return offType && OFF_TYPE_LABELS[offType] ? OFF_TYPE_LABELS[offType] : '';
     }
-    if (dateCustomTimes[dateStr] && dateCustomTimes[dateStr].startTime && dateCustomTimes[dateStr].endTime) {
-      return `${dateCustomTimes[dateStr].startTime}-${dateCustomTimes[dateStr].endTime}`;
-    }
+    const st = dateCustomTimes[dateStr]?.startTime;
+    if (st) return `${st}-${startTimePlus9Hours(st)} (9h)`;
     return '';
   };
 
@@ -237,12 +251,8 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
   const allDatesHaveShifts = (): boolean => {
     return selectedDates.length > 0 && selectedDates.every(date => {
       const shift = dateShifts[date];
-      if (shift === ShiftTime.OFF) {
-        // Kiểm tra xem đã chọn loại off chưa
-        return !!dateOffTypes[date];
-      }
-      const customTime = dateCustomTimes[date];
-      return customTime && customTime.startTime && customTime.endTime;
+      if (shift === ShiftTime.OFF) return !!dateOffTypes[date];
+      return !!(dateCustomTimes[date]?.startTime);
     });
   };
 
@@ -302,15 +312,15 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
           createdAt: Date.now()
         };
       }
-      if (!customTime || !customTime.startTime || !customTime.endTime) return null;
-      
+      if (!customTime?.startTime) return null;
+      const endTime = startTimePlus9Hours(customTime.startTime);
       return {
         id: `${Date.now()}-${index}`,
         userId: user.id,
         date: dateObj.getTime(),
         shift: ShiftTime.CUSTOM,
         startTime: customTime.startTime,
-        endTime: customTime.endTime,
+        endTime,
         status: RequestStatus.PENDING,
         createdAt: Date.now()
       };
@@ -463,9 +473,9 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                                                             ? (registeredShift.offType && OFF_TYPE_LABELS[registeredShift.offType] ? OFF_TYPE_LABELS[registeredShift.offType] : 'Ngày off')
                                                             : 'Ca làm việc'}
                                                     </p>
-                                                    {registeredShift.shift === ShiftTime.CUSTOM && registeredShift.startTime && registeredShift.endTime && (
+                                                    {registeredShift.shift === ShiftTime.CUSTOM && registeredShift.startTime && (
                                                         <p className="text-slate-600 text-xs">
-                                                            {registeredShift.startTime} – {registeredShift.endTime}
+                                                            {registeredShift.startTime} – {registeredShift.endTime || startTimePlus9Hours(registeredShift.startTime)} (9h)
                                                         </p>
                                                     )}
                                                     <p className="text-slate-500 text-xs">
@@ -539,14 +549,11 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                                                 </div>
                                                 <div className="flex items-center gap-2">
                                                     <label className="text-[10px] font-bold text-slate-600 w-16">Giờ ra:</label>
-                                                    <div className="flex-1">
-                                                        <CustomSelect
-                                                            options={TIME_OPTIONS.map((t) => ({ value: t, label: t }))}
-                                                            value={dateCustomTimes[dateStr]?.endTime || ''}
-                                                            onChange={(v) => updateCustomTime(dateStr, 'endTime', v)}
-                                                            placeholder="Chọn giờ ra"
-                                                        />
-                                                    </div>
+                                                    <p className="text-sm font-medium text-slate-700 flex-1">
+                                                        {dateCustomTimes[dateStr]?.startTime
+                                                            ? `${startTimePlus9Hours(dateCustomTimes[dateStr].startTime)} (tự động, 9 tiếng)`
+                                                            : '—'}
+                                                    </p>
                                                 </div>
                                             </>
                                         )}

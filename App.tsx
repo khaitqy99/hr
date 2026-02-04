@@ -1,17 +1,49 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import Layout from './components/Layout';
-import Dashboard from './components/Dashboard';
-import CheckIn from './components/CheckIn';
-import ShiftRegister from './components/ShiftRegister';
-import AdminPanel from './components/AdminPanel';
-import Payroll from './components/Payroll';
-import EmployeeProfile from './components/EmployeeProfile';
-import SalaryManagement from './components/SalaryManagement';
-import NotificationsPanel from './components/NotificationsPanel';
 import EnvError from './components/EnvError';
 import { User, UserRole } from './types';
-import { getCurrentUser } from './services/db';
+
+// Lazy load routes - giảm bundle ban đầu, tải mượt hơn trên mobile
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const CheckIn = lazy(() => import('./components/CheckIn'));
+const ShiftRegister = lazy(() => import('./components/ShiftRegister'));
+const AdminPanel = lazy(() => import('./components/AdminPanel'));
+const Payroll = lazy(() => import('./components/Payroll'));
+const EmployeeProfile = lazy(() => import('./components/EmployeeProfile'));
+const SalaryManagement = lazy(() => import('./components/SalaryManagement'));
+const NotificationsPanel = lazy(() => import('./components/NotificationsPanel'));
+import { getCurrentUser, syncAllOfflineData } from './services/db';
 import { sendOTP, verifyOTP } from './services/auth';
+
+// Admin sub-routes: path segment cho từng trang admin (đồng bộ với AdminPanel)
+const ADMIN_TAB_SEGMENTS = ['users', 'attendance', 'leave', 'shift', 'payroll', 'reports', 'departments', 'holidays', 'config', 'export', 'notifications', 'settings'];
+const DEFAULT_ADMIN_TAB = 'users';
+
+// Employee sub-routes: path segment cho từng trang nhân viên (đồng bộ với Layout nav)
+const EMPLOYEE_VIEW_SEGMENTS = ['dashboard', 'checkin', 'shifts', 'payroll', 'notifications'];
+const DEFAULT_EMPLOYEE_VIEW = 'dashboard';
+
+/** Parse /employee, /employee/dashboard, /employee/checkin, ... */
+function parseEmployeePath(path: string): { view: string } | null {
+  if (!path.startsWith('/employee')) return null;
+  const rest = path.slice('/employee'.length) || '/';
+  const segments = rest.split('/').filter(Boolean);
+  if (segments.length === 0) return { view: DEFAULT_EMPLOYEE_VIEW };
+  if (EMPLOYEE_VIEW_SEGMENTS.includes(segments[0])) return { view: segments[0] };
+  return { view: DEFAULT_EMPLOYEE_VIEW };
+}
+
+/** Parse /admin, /admin/users, /admin/salary, /admin/employees/:id */
+function parseAdminPath(path: string): { view: 'admin' | 'salary-management' | 'employee-profile'; adminTab?: string; employeeId?: string } | null {
+  if (!path.startsWith('/admin')) return null;
+  const rest = path.slice('/admin'.length) || '/';
+  const segments = rest.split('/').filter(Boolean);
+  if (segments.length === 0) return { view: 'admin', adminTab: DEFAULT_ADMIN_TAB };
+  if (segments[0] === 'salary') return { view: 'salary-management' };
+  if (segments[0] === 'employees' && segments[1]) return { view: 'employee-profile', employeeId: segments[1] };
+  if (ADMIN_TAB_SEGMENTS.includes(segments[0])) return { view: 'admin', adminTab: segments[0] };
+  return { view: 'admin', adminTab: DEFAULT_ADMIN_TAB };
+}
 
 // Helper function to check if current view is admin route
 // Chỉ ADMIN mới có thể truy cập các admin routes
@@ -394,27 +426,40 @@ const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [currentView, setCurrentView] = useState('dashboard');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
+  const [adminTab, setAdminTab] = useState(DEFAULT_ADMIN_TAB);
 
-  // Sync URL with view
-  const updateViewAndURL = (newView: string, replace: boolean = false, userOverride?: User | null) => {
+  // Sync URL with view. adminPath = segment (users, attendance,...); employeeId dùng cho employee-profile.
+  const updateViewAndURL = (
+    newView: string,
+    replace: boolean = false,
+    userOverride?: User | null,
+    adminPath?: string,
+    employeeId?: string
+  ) => {
     setCurrentView(newView);
     let path = '/';
-    
-    // Sử dụng userOverride nếu có, nếu không thì dùng state user
     const currentUser = userOverride !== undefined ? userOverride : user;
-    
-    // Chỉ có /admin và /employee, / chỉ dành cho login
+
     if (!currentUser) {
-      path = '/'; // Chưa login thì ở trang login
-    } else if (newView === 'admin') {
-      path = '/admin';
+      path = '/';
     } else if (currentUser.role === UserRole.ADMIN) {
-      path = '/admin';
+      if (newView === 'admin') {
+        const seg = adminPath && ADMIN_TAB_SEGMENTS.includes(adminPath) ? adminPath : adminTab;
+        path = `/admin/${seg}`;
+        setAdminTab(seg);
+      } else if (newView === 'salary-management') {
+        path = '/admin/salary';
+      } else if (newView === 'employee-profile' && employeeId) {
+        path = `/admin/employees/${employeeId}`;
+        setSelectedEmployeeId(employeeId);
+      } else {
+        path = `/admin/${adminTab}`;
+      }
     } else {
-      // EMPLOYEE dùng /employee
-      path = '/employee';
+      const empView = EMPLOYEE_VIEW_SEGMENTS.includes(newView) ? newView : DEFAULT_EMPLOYEE_VIEW;
+      path = `/employee/${empView}`;
     }
-    
+
     if (replace) {
       window.history.replaceState({ view: newView }, '', path);
     } else {
@@ -422,43 +467,43 @@ const App: React.FC = () => {
     }
   };
 
+  const setView = (view: string, options?: { replace?: boolean; adminPath?: string; employeeId?: string }) => {
+    updateViewAndURL(view, options?.replace ?? false, undefined, options?.adminPath, options?.employeeId);
+  };
+
   // Handle browser back/forward
   useEffect(() => {
-    const handlePopState = (e: PopStateEvent) => {
+    const handlePopState = () => {
       const path = window.location.pathname;
-      
-      // Nếu chưa login, chỉ cho phép ở /
       if (!user) {
-        if (path !== '/') {
-          window.history.replaceState({}, '', '/');
-        }
+        if (path !== '/') window.history.replaceState({}, '', '/');
         return;
       }
-      
-      // Nếu đã login nhưng ở /, redirect về URL phù hợp với role
       if (path === '/') {
         updateViewAndURL('dashboard', true);
         return;
       }
-      
-      // Chỉ có /admin và /employee
-      if (path === '/admin') {
-        if (user.role === UserRole.ADMIN) {
-          setCurrentView('admin');
-        } else {
-          updateViewAndURL('dashboard', true);
-        }
-      } else if (path === '/employee') {
-        // EMPLOYEE dùng /employee
-        if (user.role === UserRole.EMPLOYEE) {
-          setCurrentView('dashboard');
-        } else {
-          updateViewAndURL('dashboard', true);
-        }
-      } else {
-        // URL không hợp lệ, redirect về URL phù hợp
-        updateViewAndURL('dashboard', true);
+      const employeeParsed = parseEmployeePath(path);
+      if (employeeParsed && user.role === UserRole.EMPLOYEE) {
+        setCurrentView(employeeParsed.view);
+        return;
       }
+      if (path.startsWith('/employee')) {
+        updateViewAndURL('dashboard', true);
+        return;
+      }
+      const adminParsed = parseAdminPath(path);
+      if (adminParsed && user.role === UserRole.ADMIN) {
+        setCurrentView(adminParsed.view);
+        if (adminParsed.adminTab) setAdminTab(adminParsed.adminTab);
+        if (adminParsed.employeeId) setSelectedEmployeeId(adminParsed.employeeId);
+        return;
+      }
+      if (path.startsWith('/admin')) {
+        updateViewAndURL('dashboard', true);
+        return;
+      }
+      updateViewAndURL('dashboard', true);
     };
 
     window.addEventListener('popstate', handlePopState);
@@ -469,55 +514,40 @@ const App: React.FC = () => {
   useEffect(() => {
     const path = window.location.pathname;
     const savedUser = localStorage.getItem('current_user');
-    
+
     if (savedUser) {
       const parsedUser = JSON.parse(savedUser);
       setUser(parsedUser);
-      
-      // Nếu đã login nhưng ở /, redirect về URL phù hợp với role
+
       if (path === '/') {
-        let redirectPath = '/';
-        if (parsedUser.role === UserRole.ADMIN) {
-          redirectPath = '/admin';
-          setCurrentView('admin');
-        } else {
-          // EMPLOYEE, HR, MANAGER đều dùng /employee
-          redirectPath = '/employee';
-          setCurrentView('dashboard');
-        }
-        window.history.replaceState({ view: 'dashboard' }, '', redirectPath);
+        const redirectPath = parsedUser.role === UserRole.ADMIN ? `/admin/${DEFAULT_ADMIN_TAB}` : `/employee/${DEFAULT_EMPLOYEE_VIEW}`;
+        setCurrentView(parsedUser.role === UserRole.ADMIN ? 'admin' : DEFAULT_EMPLOYEE_VIEW);
+        if (parsedUser.role === UserRole.ADMIN) setAdminTab(DEFAULT_ADMIN_TAB);
+        window.history.replaceState({}, '', redirectPath);
         return;
       }
-      
-      // Kiểm tra URL có khớp với role không
-      const isValidRoute = 
-        (path === '/admin' && parsedUser.role === UserRole.ADMIN) ||
-        (path === '/employee' && parsedUser.role === UserRole.EMPLOYEE);
-      
-      if (isValidRoute) {
-        if (path === '/admin') {
-          setCurrentView('admin');
-        } else {
-          setCurrentView('dashboard');
-        }
-      } else {
-        // URL không khớp với role, redirect về URL đúng
-        let redirectPath = '/';
-        if (parsedUser.role === UserRole.ADMIN) {
-          redirectPath = '/admin';
-          setCurrentView('admin');
-        } else {
-          // EMPLOYEE, HR, MANAGER đều dùng /employee
-          redirectPath = '/employee';
-          setCurrentView('dashboard');
-        }
-        window.history.replaceState({ view: 'dashboard' }, '', redirectPath);
+
+      const employeeParsed = parseEmployeePath(path);
+      if (employeeParsed && parsedUser.role === UserRole.EMPLOYEE) {
+        setCurrentView(employeeParsed.view);
+        return;
       }
+
+      const adminParsed = parseAdminPath(path);
+      if (adminParsed && parsedUser.role === UserRole.ADMIN) {
+        setCurrentView(adminParsed.view);
+        if (adminParsed.adminTab) setAdminTab(adminParsed.adminTab);
+        if (adminParsed.employeeId) setSelectedEmployeeId(adminParsed.employeeId);
+        return;
+      }
+
+      // URL không khớp role -> redirect
+      const redirectPath = parsedUser.role === UserRole.ADMIN ? `/admin/${DEFAULT_ADMIN_TAB}` : `/employee/${DEFAULT_EMPLOYEE_VIEW}`;
+      setCurrentView(parsedUser.role === UserRole.ADMIN ? 'admin' : DEFAULT_EMPLOYEE_VIEW);
+      if (parsedUser.role === UserRole.ADMIN) setAdminTab(DEFAULT_ADMIN_TAB);
+      window.history.replaceState({}, '', redirectPath);
     } else {
-      // Chưa login, chỉ cho phép ở /
-      if (path !== '/') {
-        window.history.replaceState({}, '', '/');
-      }
+      if (path !== '/') window.history.replaceState({}, '', '/');
     }
   }, []);
 
@@ -527,10 +557,9 @@ const App: React.FC = () => {
     // Redirect đến URL phù hợp với role sau khi login
     // Truyền foundUser vào updateViewAndURL để tránh race condition với setUser
     if (foundUser.role === UserRole.ADMIN) {
-      updateViewAndURL('admin', true, foundUser);
+      updateViewAndURL('admin', true, foundUser, DEFAULT_ADMIN_TAB);
     } else {
-      // EMPLOYEE, HR, MANAGER đều dùng /employee
-      updateViewAndURL('dashboard', true, foundUser); // Sẽ tự động redirect đến /employee
+      updateViewAndURL(DEFAULT_EMPLOYEE_VIEW, true, foundUser);
     }
   };
 
@@ -547,44 +576,106 @@ const App: React.FC = () => {
   // Đảm bảo user đã login không thể ở /
   useEffect(() => {
     if (user && window.location.pathname === '/') {
-      // User đã login nhưng ở /, redirect về URL phù hợp với role
       if (user.role === UserRole.ADMIN) {
         updateViewAndURL('admin', true);
       } else {
-        updateViewAndURL('dashboard', true);
+        updateViewAndURL(DEFAULT_EMPLOYEE_VIEW, true);
       }
     }
   }, [user]);
 
+  // Tự động đồng bộ dữ liệu offline khi quay lại online
+  useEffect(() => {
+    if (!user) return;
+
+    const handleOnline = async () => {
+      console.log('🔄 Đã kết nối lại mạng, đang đồng bộ dữ liệu offline...');
+      try {
+        const result = await syncAllOfflineData();
+        if (result.totalSynced > 0) {
+          console.log(`✅ Đã đồng bộ ${result.totalSynced} bản ghi thành công`);
+        }
+        if (result.totalErrors > 0) {
+          console.warn(`⚠️ Có ${result.totalErrors} bản ghi không thể đồng bộ`);
+        }
+      } catch (error) {
+        console.error('❌ Lỗi khi đồng bộ dữ liệu offline:', error);
+      }
+    };
+
+    // Sync ngay khi component mount nếu đang online
+    if (navigator.onLine) {
+      handleOnline();
+    }
+
+    // Lắng nghe sự kiện online
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [user]);
+
   if (!user) return <LoginScreen onLogin={handleLogin} />;
 
+  // Skeleton nhẹ cho lazy loading - không block main thread
+  const RouteFallback = () => (
+    <div className="flex items-center justify-center min-h-[200px] py-12" aria-hidden="true">
+      <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+
   const renderView = () => {
-    switch (currentView) {
-      case 'dashboard': return <Dashboard user={user} />;
-      case 'checkin': return <CheckIn user={user} />;
-      case 'shifts': return <ShiftRegister user={user} />;
-      case 'payroll': return <Payroll user={user} />;
-      case 'notifications': return <NotificationsPanel user={user} />;
-      case 'admin': 
-        if (user.role !== UserRole.ADMIN) {
-          // Redirect non-admin users
-          updateViewAndURL('dashboard', true);
-          return <Dashboard user={user} />;
-        }
-        return <AdminPanel user={user} setView={updateViewAndURL} setSelectedEmployeeId={setSelectedEmployeeId} onLogout={handleLogout} />;
-      case 'salary-management': 
-        if (user.role !== UserRole.ADMIN) {
-          updateViewAndURL('dashboard', true);
-          return <Dashboard user={user} />;
-        }
-        return <SalaryManagement user={user} setView={updateViewAndURL} />;
-      case 'employee-profile': 
-        if (!selectedEmployeeId) {
-          return <div className="p-10 text-center text-slate-400">Không tìm thấy nhân viên</div>;
-        }
-        return <EmployeeProfile employeeId={selectedEmployeeId} currentUser={user} onBack={() => { updateViewAndURL('admin', false); setSelectedEmployeeId(null); }} setView={updateViewAndURL} />;
-      default: return <Dashboard user={user} />;
-    }
+    const view = (() => {
+      switch (currentView) {
+        case 'dashboard': return <Dashboard user={user} />;
+        case 'checkin': return <CheckIn user={user} />;
+        case 'shifts': return <ShiftRegister user={user} />;
+        case 'payroll': return <Payroll user={user} />;
+        case 'notifications': return <NotificationsPanel user={user} />;
+        case 'admin': 
+          if (user.role !== UserRole.ADMIN) {
+            updateViewAndURL('dashboard', true);
+            return <Dashboard user={user} />;
+          }
+          return (
+          <AdminPanel
+            user={user}
+            setView={setView}
+            setSelectedEmployeeId={setSelectedEmployeeId}
+            onLogout={handleLogout}
+            initialTab={adminTab}
+            onTabChange={(seg) => {
+              setAdminTab(seg);
+              updateViewAndURL('admin', false, undefined, seg);
+            }}
+          />
+        );
+        case 'salary-management': 
+          if (user.role !== UserRole.ADMIN) {
+            updateViewAndURL('dashboard', true);
+            return <Dashboard user={user} />;
+          }
+          return <SalaryManagement user={user} setView={setView} />;
+        case 'employee-profile': 
+          if (!selectedEmployeeId) {
+            return <div className="p-10 text-center text-slate-400">Không tìm thấy nhân viên</div>;
+          }
+          return (
+          <EmployeeProfile
+            employeeId={selectedEmployeeId}
+            currentUser={user}
+            onBack={() => {
+              updateViewAndURL('admin', false, undefined, adminTab);
+              setSelectedEmployeeId(null);
+            }}
+            setView={setView}
+          />
+        );
+        default: return <Dashboard user={user} />;
+      }
+    })();
+    return <Suspense fallback={<RouteFallback />}>{view}</Suspense>;
   };
 
   // Admin có layout riêng (desktop), không cần wrap trong Layout mobile
@@ -593,7 +684,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <Layout user={user} currentView={currentView} setView={updateViewAndURL} onLogout={handleLogout}>
+    <Layout user={user} currentView={currentView} setView={setView} onLogout={handleLogout}>
       <div className="max-w-md mx-auto min-h-full">
         {renderView()}
       </div>

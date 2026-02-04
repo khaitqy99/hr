@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { User, UserRole, PayrollRecord } from '../types';
-import { getAllUsers, getPayroll, createOrUpdatePayroll, calculatePayroll, calculateAttendanceStats } from '../services/db';
+import { getAllUsers, getPayroll, createOrUpdatePayroll, calculatePayroll, calculateAttendanceStats, getIncompleteAttendanceDays } from '../services/db';
 
 interface SalaryManagementProps {
   user: User;
@@ -19,6 +19,7 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
     bonus: 0,
   });
   const [attendanceStats, setAttendanceStats] = useState<{ actualWorkDays: number; otHours: number } | null>(null);
+  const [incompleteDays, setIncompleteDays] = useState<{ date: string; hasCheckIn: boolean; hasCheckOut: boolean }[]>([]);
   const [isCalculating, setIsCalculating] = useState(false);
   const [useAttendanceData, setUseAttendanceData] = useState(true);
 
@@ -42,10 +43,14 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
         const records = await getPayroll(selectedEmployee.id, selectedMonth);
         setPayrollRecords(records);
         
-        // Load attendance stats
-        const stats = await calculateAttendanceStats(selectedEmployee.id, selectedMonth);
+        // Load attendance stats và ngày thiếu check-in/check-out
+        const [stats, incomplete] = await Promise.all([
+          calculateAttendanceStats(selectedEmployee.id, selectedMonth),
+          getIncompleteAttendanceDays(selectedEmployee.id, selectedMonth),
+        ]);
         setAttendanceStats(stats);
-        
+        setIncompleteDays(incomplete);
+
         // Auto-fill form with attendance data if useAttendanceData is true
         if (useAttendanceData) {
           setSalaryForm(prev => ({
@@ -172,7 +177,7 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
-          <div className="max-w-7xl mx-auto p-6">
+          <div className="w-full p-6">
             <div className="space-y-6 fade-up">
               {/* Employee Selection */}
               <div className="bg-white p-5 rounded-3xl shadow-sm border border-sky-50">
@@ -405,6 +410,15 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
                         )}
                         {useAttendanceData && attendanceStats && attendanceStats.actualWorkDays === 0 && (
                           <p className="text-xs text-orange-500 text-center">Chưa có dữ liệu chấm công cho tháng này</p>
+                        )}
+                        {useAttendanceData && incompleteDays.length > 0 && (
+                          <div className="mt-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-left">
+                            <p className="text-xs font-bold text-amber-800 mb-1">Ngày thiếu chấm công (không tính vào lương):</p>
+                            <p className="text-xs text-amber-700 mb-2">
+                              {incompleteDays.map(d => `${d.date} (${d.hasCheckIn ? 'có vào' : 'thiếu vào'}, ${d.hasCheckOut ? 'có ra' : 'thiếu ra'})`).join(', ')}
+                            </p>
+                            <p className="text-xs text-amber-600">Nếu được bù công, hãy tắt &quot;Dùng dữ liệu chấm công&quot; và nhập tay số ngày công.</p>
+                          </div>
                         )}
                       </div>
                     </div>

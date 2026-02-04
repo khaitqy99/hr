@@ -173,7 +173,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
-          <div className="max-w-7xl mx-auto p-6">
+          <div className="w-full p-6">
             <div className="space-y-6 fade-up">
                       {/* Employee Card */}
               <div className="bg-white p-5 rounded-3xl shadow-sm border border-sky-50">

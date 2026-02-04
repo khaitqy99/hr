@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import React, { useEffect, useState, lazy, Suspense } from 'react';
 import { User, AttendanceRecord, AttendanceType } from '../types';
 import { getAttendance } from '../services/db';
+
+// Lazy load Recharts - giảm ~100KB+ từ initial bundle, cải thiện FCP trên mobile
+const DashboardChart = lazy(() => import('./DashboardChart'));
 
 interface DashboardProps {
   user: User;
@@ -26,8 +28,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     const d = new Date();
     d.setDate(d.getDate() - (4 - i));
     const dayStr = d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
-    const dayStart = new Date(d.setHours(0,0,0,0)).getTime();
-    const dayEnd = new Date(d.setHours(23,59,59,999)).getTime();
+    const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
+    const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999).getTime();
     
     const dayRecords = attendance.filter(r => r.timestamp >= dayStart && r.timestamp <= dayEnd);
     const checkIn = dayRecords.find(r => r.type === AttendanceType.CHECK_IN);
@@ -114,28 +116,46 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                 </div>
             </div>
             
-            <div className="flex space-x-4 mt-2">
-                <div className="flex-1 bg-black/10 rounded-2xl p-3 backdrop-blur-sm">
+            <div className="flex space-x-2 mt-2">
+                <div className="flex-1 bg-black/10 rounded-2xl p-3 backdrop-blur-sm min-w-0">
                     <p className="text-xs text-blue-100 mb-1">Giờ vào</p>
-                    <p className="text-lg font-bold">
+                    <p className="text-base sm:text-lg font-bold truncate">
                       {(() => {
-                        const today = new Date();
-                        const todayStart = new Date(today.setHours(0,0,0,0)).getTime();
-                        const todayEnd = new Date(today.setHours(23,59,59,999)).getTime();
-                        const todayCheckIn = attendance.find(r => 
-                          r.timestamp >= todayStart && 
-                          r.timestamp <= todayEnd && 
+                        const now = new Date();
+                        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
+                        const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+                        const todayCheckIn = attendance.find(r =>
+                          r.timestamp >= todayStart &&
+                          r.timestamp <= todayEnd &&
                           r.type === AttendanceType.CHECK_IN
                         );
-                        return todayCheckIn 
+                        return todayCheckIn
                           ? new Date(todayCheckIn.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
                           : '--:--';
                       })()}
                     </p>
                 </div>
-                <div className="flex-1 bg-black/10 rounded-2xl p-3 backdrop-blur-sm">
+                <div className="flex-1 bg-black/10 rounded-2xl p-3 backdrop-blur-sm min-w-0">
+                    <p className="text-xs text-blue-100 mb-1">Giờ ra</p>
+                    <p className="text-base sm:text-lg font-bold truncate">
+                      {(() => {
+                        const now = new Date();
+                        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
+                        const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+                        const todayCheckOut = attendance.find(r =>
+                          r.timestamp >= todayStart &&
+                          r.timestamp <= todayEnd &&
+                          r.type === AttendanceType.CHECK_OUT
+                        );
+                        return todayCheckOut
+                          ? new Date(todayCheckOut.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+                          : '--:--';
+                      })()}
+                    </p>
+                </div>
+                <div className="flex-1 bg-black/10 rounded-2xl p-3 backdrop-blur-sm min-w-0">
                     <p className="text-xs text-blue-100 mb-1">Giờ làm</p>
-                    <p className="text-lg font-bold">{chartData[4].hours || 0}h</p>
+                    <p className="text-base sm:text-lg font-bold">{chartData[4]?.hours ?? 0}h</p>
                 </div>
             </div>
           </div>
@@ -160,25 +180,12 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
          </div>
       </div>
 
-      {/* Chart */}
+      {/* Chart - lazy load Recharts để tải nhanh hơn trên mobile */}
       <div className="bg-white rounded-3xl shadow-sm border border-sky-50 p-5 fade-up" style={{animationDelay: '200ms'}}>
         <h3 className="text-sm font-bold text-slate-700 mb-4">Biểu đồ giờ làm</h3>
-        <div className="h-40">
-           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData}>
-              <XAxis dataKey="name" fontSize={10} axisLine={false} tickLine={false} tick={{ fill: '#94a3b8' }} dy={10} />
-              <Tooltip 
-                cursor={{fill: '#f0f9ff', radius: 6}}
-                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)', fontSize: '12px' }}
-              />
-              <Bar dataKey="hours" radius={[6, 6, 6, 6]} barSize={12}>
-                {chartData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.hours >= 8 ? '#3b82f6' : '#cbd5e1'} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <Suspense fallback={<div className="h-40 flex items-center justify-center"><div className="w-6 h-6 border-2 border-blue-300 border-t-transparent rounded-full animate-spin" /></div>}>
+          <DashboardChart data={chartData} />
+        </Suspense>
       </div>
 
       {/* Timeline */}

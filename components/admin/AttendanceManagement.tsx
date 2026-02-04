@@ -33,8 +33,11 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
   const [attendanceFilter, setAttendanceFilter] = useState<string>('ALL');
   const [selectedEmployeeForAttendance, setSelectedEmployeeForAttendance] = useState<string>('ALL');
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   /** ID các bản ghi có ảnh không tải được (URL lỗi / bucket private / bản ghi cũ) */
   const [failedPhotoIds, setFailedPhotoIds] = useState<Set<string>>(new Set());
+  /** Track images that are in viewport for lazy loading */
+  const [visibleImageIds, setVisibleImageIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     loadData();
@@ -46,24 +49,50 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
     }
   }, [onRegisterReload]);
 
+  // Intersection Observer for lazy loading images
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const recordId = entry.target.getAttribute('data-record-id');
+            if (recordId) {
+              setVisibleImageIds((prev) => new Set(prev).add(recordId));
+            }
+          }
+        });
+      },
+      { rootMargin: '50px' } // Start loading 50px before image enters viewport
+    );
+
+    // Re-observe images when records change
+    const imageElements = document.querySelectorAll('[data-record-id]');
+    imageElements.forEach((el) => observer.observe(el));
+
+    return () => {
+      imageElements.forEach((el) => observer.unobserve(el));
+    };
+  }, [attendanceRecords]);
+
   const loadData = async () => {
+    setIsLoading(true);
     setFailedPhotoIds(new Set());
-    const records = await getAllAttendance();
-    const users = await getAllUsers();
-    setAttendanceRecords(records);
-    setEmployees(users);
-    
-    // Debug: Log thông tin về ảnh
-    const recordsWithPhotos = records.filter(r => r.photoUrl);
-    console.log(`📊 Loaded ${records.length} attendance records, ${recordsWithPhotos.length} with photos`);
-    recordsWithPhotos.forEach(r => {
-      const isBase64 = isBase64DataUrl(r.photoUrl!);
-      const isValid = isValidUrl(r.photoUrl!);
-      console.log(`  Record ${r.id}: photoUrl type=${isBase64 ? 'base64' : 'URL'}, valid=${isValid}, length=${r.photoUrl?.length || 0}`);
-      if (!isBase64 && r.photoUrl) {
-        console.log(`    URL: ${r.photoUrl.substring(0, 100)}...`);
-      }
-    });
+    try {
+      // Tối ưu: Chỉ load 500 records đầu tiên để tránh lag
+      // Nếu cần tất cả, có thể load thêm khi scroll hoặc filter
+      const records = await getAllAttendance(500);
+      const users = await getAllUsers();
+      setAttendanceRecords(records);
+      setEmployees(users);
+      
+      // Debug: Log thông tin về ảnh
+      const recordsWithPhotos = records.filter(r => r.photoUrl);
+      console.log(`📊 Loaded ${records.length} attendance records, ${recordsWithPhotos.length} with photos`);
+    } catch (error) {
+      console.error('Error loading data:', error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const getFilteredData = () => {
@@ -146,8 +175,12 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
         </div>
       </div>
 
-      {/* Table */}
-      {filteredData.length === 0 ? (
+      {/* Loading State */}
+      {isLoading ? (
+        <div className="text-center py-12 bg-white rounded-2xl border border-sky-50">
+          <p className="text-slate-400 font-medium">Đang tải dữ liệu...</p>
+        </div>
+      ) : filteredData.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-2xl border border-sky-50">
           <p className="text-slate-400 font-medium">Chưa có dữ liệu chấm công</p>
         </div>
@@ -240,27 +273,36 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
                               );
                             }
 
-                            // HTTP URL: hiển thị và check error
+                            // HTTP URL: Lazy load chỉ khi image trong viewport
+                            const shouldLoad = visibleImageIds.has(record.id);
                             return (
                               <button
                                 onClick={() => setSelectedPhoto(photoUrl)}
-                                className="w-16 h-16 rounded-lg overflow-hidden border-2 border-slate-200 hover:border-blue-500 transition-colors"
+                                className="w-16 h-16 rounded-lg overflow-hidden border-2 border-slate-200 hover:border-blue-500 transition-colors bg-slate-100"
+                                data-record-id={record.id}
                               >
-                                <img
-                                  src={photoUrl}
-                                  alt="Attendance photo"
-                                  className="w-full h-full object-cover"
-                                  onError={(e) => {
-                                    console.warn(`Failed to load photo for record ${record.id}:`, photoUrl);
-                                    setFailedPhotoIds((prev) => new Set(prev).add(record.id));
-                                  }}
-                                  onLoad={() => {
-                                    // Log success để debug
-                                    if (photoUrl.includes('supabase.co')) {
-                                      console.log(`Successfully loaded photo for record ${record.id}`);
-                                    }
-                                  }}
-                                />
+                                {shouldLoad ? (
+                                  <img
+                                    src={photoUrl}
+                                    alt="Attendance photo"
+                                    className="w-full h-full object-cover"
+                                    loading="lazy"
+                                    onError={(e) => {
+                                      console.warn(`Failed to load photo for record ${record.id}:`, photoUrl);
+                                      setFailedPhotoIds((prev) => new Set(prev).add(record.id));
+                                    }}
+                                    onLoad={() => {
+                                      // Log success để debug
+                                      if (photoUrl.includes('supabase.co')) {
+                                        console.log(`Successfully loaded photo for record ${record.id}`);
+                                      }
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-[8px] text-slate-400">
+                                    Loading...
+                                  </div>
+                                )}
                               </button>
                             );
                           })()

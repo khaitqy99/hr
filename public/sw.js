@@ -1,11 +1,53 @@
 // Service Worker cho HR Connect PWA
 // File này sẽ được sử dụng thay cho service worker tự động tạo bởi VitePWA
 
-// Import workbox
-importScripts('https://storage.googleapis.com/workbox-cdn/releases/7.0.0/workbox-sw.js');
+// Cache Workbox CDN để tải nhanh hơn lần sau
+const WORKBOX_CDN = 'https://storage.googleapis.com/workbox-cdn/releases/7.0.0/workbox-sw.js';
+
+// Tối ưu: Cache Workbox CDN response để tránh delay khi reload
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open('workbox-cdn-cache').then((cache) => {
+      return fetch(WORKBOX_CDN).then((response) => {
+        if (response.ok) {
+          cache.put(WORKBOX_CDN, response.clone());
+        }
+        return response;
+      }).catch(() => {
+        // Nếu fetch fail, thử load từ cache
+        return cache.match(WORKBOX_CDN);
+      });
+    })
+  );
+});
+
+// Import workbox với fallback từ cache
+let workboxLoaded = false;
+try {
+  importScripts(WORKBOX_CDN);
+  workboxLoaded = true;
+} catch (error) {
+  console.warn('Failed to load Workbox from CDN, trying cache...', error);
+  // Fallback: Thử load từ cache nếu có
+  caches.open('workbox-cdn-cache').then((cache) => {
+    cache.match(WORKBOX_CDN).then((cachedResponse) => {
+      if (cachedResponse) {
+        cachedResponse.text().then((text) => {
+          try {
+            eval(text);
+            workboxLoaded = true;
+            console.log('Workbox loaded from cache');
+          } catch (e) {
+            console.error('Failed to load Workbox from cache', e);
+          }
+        });
+      }
+    });
+  });
+}
 
 // Kiểm tra workbox có sẵn không
-if (workbox) {
+if (typeof workbox !== 'undefined' && workbox) {
   console.log('Workbox loaded');
 
   // Skip waiting và claim clients ngay lập tức
@@ -18,17 +60,33 @@ if (workbox) {
   // Cleanup outdated caches
   workbox.precaching.cleanupOutdatedCaches();
 
-  // Cache strategy cho navigation requests
+  // Cache strategy cho navigation requests - tối ưu với timeout
   workbox.routing.registerRoute(
     ({ request }) => request.mode === 'navigate',
     new workbox.strategies.NetworkFirst({
       cacheName: 'pages',
+      networkTimeoutSeconds: 3, // Timeout sau 3 giây để tránh delay
       plugins: [
         {
           cacheWillUpdate: async ({ response }) => {
             return response && response.status === 200 ? response : null;
           },
         },
+      ],
+    })
+  );
+
+  // Cache strategy cho API requests từ Supabase - tối ưu performance
+  workbox.routing.registerRoute(
+    ({ url }) => url.hostname.includes('supabase.co'),
+    new workbox.strategies.NetworkFirst({
+      cacheName: 'supabase-api',
+      networkTimeoutSeconds: 5,
+      plugins: [
+        new workbox.expiration.ExpirationPlugin({
+          maxEntries: 50,
+          maxAgeSeconds: 60 * 5, // Cache 5 phút
+        }),
       ],
     })
   );
@@ -76,3 +134,4 @@ self.addEventListener('message', (event) => {
     self.skipWaiting();
   }
 });
+

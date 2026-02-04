@@ -2,7 +2,7 @@
 <html lang="vi">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#0c4a6e" />
     <meta name="description" content="Hệ thống quản lý nhân sự 4.0 - Check-in, lịch làm việc và quản trị HR" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -11,22 +11,34 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <title>HR Connect</title>
-    <!-- Tailwind CSS CDN - Remove in production and use local build instead -->
+    <!-- Tailwind CSS CDN - Tối ưu loading cho mobile -->
+    <!-- Preconnect để giảm latency -->
+    <link rel="preconnect" href="https://cdn.tailwindcss.com">
+    <!-- Remove in production and use local build instead -->
     <!-- To build locally: npm install -D tailwindcss postcss autoprefixer -->
     <!-- Then create tailwind.config.js and postcss.config.js -->
     <!-- For now, keeping CDN for development. Remove this line before production deploy -->
     <!-- <script src="https://cdn.tailwindcss.com"></script> -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com" defer></script>
+    <!-- Tối ưu font loading cho mobile - preconnect và display=swap -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
       body { 
         font-family: 'Plus Jakarta Sans', sans-serif; 
         -webkit-tap-highlight-color: transparent;
-        -webkit-touch-callout: none; /* Tắt menu Copy/Paste khi nhấn giữ (iOS) */
+        -webkit-touch-callout: none;
         -webkit-user-select: none;
         user-select: none;
-        overscroll-behavior-y: none; /* Prevent pull-to-refresh logic conflict */
-        overscroll-behavior-x: none; /* Prevent browser back/forward swipe */
+        overscroll-behavior-y: none;
+        overscroll-behavior-x: none;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        transform: translateZ(0);
+        backface-visibility: hidden;
+        /* iOS notch/safe area - fullscreen PWA */
+        padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
       }
       /* Vẫn cho phép chọn text trong ô nhập */
       input, textarea, [contenteditable="true"] {
@@ -34,61 +46,140 @@
         user-select: text;
         -webkit-touch-callout: default;
       }
-      /* Hide scrollbar */
+      /* Hide scrollbar và tối ưu scroll trên iOS */
       .no-scrollbar::-webkit-scrollbar { display: none; }
-      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      .no-scrollbar { 
+        -ms-overflow-style: none; 
+        scrollbar-width: none;
+        /* Tối ưu scroll performance trên iOS */
+        -webkit-overflow-scrolling: touch;
+        overflow-scrolling: touch;
+      }
       
-      /* Ocean Animations */
+      /* Ocean Animations - Tối ưu cho mobile */
       @keyframes float-slow {
         0%, 100% { transform: translateY(0); }
-        50% { transform: translateY(-8px); }
+        50% { transform: translateY(-4px); }
+      }
+      /* Giảm animation trên mobile để tiết kiệm battery và CPU */
+      @media (max-width: 768px) {
+        .animate-float-slow { 
+          animation: float-slow 6s ease-in-out infinite;
+          /* Tắt animation nếu user prefer reduced motion */
+          animation-play-state: running;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .animate-float-slow,
+        .animate-enter-right,
+        .animate-enter-left,
+        .fade-up {
+          animation: none;
+          opacity: 1;
+          transform: none;
+        }
       }
       .animate-float-slow { animation: float-slow 4s ease-in-out infinite; }
       
-      .fade-up { animation: fadeUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; transform: translateY(20px); }
-      @keyframes fadeUp { to { opacity: 1; transform: translateY(0); } }
+      .fade-up { 
+        animation: fadeUp 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards; 
+        opacity: 0; 
+        transform: translateY(10px);
+      }
+      @keyframes fadeUp { 
+        to { opacity: 1; transform: translateY(0); } 
+      }
 
-      /* Page Transitions - Super Smooth "Native" Feel */
-      /* Using Translate3d for GPU acceleration */
+      /* Page Transitions - Tối ưu cho iOS: đơn giản hóa và giảm complexity */
+      /* Sử dụng translate thay vì translate3d + scale để giảm GPU load */
       
       .animate-enter-right { 
-        animation: pageEnterRight 0.5s cubic-bezier(0.19, 1, 0.22, 1) forwards; 
+        animation: pageEnterRight 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+        /* Tắt will-change sau animation để giải phóng GPU */
+        animation-fill-mode: forwards;
       }
       .animate-enter-left { 
-        animation: pageEnterLeft 0.5s cubic-bezier(0.19, 1, 0.22, 1) forwards; 
+        animation: pageEnterLeft 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+        animation-fill-mode: forwards;
       }
 
       @keyframes pageEnterRight {
-        0% { opacity: 0; transform: translate3d(50px, 0, 0) scale(0.99); }
-        100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+        0% { opacity: 0; transform: translateX(30px); }
+        100% { opacity: 1; transform: translateX(0); }
       }
       @keyframes pageEnterLeft {
-        0% { opacity: 0; transform: translate3d(-50px, 0, 0) scale(0.99); }
-        100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+        0% { opacity: 0; transform: translateX(-30px); }
+        100% { opacity: 1; transform: translateX(0); }
       }
 
-      /* Bottom bar - pill trượt mượt (GPU, easing mượt) */
+      /* Bottom bar - Tối ưu transitions cho iOS */
       .nav-sliding-pill {
-        will-change: transform, width;
-        transition: transform 0.55s cubic-bezier(0.33, 1, 0.68, 1),
-          width 0.55s cubic-bezier(0.33, 1, 0.68, 1);
+        /* Chỉ dùng will-change khi đang animate, không dùng liên tục */
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+          width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        /* Force GPU acceleration chỉ khi cần */
+        transform: translateZ(0);
       }
       .nav-item {
-        transition: flex-grow 0.5s cubic-bezier(0.33, 1, 0.68, 1),
-          padding 0.5s cubic-bezier(0.33, 1, 0.68, 1);
+        transition: flex-grow 0.25s ease-out,
+          padding 0.25s ease-out;
       }
       .nav-icon {
-        transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
-          color 0.3s ease-out;
+        transition: transform 0.2s ease-out,
+          color 0.2s ease-out;
       }
       .nav-label {
-        transition: max-width 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
-          margin 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
-          opacity 0.35s ease-out,
-          transform 0.35s ease-out;
+        transition: max-width 0.25s ease-out,
+          margin 0.25s ease-out,
+          opacity 0.2s ease-out;
       }
       .nav-bar-wrap {
-        transition: box-shadow 0.3s ease;
+        transition: box-shadow 0.2s ease;
+      }
+
+      /* Giảm backdrop-blur trên mobile - tốn CPU/battery trên iOS/Android */
+      @media (max-width: 768px) {
+        .backdrop-blur-md { backdrop-filter: blur(8px); }
+        .backdrop-blur-xl { backdrop-filter: blur(12px); }
+        .backdrop-blur-2xl { backdrop-filter: blur(16px); }
+      }
+
+      /* iOS-specific optimizations */
+      @supports (-webkit-touch-callout: none) {
+        /* Tối ưu scrolling trên iOS */
+        * {
+          -webkit-overflow-scrolling: touch;
+        }
+        
+        /* Giảm repaints trên iOS */
+        .animate-enter-right,
+        .animate-enter-left {
+          backface-visibility: hidden;
+          perspective: 1000px;
+        }
+        
+        /* Tối ưu images trên iOS */
+        img {
+          image-rendering: -webkit-optimize-contrast;
+          -webkit-backface-visibility: hidden;
+          /* Force GPU acceleration cho images */
+          transform: translateZ(0);
+          /* Giảm memory usage */
+          max-width: 100%;
+          height: auto;
+        }
+        
+        /* Tối ưu video trên iOS */
+        video {
+          -webkit-backface-visibility: hidden;
+          transform: translateZ(0);
+        }
+        
+        /* Tối ưu canvas trên iOS */
+        canvas {
+          -webkit-backface-visibility: hidden;
+          transform: translateZ(0);
+        }
       }
     </style>
   <script type="importmap">

@@ -62,7 +62,7 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
     return Object.keys(errors).length === 0;
   };
 
-  const handleCreateUser = (e: React.FormEvent) => {
+  const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setUserFormError('');
     setFieldErrors({});
@@ -72,7 +72,7 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
     }
     
     try {
-      createUser({
+      await createUser({
         name: userForm.name.trim(),
         email: userForm.email.trim(),
         role: UserRole.EMPLOYEE,

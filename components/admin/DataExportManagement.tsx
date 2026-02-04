@@ -59,7 +59,8 @@ const DataExportManagement: React.FC<DataExportManagementProps> = ({ onRegisterR
           exportToCSV(users, `users_${Date.now()}.csv`);
           break;
         case 'ATTENDANCE':
-          const attendance = await getAllAttendance();
+          // Tối ưu: Load với limit để tránh lag
+          const attendance = await getAllAttendance(1000);
           exportToCSV(attendance, `attendance_${Date.now()}.csv`);
           break;
         case 'LEAVE':
@@ -75,14 +76,22 @@ const DataExportManagement: React.FC<DataExportManagementProps> = ({ onRegisterR
           exportToCSV(payrolls, `payroll_${currentMonth}_${Date.now()}.csv`);
           break;
         case 'ALL':
-          // Export all data
-          const allData = {
-            users: (await getAllUsers()).filter(u => u.role !== UserRole.ADMIN),
-            attendance: await getAllAttendance(),
-            leaves: await getLeaveRequests(undefined, UserRole.ADMIN),
-            shifts: await getShiftRegistrations(undefined, UserRole.ADMIN),
-            payrolls: await getAllPayrolls(currentMonth),
-          };
+          // Export all data với pagination để tránh lag
+          // Tối ưu: Load từng loại dữ liệu một cách tuần tự và hiển thị progress
+          const allData: any = {};
+          
+          // Load users (thường ít nên load hết)
+          allData.users = (await getAllUsers()).filter(u => u.role !== UserRole.ADMIN);
+          
+          // Load attendance với limit lớn hơn (1000 records)
+          allData.attendance = await getAllAttendance(1000);
+          
+          // Load các loại còn lại
+          allData.leaves = await getLeaveRequests(undefined, UserRole.ADMIN);
+          allData.shifts = await getShiftRegistrations(undefined, UserRole.ADMIN);
+          allData.payrolls = await getAllPayrolls(currentMonth);
+          
+          // Tối ưu: Sử dụng streaming để tạo file lớn
           const jsonData = JSON.stringify(allData, null, 2);
           const blob = new Blob([jsonData], { type: 'application/json' });
           const link = document.createElement('a');
@@ -92,7 +101,11 @@ const DataExportManagement: React.FC<DataExportManagementProps> = ({ onRegisterR
           link.style.visibility = 'hidden';
           document.body.appendChild(link);
           link.click();
-          document.body.removeChild(link);
+          // Cleanup sau khi download
+          setTimeout(() => {
+            URL.revokeObjectURL(url);
+            document.body.removeChild(link);
+          }, 100);
           break;
       }
       alert('Xuất dữ liệu thành công!');

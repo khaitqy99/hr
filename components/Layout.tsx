@@ -60,15 +60,26 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
     setView(newView);
   };
 
+  // Tối ưu touch events cho iOS - sử dụng passive listeners khi có thể
   const onTouchStart = (e: React.TouchEvent) => {
-    setTouchEnd(null);
-    const t = e.targetTouches[0];
-    setTouchStart({ x: t.clientX, y: t.clientY });
+    // Chỉ xử lý nếu không phải scroll
+    if (e.target instanceof HTMLElement && e.target.closest('.no-scrollbar')) {
+      setTouchEnd(null);
+      const t = e.targetTouches[0];
+      if (t) {
+        setTouchStart({ x: t.clientX, y: t.clientY });
+      }
+    }
   };
 
   const onTouchMove = (e: React.TouchEvent) => {
-    const t = e.targetTouches[0];
-    setTouchEnd({ x: t.clientX, y: t.clientY });
+    // Chỉ update nếu đã có touchStart
+    if (touchStart) {
+      const t = e.targetTouches[0];
+      if (t) {
+        setTouchEnd({ x: t.clientX, y: t.clientY });
+      }
+    }
   };
 
   const onTouchEnd = () => {
@@ -106,23 +117,26 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [indicatorPos, setIndicatorPos] = useState({ left: 0, top: 0, width: 48, height: 48 });
 
+  // Tối ưu updateIndicatorPos với requestAnimationFrame để tránh lag trên iOS
   const updateIndicatorPos = () => {
-    const idx = views.indexOf(currentView);
-    const btn = itemRefs.current[idx];
-    const container = navContainerRef.current;
-    if (btn && container) {
-      const cr = container.getBoundingClientRect();
-      const br = btn.getBoundingClientRect();
-      // Trừ border của container vì pill được đặt relative to padding edge
-      const borderLeft = container.clientLeft || 0;
-      const borderTop = container.clientTop || 0;
-      setIndicatorPos({
-        left: br.left - cr.left - borderLeft,
-        top: br.top - cr.top - borderTop,
-        width: br.width,
-        height: br.height,
-      });
-    }
+    requestAnimationFrame(() => {
+      const idx = views.indexOf(currentView);
+      const btn = itemRefs.current[idx];
+      const container = navContainerRef.current;
+      if (btn && container) {
+        const cr = container.getBoundingClientRect();
+        const br = btn.getBoundingClientRect();
+        // Trừ border của container vì pill được đặt relative to padding edge
+        const borderLeft = container.clientLeft || 0;
+        const borderTop = container.clientTop || 0;
+        setIndicatorPos({
+          left: br.left - cr.left - borderLeft,
+          top: br.top - cr.top - borderTop,
+          width: br.width,
+          height: br.height,
+        });
+      }
+    });
   };
 
   useEffect(() => {
@@ -136,9 +150,20 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
     };
   }, [currentView, views.length]);
 
+  // Debounce resize để tránh lag trên iOS
   useEffect(() => {
-    window.addEventListener('resize', updateIndicatorPos);
-    return () => window.removeEventListener('resize', updateIndicatorPos);
+    let resizeTimeout: NodeJS.Timeout;
+    const handleResize = () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        updateIndicatorPos();
+      }, 150); // Debounce 150ms
+    };
+    window.addEventListener('resize', handleResize, { passive: true });
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      clearTimeout(resizeTimeout);
+    };
   }, [currentView, views.length]);
 
   // Tắt menu nhấn giữ & chọn text (giống app mobile), trừ input/textarea
@@ -181,7 +206,7 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
     );
   }
 
-  const NavItem = ({ view, icon, label, index }: { view: string; icon: React.ReactNode; label: string; index: number }) => {
+  const NavItem = React.memo(({ view, icon, label, index }: { view: string; icon: React.ReactNode; label: string; index: number }) => {
     const isActive = currentView === view;
     return (
       <button
@@ -198,7 +223,6 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
         <div className={`nav-icon flex items-center justify-center shrink-0 w-6 h-6 leading-none [&_svg]:block [&_svg]:shrink-0 ${isActive ? 'scale-100 text-white translate-y-0' : 'scale-90 text-slate-400'}`}>
           {icon}
         </div>
-        {/* Chỉ hiện chữ từ sm trở lên; trên điện thoại chỉ icon, tránh bị cắt */}
         <span
           className={`nav-label whitespace-nowrap overflow-hidden font-bold text-xs text-white ${
             isActive
@@ -210,7 +234,7 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
         </span>
       </button>
     );
-  };
+  });
 
   // Admin có layout riêng (desktop với sidebar), không cần layout mobile
   if (user.role === UserRole.ADMIN && (currentView === 'admin' || currentView === 'salary-management')) {
@@ -298,20 +322,29 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
+        style={{
+          // Tối ưu scroll performance trên iOS
+          WebkitOverflowScrolling: 'touch',
+          // Force GPU acceleration cho scroll
+          transform: 'translateZ(0)',
+        }}
       >
         {/* Using key={currentView} forces React to destroy and recreate this div, triggering the CSS animation */}
-        {/* will-change-transform hints the browser to optimize this layer for movement */}
-        <div key={currentView} className={`w-full min-h-full will-change-transform ${animClass}`}>
+        {/* Tối ưu: chỉ dùng will-change khi đang animate, không dùng liên tục */}
+        <div key={currentView} className={`w-full min-h-full ${animClass}`} style={{
+          // Chỉ enable will-change khi đang có animation
+          willChange: animClass !== 'fade-up' ? 'transform, opacity' : 'auto',
+        }}>
             {children}
         </div>
       </main>
 
-      {/* Bottom Navigation - Pill trượt khi chuyển tab */}
-      <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[92%] max-w-[400px] z-40">
+      {/* Bottom Navigation - Pill trượt khi chuyển tab, safe-area cho iOS notch */}
+      <nav className="fixed left-1/2 -translate-x-1/2 w-[92%] max-w-[400px] z-40" style={{ bottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}>
         <div ref={navContainerRef} className="nav-bar-wrap relative bg-white/90 backdrop-blur-2xl rounded-full shadow-[0_20px_40px_-12px_rgba(0,0,0,0.12)] border-2 border-sky-200 p-1.5 flex justify-between items-center gap-0.5">
           {/* Pill trượt theo tab active — blue/cyan đồng bộ với dự án */}
           <div
-            className="nav-sliding-pill absolute left-0 top-0 rounded-full bg-gradient-to-r from-blue-600 to-cyan-500 shadow-lg shadow-blue-500/30 pointer-events-none will-change-transform"
+            className="nav-sliding-pill absolute left-0 top-0 rounded-full bg-gradient-to-r from-blue-600 to-cyan-500 shadow-lg shadow-blue-500/30 pointer-events-none"
             style={{
               transform: `translate(${indicatorPos.left}px, ${indicatorPos.top}px)`,
               width: indicatorPos.width,

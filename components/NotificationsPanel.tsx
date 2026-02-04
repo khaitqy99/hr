@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Notification, User } from '../types';
+import type { Notification, User } from '../types';
 import { getNotifications, markNotificationAsRead } from '../services/db';
 
 interface NotificationsPanelProps {

@@ -202,15 +202,41 @@ export const createUser = async (data: Omit<User, 'id'> & { id?: string }): Prom
 
       // Xử lý lỗi 409 Conflict (user đã tồn tại)
       if (error) {
-        if (error.code === '23505' || error.message.includes('duplicate') || error.message.includes('unique')) {
+        // Log error details for debugging
+        console.error('Error creating user:', {
+          code: error.code,
+          message: error.message,
+          status: error.status,
+          details: error.details,
+          hint: error.hint
+        });
+
+        // Check for various conflict error codes and messages
+        const isConflictError = 
+          error.code === '23505' || // PostgreSQL unique constraint violation
+          error.code === 'PGRST409' || // PostgREST 409 Conflict
+          error.status === 409 || // HTTP 409 Conflict
+          error.message?.toLowerCase().includes('duplicate') ||
+          error.message?.toLowerCase().includes('unique') ||
+          error.message?.toLowerCase().includes('already exists') ||
+          error.message?.toLowerCase().includes('conflict') ||
+          error.details?.toLowerCase().includes('duplicate') ||
+          error.details?.toLowerCase().includes('unique') ||
+          error.hint?.toLowerCase().includes('duplicate') ||
+          error.hint?.toLowerCase().includes('unique');
+        
+        if (isConflictError) {
           // User đã tồn tại, lấy user đó
+          console.warn('Conflict detected, attempting to fetch existing user:', data.email);
           const existingUser = await getCurrentUser(data.email);
           if (existingUser) {
             console.warn('User already exists (409), returning existing user');
             return existingUser;
           }
+          // Nếu không tìm thấy user (có thể do RLS policy), throw error với message rõ ràng
+          throw new Error('Email đã tồn tại trong hệ thống');
         }
-        throw new Error(`Lỗi tạo user: ${error.message}`);
+        throw new Error(`Lỗi tạo user: ${error.message || error.code || error.details || 'Unknown error'}`);
       }
       if (!newUser) throw new Error('Không thể tạo user');
 
@@ -373,13 +399,20 @@ export const getAttendance = async (userId: string): Promise<AttendanceRecord[]>
   return all.filter((r: AttendanceRecord) => r.userId === userId).sort((a: AttendanceRecord, b: AttendanceRecord) => b.timestamp - a.timestamp);
 };
 
-export const getAllAttendance = async (): Promise<AttendanceRecord[]> => {
+export const getAllAttendance = async (limit?: number): Promise<AttendanceRecord[]> => {
   if (isSupabaseAvailable()) {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('attendance_records')
         .select('*')
         .order('timestamp', { ascending: false });
+      
+      // Thêm limit nếu được chỉ định để tối ưu performance
+      if (limit && limit > 0) {
+        query = query.limit(limit);
+      }
+
+      const { data, error } = await query;
 
       if (error || !data) return [];
 
@@ -402,7 +435,8 @@ export const getAllAttendance = async (): Promise<AttendanceRecord[]> => {
 
   // Fallback to localStorage
   const all = JSON.parse(localStorage.getItem(ATTENDANCE_KEY) || '[]');
-  return all.sort((a: AttendanceRecord, b: AttendanceRecord) => b.timestamp - a.timestamp);
+  const sorted = all.sort((a: AttendanceRecord, b: AttendanceRecord) => b.timestamp - a.timestamp);
+  return limit && limit > 0 ? sorted.slice(0, limit) : sorted;
 };
 
 export const deleteAttendance = async (id: string): Promise<void> => {
@@ -485,6 +519,44 @@ export const calculateAttendanceStats = async (userId: string, month: string): P
     actualWorkDays,
     otHours: Math.round(totalOtHours * 10) / 10 // Round to 1 decimal place
   };
+};
+
+/**
+ * Trả về các ngày trong tháng có chấm công không đủ (chỉ có check-in hoặc chỉ có check-out).
+ * HR có thể dùng để bù công tay khi tính lương hoặc nhắc nhân viên.
+ */
+export const getIncompleteAttendanceDays = async (
+  userId: string,
+  month: string
+): Promise<{ date: string; hasCheckIn: boolean; hasCheckOut: boolean }[]> => {
+  const records = await getAttendance(userId);
+  const [monthStr, yearStr] = month.split('-');
+  const targetMonth = parseInt(monthStr);
+  const targetYear = parseInt(yearStr);
+
+  const monthRecords = records.filter(record => {
+    const d = new Date(record.timestamp);
+    return d.getMonth() + 1 === targetMonth && d.getFullYear() === targetYear;
+  });
+
+  const byDate: { [key: string]: { checkIn: boolean; checkOut: boolean } } = {};
+  monthRecords.forEach(record => {
+    const date = new Date(record.timestamp);
+    const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    if (!byDate[dateKey]) byDate[dateKey] = { checkIn: false, checkOut: false };
+    if (record.type === AttendanceType.CHECK_IN) byDate[dateKey].checkIn = true;
+    if (record.type === AttendanceType.CHECK_OUT) byDate[dateKey].checkOut = true;
+  });
+
+  const incomplete: { date: string; hasCheckIn: boolean; hasCheckOut: boolean }[] = [];
+  Object.entries(byDate).forEach(([dateKey, v]) => {
+    const hasBoth = v.checkIn && v.checkOut;
+    if (!hasBoth && (v.checkIn || v.checkOut)) {
+      incomplete.push({ date: dateKey, hasCheckIn: v.checkIn, hasCheckOut: v.checkOut });
+    }
+  });
+  incomplete.sort((a, b) => a.date.localeCompare(b.date));
+  return incomplete;
 };
 
 export const saveAttendance = async (record: AttendanceRecord): Promise<void> => {
@@ -900,10 +972,10 @@ export const calculatePayroll = async (
   finalWorkDays = finalWorkDays ?? standardWorkDays;
   finalOtHours = finalOtHours ?? 0;
   
-  // Công thức: lương cơ bản / 27 * số ngày công thực tế
+  // Lương theo ngày công: LCB/27 * số ngày công thực tế
   const workDaySalary = (baseSalary / 27) * finalWorkDays;
-  const dailySalary = baseSalary / 27; // Dùng để tính OT
-  const otPay = (dailySalary / 8) * 1.5 * finalOtHours;
+  // Lương OT: (LCB/27/8) * 1.5 * số giờ làm thêm
+  const otPay = (baseSalary / 27 / 8) * 1.5 * finalOtHours;
   // Công thức đúng: basicSalary (theo ngày công) + overtimePay + allowance + bonus - deductions
   const totalIncome = workDaySalary + otPay + allowance + bonus;
   const deductions = totalIncome * 0.105; // 10.5% BHXH, Thuế, etc.
@@ -982,7 +1054,7 @@ export const createNotification = async (notification: Omit<Notification, 'id'>)
       if (error) throw new Error(`Lỗi tạo notification: ${error.message}`);
       if (!data) throw new Error('Không thể tạo notification');
 
-      return {
+      const createdNotification: Notification = {
         id: data.id,
         userId: data.user_id,
         title: data.title,
@@ -991,6 +1063,8 @@ export const createNotification = async (notification: Omit<Notification, 'id'>)
         timestamp: data.timestamp,
         type: data.type as 'info' | 'warning' | 'success' | 'error',
       };
+
+      return createdNotification;
     } catch (error) {
       console.error('Error creating notification in Supabase:', error);
       throw error;
@@ -1382,13 +1456,14 @@ export const getSystemConfigs = async (): Promise<SystemConfig[]> => {
 
       if (error || !data) return [];
 
+      // DB lưu updated_at Unix seconds (theo migration); chuẩn hóa ra ms cho app
       return data.map(config => ({
         id: config.id,
         key: config.key,
         value: config.value,
         description: config.description || undefined,
         category: config.category as 'ATTENDANCE' | 'PAYROLL' | 'GENERAL' | 'NOTIFICATION',
-        updatedAt: config.updated_at,
+        updatedAt: config.updated_at < 1e12 ? config.updated_at * 1000 : config.updated_at,
         updatedBy: config.updated_by || undefined,
       }));
     } catch (error) {
@@ -1413,7 +1488,7 @@ export const updateSystemConfig = async (id: string, value: string, updatedBy?: 
         .from('system_configs')
         .update({
           value,
-          updated_at: Date.now(),
+          updated_at: Math.floor(Date.now() / 1000),
           updated_by: updatedBy || null,
         })
         .eq('id', id)
@@ -1423,13 +1498,13 @@ export const updateSystemConfig = async (id: string, value: string, updatedBy?: 
       if (error) throw new Error(`Lỗi cập nhật config: ${error.message}`);
       if (!updatedConfig) throw new Error('Không tìm thấy config');
 
-      return {
+        return {
         id: updatedConfig.id,
         key: updatedConfig.key,
         value: updatedConfig.value,
         description: updatedConfig.description || undefined,
         category: updatedConfig.category as 'ATTENDANCE' | 'PAYROLL' | 'GENERAL' | 'NOTIFICATION',
-        updatedAt: updatedConfig.updated_at,
+        updatedAt: updatedConfig.updated_at < 1e12 ? updatedConfig.updated_at * 1000 : updatedConfig.updated_at,
         updatedBy: updatedConfig.updated_by || undefined,
       };
     } catch (error) {
@@ -1457,7 +1532,7 @@ export const createSystemConfig = async (data: Omit<SystemConfig, 'id' | 'update
           value: data.value,
           description: data.description || null,
           category: data.category,
-          updated_at: Date.now(),
+          updated_at: Math.floor(Date.now() / 1000),
           updated_by: data.updatedBy || null,
         })
         .select()
@@ -1472,7 +1547,7 @@ export const createSystemConfig = async (data: Omit<SystemConfig, 'id' | 'update
         value: newConfig.value,
         description: newConfig.description || undefined,
         category: newConfig.category as 'ATTENDANCE' | 'PAYROLL' | 'GENERAL' | 'NOTIFICATION',
-        updatedAt: newConfig.updated_at,
+        updatedAt: newConfig.updated_at < 1e12 ? newConfig.updated_at * 1000 : newConfig.updated_at,
         updatedBy: newConfig.updated_by || undefined,
       };
     } catch (error) {
@@ -1662,6 +1737,109 @@ export const cleanupExpiredOTPs = async (): Promise<void> => {
     const validOTPs = otpCodes.filter(otp => otp.expiresAt > Date.now());
     localStorage.setItem(OTP_CODES_KEY, JSON.stringify(validOTPs));
   }
+};
+
+// ============ OFFLINE SYNC ============
+
+/**
+ * Đồng bộ các attendance records chưa được sync từ localStorage lên Supabase
+ * Chỉ sync khi Supabase available và đang online
+ */
+export const syncOfflineAttendance = async (): Promise<{ synced: number; errors: number }> => {
+  if (!isSupabaseAvailable() || !navigator.onLine) {
+    return { synced: 0, errors: 0 };
+  }
+
+  try {
+    // Lấy tất cả records từ localStorage
+    const localRecords: AttendanceRecord[] = JSON.parse(localStorage.getItem(ATTENDANCE_KEY) || '[]');
+    
+    // Lọc các records chưa được sync
+    const unsyncedRecords = localRecords.filter(record => !record.synced);
+    
+    if (unsyncedRecords.length === 0) {
+      return { synced: 0, errors: 0 };
+    }
+
+    let syncedCount = 0;
+    let errorCount = 0;
+
+    // Sync từng record lên Supabase
+    for (const record of unsyncedRecords) {
+      try {
+        // Kiểm tra xem record đã tồn tại trên Supabase chưa (dựa vào timestamp và user_id)
+        const { data: existing } = await supabase
+          .from('attendance_records')
+          .select('id')
+          .eq('user_id', record.userId)
+          .eq('timestamp', record.timestamp)
+          .maybeSingle();
+
+        if (existing) {
+          // Record đã tồn tại, đánh dấu là synced trong localStorage
+          const updatedRecords = localRecords.map(r => 
+            r.id === record.id ? { ...r, synced: true } : r
+          );
+          localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(updatedRecords));
+          syncedCount++;
+          continue;
+        }
+
+        // Insert record mới vào Supabase
+        const { error } = await supabase
+          .from('attendance_records')
+          .insert({
+            user_id: record.userId,
+            timestamp: record.timestamp,
+            type: record.type,
+            location: record.location,
+            status: record.status,
+            synced: true,
+            notes: record.notes || null,
+            photo_url: record.photoUrl || null,
+          });
+
+        if (error) {
+          console.error('Error syncing attendance record:', error);
+          errorCount++;
+        } else {
+          // Đánh dấu record đã được sync trong localStorage
+          const updatedRecords = localRecords.map(r => 
+            r.id === record.id ? { ...r, synced: true } : r
+          );
+          localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(updatedRecords));
+          syncedCount++;
+        }
+      } catch (error) {
+        console.error('Error syncing individual attendance record:', error);
+        errorCount++;
+      }
+    }
+
+    return { synced: syncedCount, errors: errorCount };
+  } catch (error) {
+    console.error('Error syncing offline attendance:', error);
+    return { synced: 0, errors: 0 };
+  }
+};
+
+/**
+ * Đồng bộ tất cả dữ liệu offline (attendance, leave requests, shifts, etc.)
+ */
+export const syncAllOfflineData = async (): Promise<{
+  attendance: { synced: number; errors: number };
+  totalSynced: number;
+  totalErrors: number;
+}> => {
+  const attendance = await syncOfflineAttendance();
+  
+  // Có thể thêm sync cho các loại dữ liệu khác ở đây nếu cần
+  
+  return {
+    attendance,
+    totalSynced: attendance.synced,
+    totalErrors: attendance.errors,
+  };
 };
 
 // Initialize database on module load

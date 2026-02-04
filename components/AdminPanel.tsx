@@ -15,15 +15,47 @@ import NotificationsManagement from './admin/NotificationsManagement';
 
 interface AdminPanelProps {
   user: User;
-  setView: (view: string) => void;
+  setView: (view: string, options?: { employeeId?: string }) => void;
   setSelectedEmployeeId: (id: string) => void;
   onLogout?: () => void;
+  /** Tab từ URL (path segment), ví dụ 'users', 'attendance' */
+  initialTab?: string;
+  /** Gọi khi user đổi tab để App cập nhật URL (path segment, ví dụ 'users', 'attendance') */
+  onTabChange?: (pathSegment: string) => void;
 }
 
-type Tab = 'USERS' | 'ATTENDANCE' | 'LEAVE' | 'SHIFT' | 'PAYROLL' | 'REPORTS' | 'DEPARTMENTS' | 'HOLIDAYS' | 'CONFIG' | 'EXPORT' | 'NOTIFICATIONS' | 'SETTINGS';
+export type Tab = 'USERS' | 'ATTENDANCE' | 'LEAVE' | 'SHIFT' | 'PAYROLL' | 'REPORTS' | 'DEPARTMENTS' | 'HOLIDAYS' | 'CONFIG' | 'EXPORT' | 'NOTIFICATIONS' | 'SETTINGS';
 
-const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmployeeId, onLogout }) => {
-  const [activeTab, setActiveTab] = useState<Tab>('USERS');
+/** Map tab id to URL path segment (e.g. /admin/users) */
+export const TAB_TO_PATH: Record<Tab, string> = {
+  USERS: 'users',
+  ATTENDANCE: 'attendance',
+  LEAVE: 'leave',
+  SHIFT: 'shift',
+  PAYROLL: 'payroll',
+  REPORTS: 'reports',
+  DEPARTMENTS: 'departments',
+  HOLIDAYS: 'holidays',
+  CONFIG: 'config',
+  EXPORT: 'export',
+  NOTIFICATIONS: 'notifications',
+  SETTINGS: 'settings',
+};
+
+const PATH_TO_TAB: Record<string, Tab> = Object.fromEntries(
+  (Object.entries(TAB_TO_PATH) as [Tab, string][]).map(([tab, path]) => [path, tab])
+);
+
+const DEFAULT_TAB: Tab = 'USERS';
+
+const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmployeeId, onLogout, initialTab, onTabChange }) => {
+  const tabFromUrl = (initialTab && PATH_TO_TAB[initialTab]) ? PATH_TO_TAB[initialTab] : DEFAULT_TAB;
+  const [activeTab, setActiveTab] = useState<Tab>(tabFromUrl);
+
+  // Đồng bộ tab khi URL thay đổi (back/forward)
+  React.useEffect(() => {
+    setActiveTab(tabFromUrl);
+  }, [initialTab, tabFromUrl]);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const profileMenuRef = React.useRef<HTMLDivElement>(null);
   const reloadHandlerRef = React.useRef<(() => void) | null>(null);
@@ -41,8 +73,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
   }, []);
 
   const handleEditUser = (emp: User) => {
-    setSelectedEmployeeId(emp.id);
-    setView('employee-profile');
+    setView('employee-profile', { employeeId: emp.id });
   };
 
   const tabs: Array<{ id: Tab; label: string; icon: string; category: 'main' | 'config' }> = [
@@ -126,7 +157,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
             {tabs.filter(t => t.category === 'main').map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  onTabChange?.(TAB_TO_PATH[tab.id]);
+                }}
                 className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-medium transition-all mb-1 ${
                   activeTab === tab.id
                     ? 'bg-blue-600 text-white shadow-md'
@@ -145,7 +179,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
             {tabs.filter(t => t.category === 'config').map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  onTabChange?.(TAB_TO_PATH[tab.id]);
+                }}
                 className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-medium transition-all mb-1 ${
                   activeTab === tab.id
                     ? 'bg-blue-600 text-white shadow-md'
@@ -290,7 +327,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
-          <div className="max-w-7xl mx-auto p-6">
+          <div className="w-full p-6">
             {/* Key prop forces React to remount component when activeTab changes, ensuring data reload */}
             <div key={activeTab}>
               {renderContent()}
