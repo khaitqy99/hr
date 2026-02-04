@@ -1,5 +1,5 @@
--- Migration: Initial HR Connect Database Schema
--- Tạo các bảng cơ bản cho hệ thống HR Connect
+-- Migration: Initial Y99 HR Database Schema
+-- Tạo các bảng cơ bản cho hệ thống Y99 HR
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";

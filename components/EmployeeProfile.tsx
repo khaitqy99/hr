@@ -109,7 +109,10 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
       {/* Sidebar */}
       <div className="w-64 bg-white border-r border-slate-200 flex flex-col">
         <div className="px-6 h-[73px] border-b border-slate-200 flex flex-col justify-center">
-          <h1 className="text-lg font-bold text-slate-800 leading-tight">HR Connect</h1>
+          <div className="flex items-center gap-2">
+            <img src="/logo.png" alt="Y99 HR Logo" className="w-6 h-6 object-contain" />
+            <h1 className="text-lg font-bold text-slate-800 leading-tight">Y99 HR</h1>
+          </div>
           <p className="text-xs text-slate-500 mt-0.5 leading-tight">Quản trị hệ thống</p>
         </div>
         <nav className="flex-1 p-4 space-y-1">

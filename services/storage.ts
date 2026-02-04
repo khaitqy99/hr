@@ -41,7 +41,7 @@ export const uploadAttendancePhoto = async (
 
   if (!isSupabaseConfigured()) {
     console.warn('⚠️ Supabase chưa được cấu hình, sử dụng base64 fallback');
-    return typeof photo === 'string' ? photo : blobToDataUrl(photo);
+    return typeof photo === 'string' ? photo : await blobToDataUrl(photo);
   }
 
   try {
@@ -54,7 +54,6 @@ export const uploadAttendancePhoto = async (
     const file = new File([blob], filename.split('/').pop() || 'photo.jpg', { type: 'image/jpeg' });
 
     // Upload ảnh chuẩn multipart (File có name + type đúng)
-    console.log(`📤 Uploading photo: ${filename}`);
     const { data, error } = await supabase.storage
       .from(ATTENDANCE_PHOTOS_BUCKET)
       .upload(filename, file, {
@@ -71,10 +70,8 @@ export const uploadAttendancePhoto = async (
         error: error.error,
       });
       console.warn('⚠️ Falling back to base64 data URL');
-      return typeof photo === 'string' ? photo : blobToDataUrl(photo);
+      return typeof photo === 'string' ? photo : await blobToDataUrl(photo);
     }
-
-    console.log('✅ Photo uploaded successfully:', data?.path);
 
     // Lấy public URL
     const { data: urlData } = supabase.storage
@@ -83,14 +80,13 @@ export const uploadAttendancePhoto = async (
 
     if (!urlData?.publicUrl) {
       console.error('❌ Error getting public URL');
-      return typeof photo === 'string' ? photo : blobToDataUrl(photo);
+      return typeof photo === 'string' ? photo : await blobToDataUrl(photo);
     }
 
-    console.log('✅ Public URL generated:', urlData.publicUrl);
     return urlData.publicUrl;
   } catch (error) {
     console.error('Error in uploadAttendancePhoto:', error);
-    return typeof photo === 'string' ? photo : blobToDataUrl(photo);
+    return typeof photo === 'string' ? photo : await blobToDataUrl(photo);
   }
 };
 
@@ -120,46 +116,5 @@ export const deleteAttendancePhoto = async (photoUrl: string): Promise<void> => 
     }
   } catch (error) {
     console.error('Error in deleteAttendancePhoto:', error);
-  }
-};
-
-/**
- * Kiểm tra và tạo bucket nếu chưa tồn tại (chạy một lần)
- * Lưu ý: Function này cần quyền admin, nên chỉ chạy từ server-side hoặc migration
- */
-export const ensureBucketExists = async (): Promise<boolean> => {
-  if (!isSupabaseConfigured()) return false;
-
-  try {
-    // Kiểm tra bucket có tồn tại không
-    const { data: buckets, error: listError } = await supabase.storage.listBuckets();
-    
-    if (listError) {
-      console.error('Error listing buckets:', listError);
-      return false;
-    }
-
-    const bucketExists = buckets?.some(b => b.name === ATTENDANCE_PHOTOS_BUCKET);
-    
-    if (bucketExists) {
-      return true;
-    }
-
-    // Tạo bucket mới
-    const { error: createError } = await supabase.storage.createBucket(ATTENDANCE_PHOTOS_BUCKET, {
-      public: true, // Cho phép public access
-      fileSizeLimit: 5242880, // 5MB max
-      allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
-    });
-
-    if (createError) {
-      console.error('Error creating bucket:', createError);
-      return false;
-    }
-
-    return true;
-  } catch (error) {
-    console.error('Error in ensureBucketExists:', error);
-    return false;
   }
 };

@@ -91,15 +91,15 @@ serve(async (req) => {
       );
     }
 
-    // Create email HTML template (tối ưu - inline styles để giảm kích thước)
-    const emailHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mã OTP đăng nhập</title></head><body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;max-width:600px;margin:0 auto;padding:20px"><div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:30px;text-align:center;border-radius:10px 10px 0 0"><h1 style="color:#fff;margin:0">HR Connect</h1><p style="color:rgba(255,255,255,0.9);margin:5px 0 0">Hệ thống quản lý nhân sự 4.0</p></div><div style="background:#f9f9f9;padding:30px;border-radius:0 0 10px 10px"><h2 style="color:#333;margin-top:0">Mã OTP đăng nhập</h2>${userName ? `<p>Xin chào <strong>${userName}</strong>,</p>` : '<p>Xin chào,</p>'}<p>Bạn đã yêu cầu mã OTP để đăng nhập vào hệ thống HR Connect.</p><div style="background:#fff;border:2px dashed #667eea;border-radius:10px;padding:20px;text-align:center;margin:30px 0"><p style="margin:0 0 10px;color:#666;font-size:14px">Mã OTP của bạn:</p><div style="font-size:36px;font-weight:bold;letter-spacing:8px;color:#667eea;font-family:'Courier New',monospace">${otpCode}</div></div><p style="color:#666;font-size:14px"><strong>Lưu ý:</strong></p><ul style="color:#666;font-size:14px;padding-left:20px"><li>Mã OTP có hiệu lực trong <strong>5 phút</strong></li><li>Mỗi mã OTP chỉ sử dụng được một lần</li><li>Không chia sẻ mã OTP với bất kỳ ai</li></ul><p style="color:#999;font-size:12px;margin-top:30px;border-top:1px solid #eee;padding-top:20px">Nếu bạn không yêu cầu mã OTP này, vui lòng bỏ qua email này.<br>Email này được gửi tự động từ hệ thống HR Connect.</p></div></body></html>`;
+    // Create simple text email
+    const emailText = `${userName ? `Xin chào ${userName},\n\n` : 'Xin chào,\n\n'}Bạn đã yêu cầu mã OTP để đăng nhập vào hệ thống Y99 HR.\n\nMã OTP của bạn: ${otpCode}\n\nLưu ý:\n- Mã OTP có hiệu lực trong 5 phút\n- Mỗi mã OTP chỉ sử dụng được một lần\n- Không chia sẻ mã OTP với bất kỳ ai\n\nNếu bạn không yêu cầu mã OTP này, vui lòng bỏ qua email này.\nEmail này được gửi tự động từ hệ thống Y99 HR.`;
 
-    // Send email via Resend API (tối ưu - không đợi response body nếu không cần)
+    // Send email via Resend API
     const emailPayload = {
-      from: 'HR Connect <noreply@hr.y99.info>',
+      from: 'Y99 HR <noreply@hr.y99.info>',
       to: [email],
-      subject: 'Mã OTP đăng nhập - HR Connect',
-      html: emailHtml,
+      subject: 'Mã OTP đăng nhập - Y99 HR',
+      text: emailText,
     };
 
     const response = await fetch(RESEND_API_URL, {

@@ -10,15 +10,26 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload 
   const [payrollRecords, setPayrollRecords] = useState<PayrollRecord[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
   const [selectedMonth, setSelectedMonth] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const initData = async () => {
-      const now = new Date();
-      const currentMonth = `${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
-      setSelectedMonth(currentMonth);
-      await loadData(currentMonth);
-      const users = await getAllUsers();
-      setEmployees(users);
+      try {
+        setError(null);
+        setLoading(true);
+        const now = new Date();
+        const currentMonth = `${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+        setSelectedMonth(currentMonth);
+        await loadData(currentMonth);
+        const users = await getAllUsers();
+        setEmployees(users);
+      } catch (err: any) {
+        setError('Không thể tải dữ liệu: ' + (err?.message || 'Vui lòng thử lại'));
+        console.error('Error initializing data:', err);
+      } finally {
+        setLoading(false);
+      }
     };
     initData();
   }, []);
@@ -26,21 +37,37 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload 
   useEffect(() => {
     if (onRegisterReload && selectedMonth) {
       onRegisterReload(async () => {
-        await loadData(selectedMonth);
-        const users = await getAllUsers();
-        setEmployees(users);
+        try {
+          setError(null);
+          await loadData(selectedMonth);
+          const users = await getAllUsers();
+          setEmployees(users);
+        } catch (err: any) {
+          setError('Không thể tải dữ liệu: ' + (err?.message || 'Vui lòng thử lại'));
+          console.error('Error reloading data:', err);
+        }
       });
     }
   }, [onRegisterReload, selectedMonth]);
 
   const loadData = async (month: string) => {
-    const records = await getAllPayrolls(month);
-    setPayrollRecords(records);
+    try {
+      setError(null);
+      const records = await getAllPayrolls(month);
+      setPayrollRecords(records);
+    } catch (err: any) {
+      setError('Không thể tải bảng lương: ' + (err?.message || 'Vui lòng thử lại'));
+      console.error('Error loading payroll data:', err);
+      setPayrollRecords([]);
+      throw err; // Re-throw để caller có thể handle
+    }
   };
 
   useEffect(() => {
     if (selectedMonth) {
-      loadData(selectedMonth);
+      loadData(selectedMonth).catch(() => {
+        // Error đã được handle trong loadData
+      });
     }
   }, [selectedMonth]);
 
@@ -78,7 +105,17 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload 
         </div>
       </div>
 
-      {payrollRecords.length === 0 ? (
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+          <p className="text-sm text-red-600 font-medium">{error}</p>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-center py-12 bg-white rounded-2xl border border-sky-50">
+          <p className="text-slate-400 font-medium">Đang tải dữ liệu...</p>
+        </div>
+      ) : payrollRecords.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-2xl border border-sky-50">
           <p className="text-slate-400 font-medium">Chưa có dữ liệu bảng lương</p>
         </div>

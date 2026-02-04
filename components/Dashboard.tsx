@@ -14,14 +14,42 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
 
   useEffect(() => {
     const loadAttendance = async () => {
-      const data = await getAttendance(user.id);
-      setAttendance(data);
+      try {
+        const data = await getAttendance(user.id);
+        setAttendance(data);
+      } catch (error) {
+        console.error('Error loading attendance:', error);
+        // Không hiển thị error cho user vì Dashboard là view chính
+        // Có thể thêm error state nếu cần
+      }
     };
     
     loadAttendance();
     // Reload every 30 seconds to get latest attendance
-    const interval = setInterval(loadAttendance, 30000);
-    return () => clearInterval(interval);
+    // Chỉ reload khi tab đang active để tránh lãng phí tài nguyên
+    let interval: NodeJS.Timeout | null = null;
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        if (interval) {
+          clearInterval(interval);
+          interval = null;
+        }
+      } else {
+        loadAttendance();
+        interval = setInterval(loadAttendance, 30000);
+      }
+    };
+    
+    if (!document.hidden) {
+      interval = setInterval(loadAttendance, 30000);
+    }
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      if (interval) clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [user.id]);
 
   const chartData = Array.from({ length: 5 }).map((_, i) => {

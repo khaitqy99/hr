@@ -14,7 +14,7 @@ const DataExportManagement: React.FC<DataExportManagementProps> = ({ onRegisterR
     // Component này không có loadData, nhưng vẫn đăng ký để nút reload không bị disable
     if (onRegisterReload) {
       onRegisterReload(async () => {
-        // Không làm gì vì component này chỉ export dữ liệu
+        // No-op: component này chỉ export dữ liệu, không cần reload
       });
     }
   }, [onRegisterReload]);
@@ -130,7 +130,6 @@ const DataExportManagement: React.FC<DataExportManagementProps> = ({ onRegisterR
           const data = JSON.parse(event.target?.result as string);
           // In production, you would validate and import data here
           alert('Chức năng import đang được phát triển. Dữ liệu đã được đọc thành công.');
-          console.log('Import data:', data);
         } catch (error) {
           alert('Lỗi khi đọc file: ' + (error as Error).message);
         }

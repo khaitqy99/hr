@@ -50,19 +50,3 @@ export const supabase = createClient<Database>(
     }
   }
 );
-
-// Helper function để kiểm tra kết nối
-export const checkSupabaseConnection = async (): Promise<boolean> => {
-  try {
-    const { data, error } = await supabase.from('users').select('count').limit(1);
-    if (error && error.code !== 'PGRST116') { // PGRST116 = table doesn't exist (expected if not migrated yet)
-      console.error('❌ Lỗi kết nối Supabase:', error);
-      return false;
-    }
-    console.log('✅ Kết nối Supabase thành công!');
-    return true;
-  } catch (err) {
-    console.error('❌ Lỗi kết nối Supabase:', err);
-    return false;
-  }
-};

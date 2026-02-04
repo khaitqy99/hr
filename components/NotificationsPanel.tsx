@@ -9,19 +9,45 @@ interface NotificationsPanelProps {
 const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user }) => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadNotifications();
     // Reload notifications every 30 seconds
-    const interval = setInterval(loadNotifications, 30000);
-    return () => clearInterval(interval);
+    // Chỉ reload khi tab đang active để tránh lãng phí tài nguyên
+    let interval: NodeJS.Timeout | null = null;
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        if (interval) {
+          clearInterval(interval);
+          interval = null;
+        }
+      } else {
+        loadNotifications();
+        interval = setInterval(loadNotifications, 30000);
+      }
+    };
+    
+    if (!document.hidden) {
+      interval = setInterval(loadNotifications, 30000);
+    }
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      if (interval) clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [user.id]);
 
   const loadNotifications = async () => {
     try {
+      setError(null);
       const data = await getNotifications(user.id);
       setNotifications(data);
-    } catch (error) {
+    } catch (error: any) {
+      const errorMessage = 'Không thể tải thông báo: ' + (error?.message || 'Vui lòng thử lại');
+      setError(errorMessage);
       console.error('Error loading notifications:', error);
     } finally {
       setLoading(false);
@@ -34,8 +60,10 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user }) => {
       setNotifications(prev => 
         prev.map(notif => notif.id === id ? { ...notif, read: true } : notif)
       );
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error marking notification as read:', error);
+      // Hiển thị error cho user
+      alert('Không thể đánh dấu đã đọc: ' + (error?.message || 'Vui lòng thử lại'));
     }
   };
 
@@ -44,8 +72,10 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user }) => {
       const unreadNotifications = notifications.filter(n => !n.read);
       await Promise.all(unreadNotifications.map(n => markNotificationAsRead(n.id)));
       setNotifications(prev => prev.map(notif => ({ ...notif, read: true })));
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error marking all notifications as read:', error);
+      // Hiển thị error cho user
+      alert('Không thể đánh dấu tất cả đã đọc: ' + (error?.message || 'Vui lòng thử lại'));
     }
   };
 
@@ -143,8 +173,21 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user }) => {
         </div>
       </div>
 
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+          <p className="text-sm text-red-600 font-medium">{error}</p>
+          <button
+            onClick={loadNotifications}
+            className="mt-2 text-xs text-red-600 hover:text-red-700 underline"
+          >
+            Thử lại
+          </button>
+        </div>
+      )}
+
       {/* Notifications List */}
-      {notifications.length === 0 ? (
+      {notifications.length === 0 && !error ? (
         <div className="bg-white rounded-2xl shadow-sm border border-sky-50 p-12 text-center">
           <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-8 h-8 text-slate-400">
@@ -153,7 +196,7 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user }) => {
           </div>
           <p className="text-slate-400 font-medium">Chưa có thông báo nào</p>
         </div>
-      ) : (
+      ) : notifications.length > 0 ? (
         <div className="space-y-3">
           {notifications.map((notif) => (
             <div

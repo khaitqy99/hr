@@ -146,9 +146,12 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
     <div className="flex h-screen bg-slate-50">
       {/* Sidebar */}
       <div className="w-64 bg-white border-r border-slate-200 flex flex-col">
-        <div className="px-6 h-[73px] border-b border-slate-200 flex flex-col justify-center">
-          <h1 className="text-lg font-bold text-slate-800 leading-tight">HR Connect</h1>
-          <p className="text-xs text-slate-500 mt-0.5 leading-tight">Quản trị hệ thống</p>
+        <div className="px-6 h-[73px] border-b border-slate-200 flex items-center gap-3">
+          <img src="/logo.png" alt="Y99 HR Logo" className="w-8 h-8 object-contain flex-shrink-0" />
+          <div className="flex flex-col justify-center min-w-0">
+            <h1 className="text-lg font-bold text-slate-800 leading-tight">Y99 HR</h1>
+            <p className="text-xs text-slate-500 mt-0.5 leading-tight">Quản trị hệ thống</p>
+          </div>
         </div>
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           {/* Main Management */}

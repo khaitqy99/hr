@@ -55,8 +55,8 @@ export default defineConfig(({ mode }) => {
           srcDir: 'public',
           filename: 'sw.js',
           manifest: {
-            name: 'HR Connect',
-            short_name: 'HR Connect',
+            name: 'Y99 HR',
+            short_name: 'Y99 HR',
             description: 'Hệ thống quản lý nhân sự 4.0 - Check-in, lịch làm việc và quản trị HR',
             theme_color: '#0c4a6e',
             background_color: '#f0f9ff',

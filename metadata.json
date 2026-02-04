@@ -1,5 +1,5 @@
 {
-  "name": "HR Connect PWA",
+  "name": "Y99 HR PWA",
   "description": "Internal company check-in, scheduling, and HR management application optimized for mobile.",
   "requestFramePermissions": [
     "camera",

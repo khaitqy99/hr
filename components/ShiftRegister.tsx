@@ -289,7 +289,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
     return days[date.getDay()];
   };
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!allDatesHaveShifts()) return;
     setLoading(true);
@@ -326,21 +326,48 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
       };
     }).filter((shift): shift is ShiftRegistration => shift !== null);
 
-    setTimeout(async () => {
-        for (const shift of newShifts) {
+    try {
+      const results: { success: boolean; shift: ShiftRegistration; error?: string }[] = [];
+      
+      // Đăng ký từng shift và track kết quả
+      for (const shift of newShifts) {
+        try {
           await registerShift(shift);
+          results.push({ success: true, shift });
+        } catch (error: any) {
+          results.push({ 
+            success: false, 
+            shift, 
+            error: error?.message || 'Không thể đăng ký ca' 
+          });
         }
-        // Load lại shifts và đảm bảo state được cập nhật
-        const updatedShifts = await getShiftRegistrations(user.id);
-        updatedShifts.sort((a, b) => b.date - a.date);
-        setShifts([...updatedShifts]);
+      }
+
+      // Load lại shifts để cập nhật UI
+      const updatedShifts = await getShiftRegistrations(user.id);
+      updatedShifts.sort((a, b) => b.date - a.date);
+      setShifts([...updatedShifts]);
+
+      // Kiểm tra kết quả và hiển thị thông báo
+      const successCount = results.filter(r => r.success).length;
+      const failCount = results.filter(r => !r.success).length;
+
+      if (failCount > 0) {
+        alert(`Đã đăng ký ${successCount}/${newShifts.length} ca thành công. ${failCount} ca thất bại.`);
+      } else {
+        // Reset form chỉ khi tất cả đều thành công
         setSelectedDates([]);
         setDateShifts({});
         setDateCustomTimes({});
         setDateOffTypes({});
         setExpandedDate(null);
-        setLoading(false);
-    }, 500); // Fake delay
+      }
+    } catch (error: any) {
+      console.error('Error registering shifts:', error);
+      alert('Lỗi khi đăng ký ca: ' + (error?.message || 'Vui lòng thử lại'));
+    } finally {
+      setLoading(false);
+    }
   };
 
 

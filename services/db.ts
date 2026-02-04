@@ -632,36 +632,6 @@ export const getLeaveRequests = async (userId?: string, role?: UserRole): Promis
   return all.filter((r: LeaveRequest) => r.userId === userId).sort((a: LeaveRequest, b: LeaveRequest) => b.createdAt - a.createdAt);
 };
 
-export const createLeaveRequest = async (request: LeaveRequest): Promise<void> => {
-  if (isSupabaseAvailable()) {
-    try {
-      const { error } = await supabase
-        .from('leave_requests')
-        .insert({
-          id: request.id,
-          user_id: request.userId,
-          start_date: request.startDate,
-          end_date: request.endDate,
-          type: request.type,
-          reason: request.reason,
-          status: request.status,
-          created_at: request.createdAt,
-        });
-
-      if (error) throw new Error(`Lỗi tạo leave request: ${error.message}`);
-      return;
-    } catch (error) {
-      console.error('Error creating leave request in Supabase:', error);
-      throw error;
-    }
-  }
-
-  // Fallback to localStorage
-  const all = JSON.parse(localStorage.getItem(REQUESTS_KEY) || '[]');
-  all.push(request);
-  localStorage.setItem(REQUESTS_KEY, JSON.stringify(all));
-};
-
 export const updateLeaveRequestStatus = async (id: string, status: RequestStatus): Promise<void> => {
   if (isSupabaseAvailable()) {
     try {
@@ -1522,52 +1492,6 @@ export const updateSystemConfig = async (id: string, value: string, updatedBy?: 
   return all[idx];
 };
 
-export const createSystemConfig = async (data: Omit<SystemConfig, 'id' | 'updatedAt'>): Promise<SystemConfig> => {
-  if (isSupabaseAvailable()) {
-    try {
-      const { data: newConfig, error } = await supabase
-        .from('system_configs')
-        .insert({
-          key: data.key,
-          value: data.value,
-          description: data.description || null,
-          category: data.category,
-          updated_at: Math.floor(Date.now() / 1000),
-          updated_by: data.updatedBy || null,
-        })
-        .select()
-        .single();
-
-      if (error) throw new Error(`Lỗi tạo config: ${error.message}`);
-      if (!newConfig) throw new Error('Không thể tạo config');
-
-      return {
-        id: newConfig.id,
-        key: newConfig.key,
-        value: newConfig.value,
-        description: newConfig.description || undefined,
-        category: newConfig.category as 'ATTENDANCE' | 'PAYROLL' | 'GENERAL' | 'NOTIFICATION',
-        updatedAt: newConfig.updated_at < 1e12 ? newConfig.updated_at * 1000 : newConfig.updated_at,
-        updatedBy: newConfig.updated_by || undefined,
-      };
-    } catch (error) {
-      console.error('Error creating system config in Supabase:', error);
-      throw error;
-    }
-  }
-
-  // Fallback to localStorage
-  const all: SystemConfig[] = JSON.parse(localStorage.getItem('hr_connect_system_configs') || '[]');
-  const newConfig: SystemConfig = {
-    ...data,
-    id: 'config-' + Date.now(),
-    updatedAt: Date.now(),
-  };
-  all.push(newConfig);
-  localStorage.setItem('hr_connect_system_configs', JSON.stringify(all));
-  return newConfig;
-};
-
 // ============ OTP CODES ============
 
 interface OTPCode {
@@ -1719,24 +1643,6 @@ export const verifyOTPCode = async (email: string, code: string): Promise<boolea
   }
 
   return false;
-};
-
-/**
- * Xóa các mã OTP đã hết hạn
- */
-export const cleanupExpiredOTPs = async (): Promise<void> => {
-  if (isSupabaseAvailable()) {
-    try {
-      await supabase.rpc('cleanup_expired_otps');
-    } catch (error) {
-      console.error('Error cleaning up expired OTPs:', error);
-    }
-  } else {
-    // Fallback to localStorage
-    const otpCodes: OTPCode[] = JSON.parse(localStorage.getItem(OTP_CODES_KEY) || '[]');
-    const validOTPs = otpCodes.filter(otp => otp.expiresAt > Date.now());
-    localStorage.setItem(OTP_CODES_KEY, JSON.stringify(validOTPs));
-  }
 };
 
 // ============ OFFLINE SYNC ============

@@ -4,20 +4,6 @@ import { getCurrentUser, createOTPCode, verifyOTPCode } from './db';
 import { sendOTPEmail } from './email';
 
 /**
- * Kiểm tra email có tồn tại trong hệ thống không
- * @deprecated Sử dụng getCurrentUser trực tiếp thay vì function này để tránh query nhiều lần
- */
-const checkEmailExists = async (email: string): Promise<boolean> => {
-  try {
-    const user = await getCurrentUser(email.trim().toLowerCase());
-    return !!user;
-  } catch (error) {
-    console.error('Error checking email:', error);
-    return false;
-  }
-};
-
-/**
  * Gửi OTP đến email
  * 
  * LUỒNG HOẠT ĐỘNG:
@@ -160,26 +146,4 @@ export const signOut = async (): Promise<void> => {
   } catch (error) {
     console.error('Error signing out:', error);
   }
-};
-
-/**
- * Lấy session hiện tại
- */
-export const getSession = async () => {
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    return session;
-  } catch (error) {
-    console.error('Error getting session:', error);
-    return null;
-  }
-};
-
-/**
- * Lắng nghe thay đổi auth state
- */
-export const onAuthStateChange = (callback: (session: any) => void) => {
-  return supabase.auth.onAuthStateChange((_event, session) => {
-    callback(session);
-  });
 };

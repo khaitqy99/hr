@@ -39,11 +39,12 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
   const validateForm = (): boolean => {
     const errors: { email?: string; name?: string; department?: string } = {};
     
-    // Validate email
+    // Validate email với regex pattern chuẩn hơn
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!userForm.email.trim()) {
       errors.email = 'Email (đăng nhập) là bắt buộc';
-    } else if (!userForm.email.includes('@') || !userForm.email.includes('.')) {
-      errors.email = 'Email không hợp lệ';
+    } else if (!emailRegex.test(userForm.email.trim())) {
+      errors.email = 'Email không hợp lệ (ví dụ: user@example.com)';
     }
     
     // Validate name

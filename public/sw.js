@@ -1,4 +1,4 @@
-// Service Worker cho HR Connect PWA
+// Service Worker cho Y99 HR PWA
 // File này sẽ được sử dụng thay cho service worker tự động tạo bởi VitePWA
 
 // Cache Workbox CDN để tải nhanh hơn lần sau

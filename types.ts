@@ -124,12 +124,6 @@ export const OFF_TYPE_LABELS: Record<OffType, string> = {
   [OffType.LE]: 'LỄ - Nghỉ lễ'
 }
 
-// Trạng thái check-in
-export enum CheckInStatus {
-  ONLINE = 'ONLINE',    // Đang làm
-  DONE = 'DONE'         // Đã về
-}
-
 export interface ShiftRegistration {
   id: string;
   userId: string;

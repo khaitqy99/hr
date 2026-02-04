@@ -84,10 +84,6 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       const users = await getAllUsers();
       setAttendanceRecords(records);
       setEmployees(users);
-      
-      // Debug: Log thông tin về ảnh
-      const recordsWithPhotos = records.filter(r => r.photoUrl);
-      console.log(`📊 Loaded ${records.length} attendance records, ${recordsWithPhotos.length} with photos`);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -292,10 +288,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
                                       setFailedPhotoIds((prev) => new Set(prev).add(record.id));
                                     }}
                                     onLoad={() => {
-                                      // Log success để debug
-                                      if (photoUrl.includes('supabase.co')) {
-                                        console.log(`Successfully loaded photo for record ${record.id}`);
-                                      }
+                                      // Photo loaded successfully
                                     }}
                                   />
                                 ) : (
