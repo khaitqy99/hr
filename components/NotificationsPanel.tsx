@@ -254,7 +254,7 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user }) => {
             </div>
           ))}
         </div>
-      )}
+      ) : null}
     </div>
   );
 };
