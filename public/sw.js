@@ -34,7 +34,11 @@ try {
       if (cachedResponse) {
         cachedResponse.text().then((text) => {
           try {
-            eval(text);
+            // Sử dụng blob URL thay vì eval để tránh security warning
+            const blob = new Blob([text], { type: 'application/javascript' });
+            const blobUrl = URL.createObjectURL(blob);
+            importScripts(blobUrl);
+            URL.revokeObjectURL(blobUrl);
             workboxLoaded = true;
             console.log('Workbox loaded from cache');
           } catch (e) {
