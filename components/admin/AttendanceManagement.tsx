@@ -26,7 +26,7 @@ const isValidUrl = (url: string): boolean => {
 
 interface AttendanceManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
-  setView?: (view: string, options?: { adminPath?: string }) => void;
+  setView?: (view: string, options?: { replace?: boolean; adminPath?: string; employeeId?: string }) => void;
 }
 
 const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterReload, setView }) => {
@@ -261,7 +261,16 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
                       </td>
                       <td className="px-6 py-4">
                         <div>
-                          <p className="text-sm font-bold text-slate-800">{employee?.name || record.userId}</p>
+                          {employee && setView ? (
+                            <button
+                              onClick={() => setView('employee-profile', { employeeId: employee.id })}
+                              className="text-sm font-bold text-blue-600 hover:text-blue-700 hover:underline transition-colors text-left"
+                            >
+                              {employee.name}
+                            </button>
+                          ) : (
+                            <p className="text-sm font-bold text-slate-800">{employee?.name || record.userId}</p>
+                          )}
                           <p className="text-xs text-slate-500">{employee?.department || ''}</p>
                         </div>
                       </td>

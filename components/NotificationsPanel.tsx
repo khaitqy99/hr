@@ -4,9 +4,56 @@ import { getNotifications, markNotificationAsRead } from '../services/db';
 
 interface NotificationsPanelProps {
   user: User;
+  setView?: (view: string, options?: { replace?: boolean; adminPath?: string; employeeId?: string }) => void;
 }
 
-const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user }) => {
+const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user, setView }) => {
+  // Helper function để xác định view cần điều hướng dựa trên nội dung notification
+  const getNotificationAction = (notif: Notification): { view: string; options?: any } | null => {
+    const title = notif.title.toLowerCase();
+    const message = notif.message.toLowerCase();
+
+    // Đăng ký ca
+    if (title.includes('đăng ký ca') || title.includes('ca làm việc') || message.includes('đăng ký ca')) {
+      return { view: 'shifts' };
+    }
+
+    // Chấm công
+    if (title.includes('chấm công') || message.includes('chấm công')) {
+      return { view: 'checkin' };
+    }
+
+    // Bảng lương
+    if (title.includes('lương') || title.includes('payroll') || message.includes('bảng lương')) {
+      return { view: 'payroll' };
+    }
+
+    // Admin views
+    if (user.role === 'ADMIN') {
+      if (title.includes('nhân viên') || message.includes('nhân viên')) {
+        return { view: 'admin', options: { adminPath: 'users' } };
+      }
+      if (title.includes('chấm công') || message.includes('chấm công')) {
+        return { view: 'admin', options: { adminPath: 'attendance' } };
+      }
+      if (title.includes('ca') || message.includes('ca')) {
+        return { view: 'admin', options: { adminPath: 'shift' } };
+      }
+      if (title.includes('lương') || message.includes('lương')) {
+        return { view: 'admin', options: { adminPath: 'payroll' } };
+      }
+    }
+
+    return null;
+  };
+
+  const handleNotificationClick = (notif: Notification) => {
+    if (!setView) return;
+    const action = getNotificationAction(notif);
+    if (action) {
+      setView(action.view, action.options);
+    }
+  };
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -198,10 +245,15 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user }) => {
         </div>
       ) : notifications.length > 0 ? (
         <div className="space-y-3">
-          {notifications.map((notif) => (
+          {notifications.map((notif) => {
+            const hasAction = setView && getNotificationAction(notif) !== null;
+            return (
             <div
               key={notif.id}
-              className={`bg-white rounded-2xl shadow-sm border-2 p-4 transition-all hover:shadow-md ${
+              onClick={() => hasAction && handleNotificationClick(notif)}
+              className={`bg-white rounded-2xl shadow-sm border-2 p-4 transition-all ${
+                hasAction ? 'cursor-pointer hover:shadow-md' : ''
+              } ${
                 notif.read 
                   ? 'border-slate-100 opacity-75' 
                   : 'border-blue-200 bg-blue-50/30'
@@ -251,8 +303,14 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user }) => {
                   </div>
                 </div>
               </div>
+              {hasAction && (
+                <div className="mt-2 pt-2 border-t border-slate-100">
+                  <span className="text-xs text-blue-600 font-medium">Nhấn để xem chi tiết →</span>
+                </div>
+              )}
             </div>
-          ))}
+          );
+          })}
         </div>
       ) : null}
     </div>

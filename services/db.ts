@@ -1,5 +1,6 @@
 import { User, UserRole, AttendanceRecord, LeaveRequest, Notification, RequestStatus, LeaveType, ShiftRegistration, PayrollRecord, ContractType, EmployeeStatus, AttendanceType, Department, Holiday, SystemConfig } from '../types';
 import { supabase } from './supabase';
+import { emitUserEvent, emitAttendanceEvent, emitShiftEvent, emitPayrollEvent, emitDepartmentEvent, emitHolidayEvent, emitConfigEvent, emitNotificationEvent } from './events';
 
 // Helper để check Supabase connection
 const isSupabaseAvailable = (): boolean => {
@@ -240,7 +241,7 @@ export const createUser = async (data: Omit<User, 'id'> & { id?: string }): Prom
       }
       if (!newUser) throw new Error('Không thể tạo user');
 
-      return {
+      const createdUser = {
         id: newUser.id,
         name: newUser.name,
         email: newUser.email,
@@ -256,6 +257,12 @@ export const createUser = async (data: Omit<User, 'id'> & { id?: string }): Prom
         socialInsuranceSalary: newUser.social_insurance_salary ? Number(newUser.social_insurance_salary) : undefined,
         traineeSalary: newUser.trainee_salary ? Number(newUser.trainee_salary) : undefined,
       };
+
+      // Emit event và invalidate cache
+      invalidateUsersCache();
+      await emitUserEvent('created', createdUser.id);
+
+      return createdUser;
     } catch (error) {
       console.error('Error creating user in Supabase:', error);
       throw error;
@@ -285,6 +292,11 @@ export const createUser = async (data: Omit<User, 'id'> & { id?: string }): Prom
   };
   users.push(user);
   localStorage.setItem(USERS_KEY, JSON.stringify(users));
+
+  // Emit event và invalidate cache
+  invalidateUsersCache();
+  await emitUserEvent('created', user.id);
+
   return user;
 };
 
@@ -338,6 +350,27 @@ export const updateUser = async (id: string, data: Partial<User>): Promise<User>
         socialInsuranceSalary: updatedUser.social_insurance_salary ? Number(updatedUser.social_insurance_salary) : undefined,
         traineeSalary: updatedUser.trainee_salary ? Number(updatedUser.trainee_salary) : undefined,
       };
+
+      // Emit event và invalidate cache
+      invalidateUsersCache();
+      await emitUserEvent('updated', updatedUser.id);
+
+      return {
+        id: updatedUser.id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        role: updatedUser.role as UserRole,
+        department: updatedUser.department,
+        avatarUrl: updatedUser.avatar_url || undefined,
+        employeeCode: updatedUser.employee_code || undefined,
+        jobTitle: updatedUser.job_title || undefined,
+        contractType: updatedUser.contract_type as ContractType | undefined,
+        startDate: updatedUser.start_date || undefined,
+        status: updatedUser.status as EmployeeStatus | undefined,
+        grossSalary: updatedUser.gross_salary ? Number(updatedUser.gross_salary) : undefined,
+        socialInsuranceSalary: updatedUser.social_insurance_salary ? Number(updatedUser.social_insurance_salary) : undefined,
+        traineeSalary: updatedUser.trainee_salary ? Number(updatedUser.trainee_salary) : undefined,
+      };
     } catch (error) {
       console.error('Error updating user in Supabase:', error);
       throw error;
@@ -361,6 +394,11 @@ export const updateUser = async (id: string, data: Partial<User>): Promise<User>
     jobTitle: data.jobTitle?.trim() || undefined,
   };
   localStorage.setItem(USERS_KEY, JSON.stringify(users));
+
+  // Emit event và invalidate cache
+  invalidateUsersCache();
+  await emitUserEvent('updated', users[idx].id);
+
   return users[idx];
 };
 
@@ -448,6 +486,11 @@ export const deleteAttendance = async (id: string): Promise<void> => {
         .eq('id', id);
 
       if (error) throw new Error(`Lỗi xóa attendance: ${error.message}`);
+
+      // Emit event và invalidate cache
+      invalidateAttendanceCache();
+      await emitAttendanceEvent('deleted', id);
+
       return;
     } catch (error) {
       console.error('Error deleting attendance from Supabase:', error);
@@ -459,6 +502,10 @@ export const deleteAttendance = async (id: string): Promise<void> => {
   const all = JSON.parse(localStorage.getItem(ATTENDANCE_KEY) || '[]');
   const filtered = all.filter((r: AttendanceRecord) => r.id !== id);
   localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(filtered));
+
+  // Emit event và invalidate cache
+  invalidateAttendanceCache();
+  await emitAttendanceEvent('deleted', id);
 };
 
 // Helper: Tính số ngày nghỉ từ leave requests trong tháng
@@ -643,6 +690,11 @@ export const saveAttendance = async (record: AttendanceRecord): Promise<void> =>
         });
 
       if (error) throw new Error(`Lỗi lưu attendance: ${error.message}`);
+
+      // Emit event và invalidate cache
+      invalidateAttendanceCache();
+      await emitAttendanceEvent('created', record.id);
+
       return;
     } catch (error) {
       console.error('Error saving attendance to Supabase:', error);
@@ -654,6 +706,10 @@ export const saveAttendance = async (record: AttendanceRecord): Promise<void> =>
   const all = JSON.parse(localStorage.getItem(ATTENDANCE_KEY) || '[]');
   all.push(record);
   localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(all));
+
+  // Emit event và invalidate cache
+  invalidateAttendanceCache();
+  await emitAttendanceEvent('created', record.id);
 };
 
 // ============ LEAVE REQUESTS ============
@@ -835,6 +891,11 @@ export const registerShift = async (shift: ShiftRegistration): Promise<void> => 
         });
 
       if (error) throw new Error(`Lỗi đăng ký ca: ${error.message}`);
+
+      // Emit event và invalidate cache
+      invalidateShiftsCache();
+      await emitShiftEvent('created', shift.id);
+
       return;
     } catch (error) {
       console.error('Error registering shift in Supabase:', error);
@@ -846,6 +907,10 @@ export const registerShift = async (shift: ShiftRegistration): Promise<void> => 
   const all = JSON.parse(localStorage.getItem(SHIFTS_KEY) || '[]');
   all.push(shift);
   localStorage.setItem(SHIFTS_KEY, JSON.stringify(all));
+
+  // Emit event và invalidate cache
+  invalidateShiftsCache();
+  await emitShiftEvent('created', shift.id);
 };
 
 export const updateShiftStatus = async (id: string, status: RequestStatus, rejectionReason?: string): Promise<void> => {
@@ -863,6 +928,11 @@ export const updateShiftStatus = async (id: string, status: RequestStatus, rejec
         .eq('id', id);
 
       if (error) throw new Error(`Lỗi cập nhật ca: ${error.message}`);
+
+      // Emit event và invalidate cache
+      invalidateShiftsCache();
+      await emitShiftEvent('updated', id);
+
       return;
     } catch (error) {
       console.error('Error updating shift status in Supabase:', error);
@@ -881,6 +951,10 @@ export const updateShiftStatus = async (id: string, status: RequestStatus, rejec
       all[idx].rejectionReason = undefined;
     }
     localStorage.setItem(SHIFTS_KEY, JSON.stringify(all));
+
+    // Emit event và invalidate cache
+    invalidateShiftsCache();
+    await emitShiftEvent('updated', id);
   }
 };
 
@@ -1021,6 +1095,26 @@ export const createOrUpdatePayroll = async (record: PayrollRecord): Promise<Payr
         netSalary: Number(data.net_salary),
         status: data.status as 'PAID' | 'PENDING',
       };
+
+      // Emit event và invalidate cache
+      invalidatePayrollCache(record.month);
+      await emitPayrollEvent(record.id ? 'updated' : 'created', data.id);
+
+      return {
+        id: data.id,
+        userId: data.user_id,
+        month: data.month,
+        baseSalary: Number(data.base_salary),
+        standardWorkDays: data.standard_work_days,
+        actualWorkDays: data.actual_work_days,
+        otHours: Number(data.ot_hours),
+        otPay: Number(data.ot_pay),
+        allowance: Number(data.allowance),
+        bonus: Number(data.bonus),
+        deductions: Number(data.deductions),
+        netSalary: Number(data.net_salary),
+        status: data.status as 'PAID' | 'PENDING',
+      };
     } catch (error) {
       console.error('Error saving payroll to Supabase:', error);
       throw error;
@@ -1030,14 +1124,20 @@ export const createOrUpdatePayroll = async (record: PayrollRecord): Promise<Payr
   // Fallback to localStorage
   const all: PayrollRecord[] = JSON.parse(localStorage.getItem(PAYROLL_KEY) || '[]');
   const existingIndex = all.findIndex((r: PayrollRecord) => r.id === record.id);
+  const isUpdate = existingIndex >= 0;
   
-  if (existingIndex >= 0) {
+  if (isUpdate) {
     all[existingIndex] = record;
   } else {
     all.push(record);
   }
   
   localStorage.setItem(PAYROLL_KEY, JSON.stringify(all));
+
+  // Emit event và invalidate cache
+  invalidatePayrollCache(record.month);
+  await emitPayrollEvent(isUpdate ? 'updated' : 'created', record.id);
+
   return record;
 };
 
@@ -1620,6 +1720,7 @@ export const updateSystemConfig = async (id: string, value: string, updatedBy?: 
 
       // Invalidate cache sau khi update
       invalidateConfigCache();
+      await emitConfigEvent();
 
         return {
         id: updatedConfig.id,
@@ -1643,6 +1744,7 @@ export const updateSystemConfig = async (id: string, value: string, updatedBy?: 
   all[idx] = { ...all[idx], value, updatedAt: Date.now(), updatedBy };
   localStorage.setItem('hr_connect_system_configs', JSON.stringify(all));
   invalidateConfigCache();
+  await emitConfigEvent();
   return all[idx];
 };
 
@@ -1697,6 +1799,66 @@ export const getOfficeLocation = async (): Promise<{ lat: number; lng: number; r
 export const invalidateConfigCache = () => {
   configCache = null;
   configCacheTime = 0;
+};
+
+// ============ CACHE INVALIDATION HELPERS ============
+
+/**
+ * Cache invalidation cho các loại dữ liệu
+ * Các component có thể listen events để tự động reload khi cache bị invalidate
+ */
+
+// Users cache (nếu có)
+let usersCache: User[] | null = null;
+export const invalidateUsersCache = () => {
+  usersCache = null;
+};
+
+// Attendance cache (nếu có)
+let attendanceCache: AttendanceRecord[] | null = null;
+export const invalidateAttendanceCache = () => {
+  attendanceCache = null;
+};
+
+// Shifts cache (nếu có)
+let shiftsCache: ShiftRegistration[] | null = null;
+export const invalidateShiftsCache = () => {
+  shiftsCache = null;
+};
+
+// Payroll cache (nếu có)
+let payrollCache: Map<string, PayrollRecord[]> = new Map();
+export const invalidatePayrollCache = (month?: string) => {
+  if (month) {
+    payrollCache.delete(month);
+  } else {
+    payrollCache.clear();
+  }
+};
+
+// Departments cache (nếu có)
+let departmentsCache: Department[] | null = null;
+export const invalidateDepartmentsCache = () => {
+  departmentsCache = null;
+};
+
+// Holidays cache (nếu có)
+let holidaysCache: Holiday[] | null = null;
+export const invalidateHolidaysCache = () => {
+  holidaysCache = null;
+};
+
+/**
+ * Invalidate tất cả caches
+ */
+export const invalidateAllCaches = () => {
+  invalidateConfigCache();
+  invalidateUsersCache();
+  invalidateAttendanceCache();
+  invalidateShiftsCache();
+  invalidatePayrollCache();
+  invalidateDepartmentsCache();
+  invalidateHolidaysCache();
 };
 
 // ============ OTP CODES ============

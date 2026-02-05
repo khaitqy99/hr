@@ -655,7 +655,7 @@ const App: React.FC = () => {
         case 'checkin': return <CheckIn user={user} />;
         case 'shifts': return <ShiftRegister user={user} />;
         case 'payroll': return <Payroll user={user} setView={setView} />;
-        case 'notifications': return <NotificationsPanel user={user} />;
+        case 'notifications': return <NotificationsPanel user={user} setView={setView} />;
         case 'admin': 
           if (user.role !== UserRole.ADMIN) {
             updateViewAndURL('dashboard', true);

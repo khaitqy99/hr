@@ -40,7 +40,7 @@ function formatDateLabel(d: Date): string {
 
 interface ShiftManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
-  setView?: (view: string, options?: { adminPath?: string }) => void;
+  setView?: (view: string, options?: { replace?: boolean; adminPath?: string; employeeId?: string }) => void;
 }
 
 /** Modal từ chối: đơn (id) hoặc hàng loạt (userId) */
@@ -558,7 +558,19 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                       className={`cursor-pointer ${isSelected ? 'bg-sky-50' : 'hover:bg-slate-50'}`}
                     >
                       <td className="px-3 py-2 border-r border-b border-slate-200 first:border-l">
-                        <span className="text-sm font-medium text-slate-800">{emp.name}</span>
+                        {setView ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setView('employee-profile', { employeeId: emp.id });
+                            }}
+                            className="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline transition-colors text-left"
+                          >
+                            {emp.name}
+                          </button>
+                        ) : (
+                          <span className="text-sm font-medium text-slate-800">{emp.name}</span>
+                        )}
                       </td>
                       <td className="px-2 py-2 border-r border-b border-slate-200">
                         <span className="text-xs text-slate-700">{emp.department || '—'}</span>
@@ -733,7 +745,22 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
               ) : null;
             })()}
             <div className="space-y-2 text-sm">
-              <p><span className="font-medium text-slate-600">Nhân viên:</span> {cellDetail.user.name}</p>
+              <p>
+                <span className="font-medium text-slate-600">Nhân viên:</span>{' '}
+                {setView ? (
+                  <button
+                    onClick={() => {
+                      setCellDetail(null);
+                      setView('employee-profile', { employeeId: cellDetail.user.id });
+                    }}
+                    className="text-blue-600 hover:text-blue-700 hover:underline transition-colors"
+                  >
+                    {cellDetail.user.name}
+                  </button>
+                ) : (
+                  <span>{cellDetail.user.name}</span>
+                )}
+              </p>
               <p><span className="font-medium text-slate-600">Bộ phận:</span> {cellDetail.user.department || '—'}</p>
               <p><span className="font-medium text-slate-600">Ngày:</span> {formatDateLabel(cellDetail.date)}</p>
               <div className="pt-2 border-t border-slate-200">

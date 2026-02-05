@@ -11,6 +11,7 @@ import HolidaysManagement from './admin/HolidaysManagement';
 import SystemConfigManagement from './admin/SystemConfigManagement';
 import DataExportManagement from './admin/DataExportManagement';
 import NotificationsManagement from './admin/NotificationsManagement';
+import { useDataEvents } from '../utils/useDataEvents';
 
 interface AdminPanelProps {
   user: User;
@@ -108,6 +109,31 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
     reloadHandlerRef.current = null;
   }, [activeTab]);
 
+  // Listen to data events và tự động reload khi có thay đổi
+  // Map các event types đến các tabs tương ứng
+  useDataEvents(
+    [
+      'users:created', 'users:updated', 'users:deleted',
+      'attendance:created', 'attendance:updated', 'attendance:deleted',
+      'shifts:created', 'shifts:updated', 'shifts:deleted',
+      'payroll:created', 'payroll:updated', 'payroll:deleted',
+      'departments:created', 'departments:updated', 'departments:deleted',
+      'holidays:created', 'holidays:updated', 'holidays:deleted',
+      'config:updated',
+      'notifications:created', 'notifications:updated',
+    ],
+    async () => {
+      // Tự động reload tab hiện tại khi có thay đổi dữ liệu
+      if (reloadHandlerRef.current) {
+        try {
+          await reloadHandlerRef.current();
+        } catch (error) {
+          console.error('Error reloading data after event:', error);
+        }
+      }
+    }
+  );
+
   const renderContent = () => {
     switch (activeTab) {
       case 'USERS':
@@ -117,9 +143,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
       case 'SHIFT':
         return <ShiftManagement onRegisterReload={registerReloadHandler} setView={setView} />;
       case 'PAYROLL':
-        return <PayrollManagement onRegisterReload={registerReloadHandler} />;
+        return <PayrollManagement onRegisterReload={registerReloadHandler} setView={setView} />;
       case 'REPORTS':
-        return <ReportsDashboard onRegisterReload={registerReloadHandler} />;
+        return <ReportsDashboard onRegisterReload={registerReloadHandler} setView={setView} />;
       case 'DEPARTMENTS':
         return <DepartmentsManagement onRegisterReload={registerReloadHandler} />;
       case 'HOLIDAYS':
@@ -259,7 +285,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
                     <button
                       onClick={() => {
                         setShowProfileMenu(false);
-                        // Navigate to profile if exists
+                        setView('employee-profile', { employeeId: user.id });
                       }}
                       className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center space-x-2"
                     >

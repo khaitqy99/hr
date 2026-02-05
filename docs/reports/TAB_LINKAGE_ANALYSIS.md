@@ -240,5 +240,87 @@ EmployeeProfile → updateUser() → users (DB)
 
 ---
 
+---
+
+## ✅ **KIỂM TRA THỰC TẾ (05/02/2026)**
+
+### **Các liên kết ĐÃ hoạt động đúng trong code:**
+
+| Liên kết | File | Trạng thái |
+|----------|------|------------|
+| Dashboard → CheckIn, Shifts, Payroll, Notifications | Dashboard.tsx | ✅ setView() đúng |
+| Payroll → Dashboard, Shifts | Payroll.tsx | ✅ Links "Xem chi tiết →" |
+| Layout (nhân viên) → EmployeeProfile | Layout.tsx:280 | ✅ setView('employee-profile', {employeeId}) |
+| UsersManagement → EmployeeProfile | AdminPanel.tsx:74 | ✅ handleEditUser |
+| AttendanceManagement → PayrollManagement | AttendanceManagement.tsx:167 | ✅ Button "Tính lương" |
+| AttendanceManagement → EmployeeProfile | AttendanceManagement.tsx:266 | ✅ Click tên nhân viên |
+| ShiftManagement → PayrollManagement | ShiftManagement.tsx:325 | ✅ Button "Tính lương" |
+| ShiftManagement → EmployeeProfile | ShiftManagement.tsx:406,565 | ✅ Click tên + modal |
+| PayrollManagement → EmployeeProfile | PayrollManagement.tsx:246 | ✅ Click tên nhân viên |
+| ReportsDashboard → users, shift, attendance | ReportsDashboard.tsx | ✅ Cards clickable |
+| EmployeeProfile → SalaryManagement, admin tabs | EmployeeProfile.tsx | ✅ Quick actions |
+| NotificationsPanel → shifts, checkin, payroll, admin | NotificationsPanel.tsx | ✅ getNotificationAction |
+
+### **Event System – Đồng bộ dữ liệu:**
+- ✅ `db.ts` emit events: users, attendance, shifts, payroll (created/updated/deleted)
+- ✅ `AdminPanel` dùng `useDataEvents` – auto reload khi có thay đổi
+- ⚠️ Chưa emit: departments, holidays, config, notifications (có helper nhưng chưa gọi trong db.ts)
+
+### **Lỗi phát hiện:**
+- ❌ **AdminPanel profile menu**: Button "Xem hồ sơ" (dòng 250-257) không gọi `setView` – click không có tác dụng → Đã sửa
+
+---
+
+## 📊 **KIỂM TRA HIỂN THỊ DỮ LIỆU (05/02/2026)**
+
+### **1. PHẠM VI DỮ LIỆU – ĐÚNG VAI TRÒ**
+
+| Tab | Nguồn dữ liệu | Scope | Trạng thái |
+|-----|---------------|-------|------------|
+| Dashboard | getAttendance(user.id), getShiftRegistrations(user.id), getNotifications(user.id) | Theo nhân viên | ✅ |
+| CheckIn | getAttendance(user.id), getShiftRegistrations(user.id), getOfficeLocation() | Theo nhân viên | ✅ |
+| ShiftRegister | getShiftRegistrations(user.id), getHolidays() | Theo nhân viên | ✅ |
+| Payroll (NV) | getPayroll(user.id), calculateAttendanceStats(user.id), getShiftRegistrations(user.id) | Theo nhân viên | ✅ |
+| NotificationsPanel | getNotifications(user.id) | Theo nhân viên | ✅ |
+| AttendanceManagement | getAllAttendance(500), getAllUsers() | Toàn hệ thống | ✅ |
+| ShiftManagement | getShiftRegistrations(undefined, UserRole.ADMIN), getAllUsers() | Toàn hệ thống | ✅ |
+| PayrollManagement | getAllPayrolls(month), getAllUsers() | Toàn hệ thống | ✅ |
+| ReportsDashboard | getAllUsers(), getShiftRegistrations(undefined, ADMIN), getAllAttendance() | Toàn hệ thống | ✅ |
+
+### **2. ĐỊNH DẠNG VÀ LOGIC HIỂN THỊ**
+
+| Tab | Mục kiểm tra | Trạng thái |
+|-----|--------------|------------|
+| Dashboard | Biểu đồ 5 ngày gần nhất, giờ làm = checkOut - checkIn | ✅ |
+| Dashboard | Ca hôm nay: lọc shift APPROVED + cùng ngày | ✅ |
+| Dashboard | Giờ tuần: Thứ 2–CN, tính từ cặp check-in/check-out | ✅ |
+| Payroll (NV) | Ngày công từ chấm công, ca đăng ký, ngày nghỉ phép | ✅ |
+| Payroll (NV) | Tháng: MM-YYYY, availableMonths từ getPayroll | ✅ |
+| ShiftManagement | Lưới theo tuần, lọc phòng ban + tìm tên | ✅ |
+| ShiftManagement | Ngày lễ hiển thị badge trên calendar | ✅ |
+| AttendanceManagement | Lọc thời gian (Hôm nay/Tuần/Tháng/Tất cả) + nhân viên | ✅ |
+| PayrollManagement | Tính lại: chỉ nhân viên ACTIVE, loại trừ ADMIN | ✅ |
+| EmployeeProfile | Load từ getAllUsers rồi find theo employeeId | ⚠️ Tải tất cả users (có thể tối ưu) |
+
+### **3. TRẠNG THÁI LOADING VÀ EMPTY**
+
+| Tab | Loading | Empty state |
+|-----|---------|-------------|
+| Dashboard | Có (qua useEffect) | "Chưa có dữ liệu hôm nay" |
+| Payroll (NV) | "Đang tải dữ liệu lương..." | "Chưa có dữ liệu lương" |
+| AttendanceManagement | "Đang tải dữ liệu..." | "Chưa có dữ liệu chấm công" |
+| ShiftManagement | Overlay "Đang tải..." | "Không có nhân viên nào" |
+| PayrollManagement | "Đang tải dữ liệu" | "Chưa có dữ liệu bảng lương" |
+| ReportsDashboard | Chưa có loading state | Có |
+| NotificationsPanel | "Đang tải thông báo..." | "Chưa có thông báo nào" |
+
+### **4. VẤN ĐỀ CẦN LƯU Ý**
+
+1. **ReportsDashboard**: `getAllAttendance()` không dùng limit → có thể chậm khi dữ liệu lớn (AttendanceManagement dùng limit 500).
+2. **EmployeeProfile**: Dùng `getAllUsers()` rồi `find` theo employeeId → nên thêm hàm `getUserById()` nếu cần tối ưu.
+3. **ReportsDashboard**: Chưa có loading state riêng khi load dữ liệu.
+
+---
+
 **Tác giả:** AI Assistant  
-**Phiên bản:** 1.0
+**Phiên bản:** 1.2

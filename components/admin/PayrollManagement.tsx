@@ -5,9 +5,10 @@ import { exportToCSV } from '../../utils/export';
 
 interface PayrollManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
+  setView?: (view: string, options?: { replace?: boolean; adminPath?: string; employeeId?: string }) => void;
 }
 
-const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload }) => {
+const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload, setView }) => {
   const [payrollRecords, setPayrollRecords] = useState<PayrollRecord[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
   const [selectedMonth, setSelectedMonth] = useState('');
@@ -240,7 +241,16 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload 
                     <tr key={item.id} className="hover:bg-sky-50/50 transition-colors">
                       <td className="px-6 py-4">
                         <div>
-                          <p className="text-sm font-bold text-slate-800">{employee?.name || item.userId}</p>
+                          {employee && setView ? (
+                            <button
+                              onClick={() => setView('employee-profile', { employeeId: employee.id })}
+                              className="text-sm font-bold text-blue-600 hover:text-blue-700 hover:underline transition-colors text-left"
+                            >
+                              {employee.name}
+                            </button>
+                          ) : (
+                            <p className="text-sm font-bold text-slate-800">{employee?.name || item.userId}</p>
+                          )}
                           <p className="text-xs text-slate-500">{employee?.department || ''}</p>
                         </div>
                       </td>

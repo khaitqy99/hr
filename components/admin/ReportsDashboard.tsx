@@ -4,9 +4,10 @@ import { getAllUsers, getShiftRegistrations, getAllAttendance, getDepartments } 
 
 interface ReportsDashboardProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
+  setView?: (view: string, options?: { replace?: boolean; adminPath?: string; employeeId?: string }) => void;
 }
 
-const ReportsDashboard: React.FC<ReportsDashboardProps> = ({ onRegisterReload }) => {
+const ReportsDashboard: React.FC<ReportsDashboardProps> = ({ onRegisterReload, setView }) => {
   const [employees, setEmployees] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [shiftRequests, setShiftRequests] = useState<ShiftRegistration[]>([]);
@@ -48,22 +49,44 @@ const ReportsDashboard: React.FC<ReportsDashboardProps> = ({ onRegisterReload })
     <div className="space-y-6">
       {/* Summary Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-2xl border border-blue-200">
-          <div className="text-3xl font-bold text-blue-600">{employees.filter(e => e.role !== UserRole.ADMIN).length}</div>
-          <div className="text-sm text-blue-700 font-medium mt-2">Tổng nhân viên</div>
-        </div>
+        {setView ? (
+          <button
+            onClick={() => setView('admin', { adminPath: 'users' })}
+            className="bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-2xl border border-blue-200 hover:from-blue-100 hover:to-blue-200 transition-all cursor-pointer text-left"
+          >
+            <div className="text-3xl font-bold text-blue-600">{employees.filter(e => e.role !== UserRole.ADMIN).length}</div>
+            <div className="text-sm text-blue-700 font-medium mt-2">Tổng nhân viên</div>
+          </button>
+        ) : (
+          <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-2xl border border-blue-200">
+            <div className="text-3xl font-bold text-blue-600">{employees.filter(e => e.role !== UserRole.ADMIN).length}</div>
+            <div className="text-sm text-blue-700 font-medium mt-2">Tổng nhân viên</div>
+          </div>
+        )}
         <div className="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-2xl border border-green-200">
           <div className="text-3xl font-bold text-green-600">
             {employees.filter(e => e.status === EmployeeStatus.ACTIVE && e.role !== UserRole.ADMIN).length}
           </div>
           <div className="text-sm text-green-700 font-medium mt-2">Đang làm việc</div>
         </div>
-        <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-6 rounded-2xl border border-purple-200">
-          <div className="text-3xl font-bold text-purple-600">
-            {shiftRequests.filter(r => r.status === 'PENDING').length}
+        {setView ? (
+          <button
+            onClick={() => setView('admin', { adminPath: 'shift' })}
+            className="bg-gradient-to-br from-purple-50 to-purple-100 p-6 rounded-2xl border border-purple-200 hover:from-purple-100 hover:to-purple-200 transition-all cursor-pointer text-left"
+          >
+            <div className="text-3xl font-bold text-purple-600">
+              {shiftRequests.filter(r => r.status === 'PENDING').length}
+            </div>
+            <div className="text-sm text-purple-700 font-medium mt-2">Đăng ký ca chờ</div>
+          </button>
+        ) : (
+          <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-6 rounded-2xl border border-purple-200">
+            <div className="text-3xl font-bold text-purple-600">
+              {shiftRequests.filter(r => r.status === 'PENDING').length}
+            </div>
+            <div className="text-sm text-purple-700 font-medium mt-2">Đăng ký ca chờ</div>
           </div>
-          <div className="text-sm text-purple-700 font-medium mt-2">Đăng ký ca chờ</div>
-        </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -97,10 +120,20 @@ const ReportsDashboard: React.FC<ReportsDashboardProps> = ({ onRegisterReload })
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-sky-50">
           <h3 className="text-lg font-bold text-slate-700 mb-4">Tổng quan chấm công hôm nay</h3>
           <div className="space-y-3">
-            <div className="flex justify-between items-center p-4 bg-green-50 rounded-xl">
-              <span className="text-sm text-green-700 font-medium">Đã chấm công</span>
-              <span className="text-lg font-bold text-green-600">{todayAttendanceCount}</span>
-            </div>
+            {setView ? (
+              <button
+                onClick={() => setView('admin', { adminPath: 'attendance' })}
+                className="w-full flex justify-between items-center p-4 bg-green-50 rounded-xl hover:bg-green-100 transition-all cursor-pointer text-left"
+              >
+                <span className="text-sm text-green-700 font-medium">Đã chấm công</span>
+                <span className="text-lg font-bold text-green-600">{todayAttendanceCount}</span>
+              </button>
+            ) : (
+              <div className="flex justify-between items-center p-4 bg-green-50 rounded-xl">
+                <span className="text-sm text-green-700 font-medium">Đã chấm công</span>
+                <span className="text-lg font-bold text-green-600">{todayAttendanceCount}</span>
+              </div>
+            )}
             <div className="flex justify-between items-center p-4 bg-orange-50 rounded-xl">
               <span className="text-sm text-orange-700 font-medium">Chưa chấm công</span>
               <span className="text-lg font-bold text-orange-600">{totalActiveEmployees - todayAttendanceCount}</span>
