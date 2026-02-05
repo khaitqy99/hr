@@ -305,6 +305,23 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
         </div>
       </div>
 
+      {/* Thông báo cần làm: Check-in hay Check-out */}
+      <div className={`px-4 py-3 rounded-2xl mx-2 flex items-center gap-3 ${isCheckInNext ? 'bg-blue-50 border border-blue-200' : 'bg-amber-50 border border-amber-200'}`}>
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${isCheckInNext ? 'bg-blue-100 text-blue-600' : 'bg-amber-100 text-amber-600'}`}>
+          {isCheckInNext ? (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" /></svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9v-3m-3 3V9m3 3v3" /></svg>
+          )}
+        </div>
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Hành động tiếp theo</p>
+          <p className={`font-bold ${isCheckInNext ? 'text-blue-700' : 'text-amber-700'}`}>
+            {isCheckInNext ? 'Bạn cần chấm công vào' : 'Bạn cần chấm công ra'}
+          </p>
+        </div>
+      </div>
+
       {/* Hôm nay: Giờ vào / Giờ ra */}
       <div className="flex gap-3 px-2">
         <div className="flex-1 bg-white rounded-2xl p-3 shadow-sm border border-sky-50 flex items-center gap-2">
@@ -444,9 +461,9 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
                     <path fillRule="evenodd" d="M9.344 3.071a49.52 49.52 0 015.312 0c.967.052 1.83.585 2.332 1.39l.821 1.317c.24.383.645.643 1.11.71.386.054.77.113 1.152.177 1.432.239 2.429 1.493 2.429 2.909V18a3 3 0 01-3 3H4.5a3 3 0 01-3-3V9.574c0-1.416.997-2.67 2.429-2.909.382-.064.766-.123 1.151-.178a1.56 1.56 0 001.11-.71l.822-1.315a2.942 2.942 0 012.332-1.39zM6.75 12.75a5.25 5.25 0 1110.5 0 5.25 5.25 0 01-10.5 0zm12-2.25a.75.75 0 01.75-.75h.008a.75.75 0 01.75.75v.008a.75.75 0 01-.75.75H19.5a.75.75 0 01-.75-.75V10.5z" clipRule="evenodd" />
                   </svg>
                 </button>
-                {/* Label rõ ràng */}
+                {/* Label rõ ràng + cần vào hay ra */}
                 <span className="text-white text-xs font-bold tracking-wider bg-black/40 px-3 py-1 rounded-full backdrop-blur-sm">
-                  CHỤP ẢNH
+                  CHỤP ẢNH {isCheckInNext ? 'ĐỂ CHẤM CÔNG VÀO' : 'ĐỂ CHẤM CÔNG RA'}
                 </span>
               </div>
             )}

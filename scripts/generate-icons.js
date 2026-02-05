@@ -10,6 +10,13 @@ const logoPath = path.join(__dirname, '..', 'logoy.png');
 // Đọc logo PNG
 const logoBuffer = fs.readFileSync(logoPath);
 
+// Copy logo ra public, giữ nguyên tỉ lệ (chỉ giới hạn cạnh dài nhất = 128px)
+await sharp(logoBuffer)
+  .resize(128, 128, { fit: 'inside', withoutEnlargement: true })
+  .png()
+  .toFile(path.join(publicDir, 'logo.png'));
+console.log('✅ Generated logo.png (aspect ratio preserved)');
+
 // Generate các icon sizes từ logo
 for (const size of [192, 512]) {
   await sharp(logoBuffer)

@@ -283,8 +283,8 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
       <div className="relative z-10 w-full max-w-sm px-6">
         <div className="bg-white/10 backdrop-blur-xl border border-white/10 rounded-[2.5rem] p-8 shadow-2xl">
             <div className="text-center mb-8">
-                <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg shadow-blue-500/30 bg-white/10 backdrop-blur-sm">
-                    <img src="/logo.png" alt="Y99 HR Logo" className="w-12 h-12 object-contain" />
+                <div className="flex items-center justify-center mx-auto mb-5 overflow-visible">
+                    <img src="/logo.png" alt="Y99 HR Logo" className="h-12 w-auto max-w-12 object-contain" />
                 </div>
                 <h1 className="text-3xl font-extrabold text-white tracking-tight">Y99 HR</h1>
                 <p className="text-blue-200 text-sm mt-2 font-medium">Hệ thống quản lý nhân sự 4.0</p>

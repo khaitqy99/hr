@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getAllUsers, getAllAttendance, getLeaveRequests, getShiftRegistrations, getAllPayrolls } from '../../services/db';
-import { UserRole } from '../../types';
+import { UserRole, ShiftTime, OFF_TYPE_LABELS } from '../../types';
 
 interface DataExportManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
@@ -67,10 +67,15 @@ const DataExportManagement: React.FC<DataExportManagementProps> = ({ onRegisterR
           const leaves = await getLeaveRequests(undefined, UserRole.ADMIN);
           exportToCSV(leaves, `leave_requests_${Date.now()}.csv`);
           break;
-        case 'SHIFTS':
+        case 'SHIFTS': {
           const shifts = await getShiftRegistrations(undefined, UserRole.ADMIN);
-          exportToCSV(shifts, `shift_registrations_${Date.now()}.csv`);
+          const shiftsWithLabel = shifts.map(s => ({
+            ...s,
+            offTypeLabel: s.shift === ShiftTime.OFF && s.offType && OFF_TYPE_LABELS[s.offType] ? OFF_TYPE_LABELS[s.offType] : (s.shift === ShiftTime.OFF ? 'Ngày off' : '')
+          }));
+          exportToCSV(shiftsWithLabel, `shift_registrations_${Date.now()}.csv`);
           break;
+        }
         case 'PAYROLL':
           const payrolls = await getAllPayrolls(currentMonth);
           exportToCSV(payrolls, `payroll_${currentMonth}_${Date.now()}.csv`);

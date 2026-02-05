@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ShiftRegistration, RequestStatus, User, UserRole, ShiftTime } from '../../types';
+import { ShiftRegistration, RequestStatus, User, UserRole, ShiftTime, OFF_TYPE_LABELS } from '../../types';
 import { getShiftRegistrations, updateShiftStatus, getAllUsers } from '../../services/db';
 
 const DAY_LABELS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
@@ -404,7 +404,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
                                   >
                                     {statusBadge.icon}
                                   </span>
-                                  <span>OFF DK</span>
+                                  <span>{reg.offType && OFF_TYPE_LABELS[reg.offType] ? OFF_TYPE_LABELS[reg.offType] : 'Ngày off'}</span>
                                   {reg.status === RequestStatus.PENDING && (
                                     <div className="flex gap-1 mt-1" onClick={(e) => e.stopPropagation()}>
                                       <button
