@@ -768,7 +768,7 @@ const App: React.FC = () => {
   return (
     <>
       <UpdateNotification />
-      {isInstalled() && <InstallPrompt />}
+      {!isInstalled() && <InstallPrompt />}
       <Layout user={user} currentView={currentView} setView={setView} onLogout={handleLogout}>
         <div className="max-w-md mx-auto min-h-full">
           {renderView()}

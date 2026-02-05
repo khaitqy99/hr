@@ -32,10 +32,11 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
         getNotifications(user.id)
       ];
       
-      // Nếu mạng chậm, load tuần tự thay vì parallel
-      const [attendanceData, shifts, notifications] = slowNetwork
-        ? await Promise.all(requests.map(req => req.catch(() => [])))
-        : await Promise.all(requests);
+      // Nếu mạng chậm, thêm error handling tốt hơn
+      // Vẫn load parallel nhưng có fallback nếu một request fail
+      const [attendanceData, shifts, notifications] = await Promise.all(
+        requests.map(req => req.catch(() => []))
+      );
       
       setAttendance(attendanceData || []);
       
