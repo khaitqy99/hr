@@ -343,6 +343,8 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
                                     alt="Attendance photo"
                                     className="w-full h-full object-cover"
                                     loading="lazy"
+                                    decoding="async"
+                                    sizes="(max-width: 768px) 100vw, 400px"
                                     onError={(e) => {
                                       console.warn(`Failed to load photo for record ${record.id}:`, photoUrl);
                                       setFailedPhotoIds((prev) => new Set(prev).add(record.id));

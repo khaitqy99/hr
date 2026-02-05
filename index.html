@@ -2,9 +2,12 @@
 <html lang="vi">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover" />
     <meta name="theme-color" content="#0c4a6e" />
     <meta name="description" content="Hệ thống quản lý nhân sự 4.0 - Check-in, lịch làm việc và quản trị HR" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-touch-fullscreen" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Y99 HR" />
@@ -19,19 +22,26 @@
     <link rel="apple-touch-startup-image" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)" href="/splash-iphone-13-pro.png" />
     <link rel="apple-touch-startup-image" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3)" href="/splash-iphone-x.png" />
     <title>Y99 HR</title>
-    <!-- Tailwind CSS CDN - Tối ưu loading cho mobile -->
-    <!-- Preconnect để giảm latency -->
+    <!-- Resource Hints - Tối ưu loading cho mobile -->
+    <link rel="dns-prefetch" href="https://cdn.tailwindcss.com">
+    <link rel="dns-prefetch" href="https://fonts.googleapis.com">
+    <link rel="dns-prefetch" href="https://fonts.gstatic.com">
+    <link rel="dns-prefetch" href="https://esm.sh">
+    <!-- Preconnect cho các domains quan trọng -->
     <link rel="preconnect" href="https://cdn.tailwindcss.com">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Tailwind CSS CDN - Tối ưu loading cho mobile -->
     <!-- Remove in production and use local build instead -->
     <!-- To build locally: npm install -D tailwindcss postcss autoprefixer -->
     <!-- Then create tailwind.config.js and postcss.config.js -->
     <!-- For now, keeping CDN for development. Remove this line before production deploy -->
     <!-- <script src="https://cdn.tailwindcss.com"></script> -->
     <script src="https://cdn.tailwindcss.com" defer></script>
-    <!-- Tối ưu font loading cho mobile - preconnect và display=swap -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Tối ưu font loading cho mobile - font-display: optional để không block rendering -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=optional" rel="stylesheet">
+    <!-- Preload critical font weights -->
+    <link rel="preload" href="https://fonts.gstatic.com/s/plusjakartasans/v8/LDIbaomQNQcsA88c7O9yZ4KMCoOg4IA6-91aHEjcWuA_qU79TR_I.ttf" as="font" type="font/ttf" crossorigin>
     <style>
       body { 
         font-family: 'Plus Jakarta Sans', sans-serif; 
@@ -53,6 +63,33 @@
         -webkit-user-select: text;
         user-select: text;
         -webkit-touch-callout: default;
+      }
+      
+      /* Đảm bảo touch targets đủ lớn (min 44x44px theo Apple/Google guidelines) */
+      button, a, [role="button"], input[type="button"], input[type="submit"] {
+        min-height: 44px;
+        min-width: 44px;
+        touch-action: manipulation; /* Tắt double-tap zoom */
+      }
+      
+      /* Tối ưu input cho mobile */
+      input, textarea, select {
+        font-size: 16px; /* Tránh zoom trên iOS khi focus */
+        touch-action: manipulation;
+      }
+      
+      /* Prevent zoom on input focus (iOS Safari) */
+      @supports (-webkit-touch-callout: none) {
+        input[type="text"],
+        input[type="email"],
+        input[type="number"],
+        input[type="tel"],
+        input[type="url"],
+        input[type="search"],
+        textarea,
+        select {
+          font-size: 16px !important;
+        }
       }
       /* Hide scrollbar và tối ưu scroll trên iOS */
       .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -150,6 +187,27 @@
         .backdrop-blur-md { backdrop-filter: blur(8px); }
         .backdrop-blur-xl { backdrop-filter: blur(12px); }
         .backdrop-blur-2xl { backdrop-filter: blur(16px); }
+      }
+      
+      /* Tối ưu cho mạng chậm - giảm animations */
+      @media (prefers-reduced-data: reduce) {
+        * {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+      
+      /* Tối ưu scroll performance */
+      * {
+        -webkit-overflow-scrolling: touch;
+        scroll-behavior: smooth;
+      }
+      
+      /* Prevent text size adjustment on iOS */
+      html {
+        -webkit-text-size-adjust: 100%;
+        text-size-adjust: 100%;
       }
 
       /* Pull to refresh animation */

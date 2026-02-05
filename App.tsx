@@ -304,10 +304,14 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
                       <label className="text-[10px] font-bold text-blue-200 uppercase tracking-widest ml-3">Email</label>
                       <input
                           type="email"
+                          inputMode="email"
+                          autoComplete="email"
+                          autoCapitalize="none"
+                          autoCorrect="off"
                           required
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
-                          className="block w-full rounded-2xl border-0 bg-black/20 px-5 py-4 text-white placeholder:text-white/30 focus:ring-2 focus:ring-cyan-400 transition-all outline-none"
+                          className="block w-full rounded-2xl border-0 bg-black/20 px-5 py-4 text-white placeholder:text-white/30 focus:ring-2 focus:ring-cyan-400 transition-all outline-none min-h-[44px]"
                           placeholder="ten@congty.com"
                       />
                   </div>
@@ -348,10 +352,13 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
                       <label className="text-[10px] font-bold text-blue-200 uppercase tracking-widest ml-3">Mã OTP</label>
                       <input
                           type="text"
+                          inputMode="numeric"
+                          autoComplete="one-time-code"
+                          autoFocus
                           required
                           value={otp}
                           onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                          className="block w-full rounded-2xl border-0 bg-black/20 px-5 py-4 text-white placeholder:text-white/30 focus:ring-2 focus:ring-cyan-400 transition-all outline-none text-center text-2xl tracking-widest font-bold"
+                          className="block w-full rounded-2xl border-0 bg-black/20 px-5 py-4 text-white placeholder:text-white/30 focus:ring-2 focus:ring-cyan-400 transition-all outline-none text-center text-2xl tracking-widest font-bold min-h-[44px]"
                           placeholder="000000"
                           maxLength={6}
                       />

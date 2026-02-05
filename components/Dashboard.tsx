@@ -2,7 +2,9 @@ import React, { useEffect, useState, lazy, Suspense } from 'react';
 import { User, AttendanceRecord, AttendanceType, ShiftRegistration, ShiftTime, OFF_TYPE_LABELS } from '../types';
 import { getAttendance, getShiftRegistrations, getNotifications } from '../services/db';
 import PullToRefresh from './PullToRefresh';
+import SkeletonLoader from './SkeletonLoader';
 import { vibrate, HapticPatterns } from '../utils/pwa';
+import { isSlowNetwork } from '../utils/mobile';
 
 // Lazy load Recharts - giảm ~100KB+ từ initial bundle, cải thiện FCP trên mobile
 const DashboardChart = lazy(() => import('./DashboardChart'));
@@ -16,25 +18,36 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [todayShift, setTodayShift] = useState<ShiftRegistration | null>(null);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
 
   const loadData = async () => {
     try {
-      const [attendanceData, shifts, notifications] = await Promise.all([
+      setIsLoading(true);
+      
+      // Network-aware loading: giảm số lượng requests khi mạng chậm
+      const slowNetwork = isSlowNetwork();
+      const requests = [
         getAttendance(user.id),
         getShiftRegistrations(user.id),
         getNotifications(user.id)
-      ]);
-      setAttendance(attendanceData);
+      ];
+      
+      // Nếu mạng chậm, load tuần tự thay vì parallel
+      const [attendanceData, shifts, notifications] = slowNetwork
+        ? await Promise.all(requests.map(req => req.catch(() => [])))
+        : await Promise.all(requests);
+      
+      setAttendance(attendanceData || []);
       
       // Tìm ca đăng ký hôm nay
       const today = new Date();
       const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0).getTime();
       const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999).getTime();
-      const shift = shifts.find(s => s.date >= todayStart && s.date <= todayEnd && s.status === 'APPROVED');
+      const shift = shifts?.find(s => s.date >= todayStart && s.date <= todayEnd && s.status === 'APPROVED');
       setTodayShift(shift || null);
       
       // Đếm thông báo chưa đọc
-      const unread = notifications.filter(n => !n.read).length;
+      const unread = notifications?.filter(n => !n.read).length || 0;
       setUnreadNotifications(unread);
       
       // Haptic feedback on successful refresh
@@ -42,6 +55,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
     } catch (error) {
       console.error('Error loading data:', error);
       vibrate(HapticPatterns.error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -143,6 +158,20 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
     const onTimeCount = attendance.filter(r => r.status === 'ON_TIME').length;
     return Math.round((onTimeCount / attendance.length) * 100);
   };
+
+  // Show skeleton loader while loading
+  if (isLoading && attendance.length === 0) {
+    return (
+      <div className="space-y-6">
+        <SkeletonLoader variant="card" height={200} className="w-full" />
+        <div className="grid grid-cols-2 gap-3">
+          <SkeletonLoader variant="card" height={120} />
+          <SkeletonLoader variant="card" height={120} />
+        </div>
+        <SkeletonLoader variant="card" height={300} className="w-full" />
+      </div>
+    );
+  }
 
   return (
     <PullToRefresh onRefresh={loadData}>
