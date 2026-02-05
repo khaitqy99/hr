@@ -461,6 +461,71 @@ export const deleteAttendance = async (id: string): Promise<void> => {
   localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(filtered));
 };
 
+// Helper: Tính số ngày nghỉ từ leave requests trong tháng
+export const calculateLeaveDays = async (userId: string, month: string): Promise<number> => {
+  const leaveRequests = await getLeaveRequests(userId);
+  
+  // Parse month format "MM-YYYY"
+  const [monthStr, yearStr] = month.split('-');
+  const targetMonth = parseInt(monthStr);
+  const targetYear = parseInt(yearStr);
+  
+  // Filter approved leave requests that overlap with the target month
+  const monthStart = new Date(targetYear, targetMonth - 1, 1).getTime();
+  const monthEnd = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999).getTime();
+  
+  let totalLeaveDays = 0;
+  
+  leaveRequests
+    .filter(req => req.status === RequestStatus.APPROVED)
+    .forEach(req => {
+      const startDate = req.startDate;
+      const endDate = req.endDate;
+      
+      // Check if leave request overlaps with target month
+      if (endDate >= monthStart && startDate <= monthEnd) {
+        // Calculate overlap days
+        const overlapStart = Math.max(startDate, monthStart);
+        const overlapEnd = Math.min(endDate, monthEnd);
+        
+        // Count days (inclusive)
+        const days = Math.floor((overlapEnd - overlapStart) / (1000 * 60 * 60 * 24)) + 1;
+        totalLeaveDays += days;
+      }
+    });
+  
+  return totalLeaveDays;
+};
+
+// Helper: Tính số ngày làm việc từ shift registrations trong tháng
+export const calculateShiftWorkDays = async (userId: string, month: string): Promise<number> => {
+  const shiftRegistrations = await getShiftRegistrations(userId);
+  
+  // Parse month format "MM-YYYY"
+  const [monthStr, yearStr] = month.split('-');
+  const targetMonth = parseInt(monthStr);
+  const targetYear = parseInt(yearStr);
+  
+  // Filter approved shifts in the target month that are not OFF
+  const shiftDays = new Set<string>();
+  
+  shiftRegistrations
+    .filter(shift => {
+      const shiftDate = new Date(shift.date);
+      return shift.status === RequestStatus.APPROVED &&
+             shiftDate.getMonth() + 1 === targetMonth &&
+             shiftDate.getFullYear() === targetYear &&
+             shift.shift !== 'OFF';
+    })
+    .forEach(shift => {
+      const date = new Date(shift.date);
+      const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      shiftDays.add(dateKey);
+    });
+  
+  return shiftDays.size;
+};
+
 export const calculateAttendanceStats = async (userId: string, month: string): Promise<{ actualWorkDays: number; otHours: number }> => {
   const records = await getAttendance(userId);
   
@@ -496,7 +561,8 @@ export const calculateAttendanceStats = async (userId: string, month: string): P
   // Calculate work days and OT hours
   let actualWorkDays = 0;
   let totalOtHours = 0;
-  const standardWorkHours = 8; // 8 hours per day
+  // Lấy số giờ làm việc tiêu chuẩn từ config (mặc định 8 giờ)
+  const standardWorkHours = await getConfigNumber('work_hours_per_day', 8);
   
   Object.values(recordsByDate).forEach(dayRecords => {
     if (dayRecords.checkIn && dayRecords.checkOut) {
@@ -630,6 +696,57 @@ export const getLeaveRequests = async (userId?: string, role?: UserRole): Promis
      return all.sort((a: LeaveRequest, b: LeaveRequest) => b.createdAt - a.createdAt);
   }
   return all.filter((r: LeaveRequest) => r.userId === userId).sort((a: LeaveRequest, b: LeaveRequest) => b.createdAt - a.createdAt);
+};
+
+export const createLeaveRequest = async (request: Omit<LeaveRequest, 'id' | 'status' | 'createdAt'>): Promise<LeaveRequest> => {
+  const newRequest: LeaveRequest = {
+    id: `lr-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    ...request,
+    status: RequestStatus.PENDING,
+    createdAt: Date.now(),
+  };
+
+  if (isSupabaseAvailable()) {
+    try {
+      const { data, error } = await supabase
+        .from('leave_requests')
+        .insert({
+          id: newRequest.id,
+          user_id: newRequest.userId,
+          start_date: newRequest.startDate,
+          end_date: newRequest.endDate,
+          type: newRequest.type,
+          reason: newRequest.reason,
+          status: newRequest.status,
+          created_at: newRequest.createdAt,
+        })
+        .select()
+        .single();
+
+      if (error) throw new Error(`Lỗi tạo đơn nghỉ phép: ${error.message}`);
+      if (!data) throw new Error('Không thể tạo đơn nghỉ phép');
+
+      return {
+        id: data.id,
+        userId: data.user_id,
+        startDate: data.start_date,
+        endDate: data.end_date,
+        type: data.type as LeaveType,
+        reason: data.reason,
+        status: data.status as RequestStatus,
+        createdAt: data.created_at,
+      };
+    } catch (error) {
+      console.error('Error creating leave request in Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  const all = JSON.parse(localStorage.getItem(REQUESTS_KEY) || '[]');
+  all.push(newRequest);
+  localStorage.setItem(REQUESTS_KEY, JSON.stringify(all));
+  return newRequest;
 };
 
 export const updateLeaveRequestStatus = async (id: string, status: RequestStatus): Promise<void> => {
@@ -931,10 +1048,18 @@ export const calculatePayroll = async (
   otHours?: number, 
   allowance: number = 0, 
   bonus: number = 0,
-  useAttendance: boolean = true
+  useAttendance: boolean = true,
+  useLeave: boolean = true,
+  useShift: boolean = false
 ): Promise<PayrollRecord> => {
   const baseSalary = employee.grossSalary || employee.traineeSalary || 0;
-  const standardWorkDays = 27; // Số ngày chuẩn để tính lương
+  // Lấy các config từ system configs
+  const [standardWorkDays, socialInsuranceRate, overtimeRate, workHoursPerDay] = await Promise.all([
+    getConfigNumber('standard_work_days', 27),
+    getConfigNumber('social_insurance_rate', 10.5),
+    getConfigNumber('overtime_rate', 1.5),
+    getConfigNumber('work_hours_per_day', 8)
+  ]);
   
   // Auto-calculate from attendance if not provided and useAttendance is true
   let finalWorkDays = actualWorkDays;
@@ -950,17 +1075,30 @@ export const calculatePayroll = async (
     }
   }
   
+  // Trừ ngày nghỉ từ leave requests nếu useLeave = true
+  if (useLeave && finalWorkDays !== undefined) {
+    const leaveDays = await calculateLeaveDays(employee.id, month);
+    finalWorkDays = Math.max(0, finalWorkDays - leaveDays);
+  }
+  
+  // Có thể sử dụng shift registrations để tính ngày công (nếu useShift = true)
+  // Nhưng hiện tại chúng ta ưu tiên attendance, chỉ dùng shift nếu không có attendance
+  if (useShift && finalWorkDays === undefined) {
+    const shiftWorkDays = await calculateShiftWorkDays(employee.id, month);
+    finalWorkDays = shiftWorkDays;
+  }
+  
   // Fallback to default if still undefined
   finalWorkDays = finalWorkDays ?? standardWorkDays;
   finalOtHours = finalOtHours ?? 0;
   
-  // Lương theo ngày công: LCB/27 * số ngày công thực tế
-  const workDaySalary = (baseSalary / 27) * finalWorkDays;
-  // Lương OT: (LCB/27/8) * 1.5 * số giờ làm thêm
-  const otPay = (baseSalary / 27 / 8) * 1.5 * finalOtHours;
+  // Lương theo ngày công: LCB/standardWorkDays * số ngày công thực tế
+  const workDaySalary = (baseSalary / standardWorkDays) * finalWorkDays;
+  // Lương OT: (LCB/standardWorkDays/workHoursPerDay) * overtimeRate * số giờ làm thêm
+  const otPay = (baseSalary / standardWorkDays / workHoursPerDay) * overtimeRate * finalOtHours;
   // Công thức đúng: basicSalary (theo ngày công) + overtimePay + allowance + bonus - deductions
   const totalIncome = workDaySalary + otPay + allowance + bonus;
-  const deductions = totalIncome * 0.105; // 10.5% BHXH, Thuế, etc.
+  const deductions = totalIncome * (socialInsuranceRate / 100); // BHXH, Thuế theo config
   const netSalary = totalIncome - deductions;
   
   // Đảm bảo tính toán chính xác (fix lỗi underpay)
@@ -1480,6 +1618,9 @@ export const updateSystemConfig = async (id: string, value: string, updatedBy?: 
       if (error) throw new Error(`Lỗi cập nhật config: ${error.message}`);
       if (!updatedConfig) throw new Error('Không tìm thấy config');
 
+      // Invalidate cache sau khi update
+      invalidateConfigCache();
+
         return {
         id: updatedConfig.id,
         key: updatedConfig.key,
@@ -1501,7 +1642,61 @@ export const updateSystemConfig = async (id: string, value: string, updatedBy?: 
   if (idx === -1) throw new Error('Không tìm thấy config');
   all[idx] = { ...all[idx], value, updatedAt: Date.now(), updatedBy };
   localStorage.setItem('hr_connect_system_configs', JSON.stringify(all));
+  invalidateConfigCache();
   return all[idx];
+};
+
+// ============ SYSTEM CONFIG HELPERS ============
+
+/** Cache để tránh load configs nhiều lần */
+let configCache: SystemConfig[] | null = null;
+let configCacheTime: number = 0;
+const CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 phút
+
+/** Load và cache system configs */
+const loadConfigsWithCache = async (): Promise<SystemConfig[]> => {
+  const now = Date.now();
+  if (configCache && (now - configCacheTime) < CONFIG_CACHE_TTL) {
+    return configCache;
+  }
+  configCache = await getSystemConfigs();
+  configCacheTime = now;
+  return configCache;
+};
+
+/** Lấy giá trị config theo key với fallback */
+export const getConfigValue = async (key: string, defaultValue: string): Promise<string> => {
+  try {
+    const configs = await loadConfigsWithCache();
+    const config = configs.find(c => c.key === key);
+    return config?.value || defaultValue;
+  } catch (error) {
+    console.error(`Error getting config ${key}:`, error);
+    return defaultValue;
+  }
+};
+
+/** Lấy giá trị config dạng number với fallback */
+export const getConfigNumber = async (key: string, defaultValue: number): Promise<number> => {
+  const value = await getConfigValue(key, String(defaultValue));
+  const num = parseFloat(value);
+  return isNaN(num) ? defaultValue : num;
+};
+
+/** Lấy office location từ config */
+export const getOfficeLocation = async (): Promise<{ lat: number; lng: number; radiusMeters: number }> => {
+  const [lat, lng, radius] = await Promise.all([
+    getConfigNumber('office_latitude', 10.040675858019696),
+    getConfigNumber('office_longitude', 105.78463187148355),
+    getConfigNumber('office_radius_meters', 200)
+  ]);
+  return { lat, lng, radiusMeters: radius };
+};
+
+/** Invalidate config cache (gọi sau khi update config) */
+export const invalidateConfigCache = () => {
+  configCache = null;
+  configCacheTime = 0;
 };
 
 // ============ OTP CODES ============

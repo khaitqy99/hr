@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { PayrollRecord, User } from '../../types';
-import { getAllPayrolls, getAllUsers } from '../../services/db';
+import { PayrollRecord, User, UserRole } from '../../types';
+import { getAllPayrolls, getAllUsers, calculatePayroll, createOrUpdatePayroll } from '../../services/db';
+import { exportToCSV } from '../../utils/export';
 
 interface PayrollManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
@@ -12,6 +13,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload 
   const [selectedMonth, setSelectedMonth] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isRecalculating, setIsRecalculating] = useState(false);
 
   useEffect(() => {
     const initData = async () => {
@@ -86,10 +88,83 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload 
     return options;
   };
 
+  const handleExport = () => {
+    if (payrollRecords.length === 0) {
+      alert('Không có dữ liệu để xuất');
+      return;
+    }
+    const filename = `payroll_${selectedMonth}_${Date.now()}.csv`;
+    exportToCSV(payrollRecords, filename);
+  };
+
+  const handleRecalculateAll = async () => {
+    if (!selectedMonth) {
+      alert('Vui lòng chọn tháng');
+      return;
+    }
+
+    if (!confirm(`Bạn có chắc muốn tính lại lương cho tất cả nhân viên trong tháng ${selectedMonth}?\n\nLưu ý: Thao tác này sẽ tính lại từ dữ liệu chấm công, nghỉ phép và đăng ký ca.`)) {
+      return;
+    }
+
+    setIsRecalculating(true);
+    setError(null);
+
+    try {
+      const activeEmployees = employees.filter(e => e.role !== UserRole.ADMIN && e.status === 'ACTIVE');
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const employee of activeEmployees) {
+        try {
+          // Tính lại lương với tích hợp attendance, leave và shift
+          const payroll = await calculatePayroll(
+            employee,
+            selectedMonth,
+            undefined, // actualWorkDays - sẽ tính từ attendance
+            undefined, // otHours - sẽ tính từ attendance
+            0, // allowance
+            0, // bonus
+            true, // useAttendance
+            true, // useLeave - trừ ngày nghỉ
+            false // useShift - không dùng shift làm nguồn chính
+          );
+
+          // Lấy payroll hiện tại để giữ lại allowance và bonus nếu có
+          const existingPayroll = payrollRecords.find(p => p.userId === employee.id);
+          if (existingPayroll) {
+            payroll.allowance = existingPayroll.allowance;
+            payroll.bonus = existingPayroll.bonus;
+            payroll.status = existingPayroll.status; // Giữ nguyên trạng thái thanh toán
+          }
+
+          await createOrUpdatePayroll(payroll);
+          successCount++;
+        } catch (err: any) {
+          console.error(`Error calculating payroll for ${employee.name}:`, err);
+          errorCount++;
+        }
+      }
+
+      // Reload data
+      await loadData(selectedMonth);
+
+      if (errorCount > 0) {
+        alert(`Tính lại lương hoàn tất!\n\nThành công: ${successCount} nhân viên\nLỗi: ${errorCount} nhân viên`);
+      } else {
+        alert(`Tính lại lương thành công cho ${successCount} nhân viên!`);
+      }
+    } catch (err: any) {
+      setError('Lỗi khi tính lại lương: ' + (err?.message || 'Vui lòng thử lại'));
+      console.error('Error recalculating payroll:', err);
+    } finally {
+      setIsRecalculating(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-slate-800">Quản lý bảng lương</h2>
         <div>
           <select
             value={selectedMonth}
@@ -102,6 +177,28 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload 
               </option>
             ))}
           </select>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleRecalculateAll}
+            disabled={loading || isRecalculating || !selectedMonth}
+            className="px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className={`w-4 h-4 ${isRecalculating ? 'animate-spin' : ''}`}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+            </svg>
+            {isRecalculating ? 'Đang tính...' : 'Tính lại lương'}
+          </button>
+          <button
+            onClick={handleExport}
+            disabled={loading || payrollRecords.length === 0}
+            className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+            Xuất CSV
+          </button>
         </div>
       </div>
 

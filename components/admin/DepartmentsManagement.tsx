@@ -104,7 +104,6 @@ const DepartmentsManagement: React.FC<DepartmentsManagementProps> = ({ onRegiste
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-slate-800">Quản lý phòng ban</h2>
         <button
           onClick={() => { resetForm(); setShowForm(true); }}
           className="px-6 py-3 rounded-xl text-sm font-bold bg-blue-600 text-white shadow-lg hover:bg-blue-700 transition-colors"

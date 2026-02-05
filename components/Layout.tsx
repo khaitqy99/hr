@@ -5,7 +5,7 @@ interface LayoutProps {
   children: React.ReactNode;
   user: User;
   currentView: string;
-  setView: (view: string) => void;
+  setView: (view: string, options?: { employeeId?: string }) => void;
   onLogout: () => void;
 }
 
@@ -41,7 +41,7 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
   if (user.role === UserRole.ADMIN) {
     views = ['admin', 'salary-management'];
   } else {
-    // Nhân viên có các tab chức năng nhân viên (không có tab nghỉ phép - chỉ admin quản lý)
+    // Nhân viên có các tab chức năng nhân viên
     views = ['dashboard', 'checkin', 'shifts', 'payroll', 'notifications'];
   }
 
@@ -276,7 +276,8 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
               <button
                 onClick={() => {
                   setShowProfileMenu(false);
-                  // Navigate to profile if exists, or just close menu
+                  // Navigate to employee profile view
+                  setView('employee-profile', { employeeId: user.id });
                 }}
                 className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center space-x-2"
               >

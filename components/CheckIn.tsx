@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { User, AttendanceType, AttendanceStatus, OFFICE_LOCATION, AttendanceRecord, ShiftRegistration, ShiftTime } from '../types';
-import { saveAttendance, getAttendance, getShiftRegistrations } from '../services/db';
+import { User, AttendanceType, AttendanceStatus, AttendanceRecord, ShiftRegistration, ShiftTime } from '../types';
+import { saveAttendance, getAttendance, getShiftRegistrations, getOfficeLocation } from '../services/db';
 import { uploadAttendancePhoto } from '../services/storage';
 
 const CUSTOM_SHIFT_HOURS = 9; // Ca CUSTOM: nhân viên làm đủ 9 tiếng
@@ -40,6 +40,7 @@ interface CheckInProps {
 const CheckIn: React.FC<CheckInProps> = ({ user }) => {
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [distance, setDistance] = useState<number | null>(null);
+  const [officeLocation, setOfficeLocation] = useState<{ lat: number; lng: number; radiusMeters: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [lastRecord, setLastRecord] = useState<AttendanceRecord | null>(null);
@@ -133,8 +134,16 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     loadAttendance();
-    getLocation();
     startCamera(); // Auto start camera
+    
+    // Load office location từ config
+    getOfficeLocation().then(loc => {
+      setOfficeLocation(loc);
+    }).catch(err => {
+      console.error('Error loading office location:', err);
+      // Fallback về giá trị mặc định
+      setOfficeLocation({ lat: 10.040675858019696, lng: 105.78463187148355, radiusMeters: 200 });
+    });
 
     // Khóa màn hình chiều dọc đứng (portrait)
     if (screen.orientation?.lock) {
@@ -151,6 +160,20 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
       }
     };
   }, [user.id, loadAttendance]);
+
+  // Tính lại distance khi officeLocation thay đổi và đã có location
+  useEffect(() => {
+    if (location && officeLocation) {
+      setDistance(calculateDistance(location.lat, location.lng, officeLocation.lat, officeLocation.lng));
+    }
+  }, [location, officeLocation]);
+
+  // Gọi getLocation sau khi officeLocation đã được load (chỉ một lần)
+  useEffect(() => {
+    if (officeLocation && !location) {
+      getLocation();
+    }
+  }, [officeLocation]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stopCamera = () => {
     if (streamRef.current) {
@@ -211,19 +234,22 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
 
-  const getLocation = () => {
+  const getLocation = useCallback(() => {
     setLoading(true);
     if (!navigator.geolocation) { setError("Không hỗ trợ GPS"); setLoading(false); return; }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const { latitude, longitude } = pos.coords;
         setLocation({ lat: latitude, lng: longitude });
-        setDistance(calculateDistance(latitude, longitude, OFFICE_LOCATION.lat, OFFICE_LOCATION.lng));
-        setError(null); setLoading(false);
+        // Sử dụng office location từ state hoặc fallback
+        const office = officeLocation || { lat: 10.040675858019696, lng: 105.78463187148355, radiusMeters: 200 };
+        setDistance(calculateDistance(latitude, longitude, office.lat, office.lng));
+        setError(null); 
+        setLoading(false);
       },
       () => { setError("Bật GPS để chấm công"); setLoading(false); }
     );
-  };
+  }, [officeLocation]);
 
   const handleAttendance = async (type: AttendanceType) => {
     if (!location) { setError("Cần vị trí GPS"); return; }
@@ -284,7 +310,8 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
   };
 
   const isCheckInNext = !lastRecord || lastRecord.type === AttendanceType.CHECK_OUT;
-  const isWithinRange = distance !== null && distance <= OFFICE_LOCATION.radiusMeters;
+  const office = officeLocation || { lat: 10.040675858019696, lng: 105.78463187148355, radiusMeters: 200 };
+  const isWithinRange = distance !== null && distance <= office.radiusMeters;
   const canAction = isWithinRange || !navigator.onLine;
 
   return (

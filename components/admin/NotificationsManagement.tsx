@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import type { Notification, User } from '../../types';
+import type { Notification, User, Department } from '../../types';
 import { UserRole } from '../../types';
-import { getAllUsers, getAllNotifications, createNotification, deleteNotification } from '../../services/db';
+import { getAllUsers, getAllNotifications, createNotification, deleteNotification, getDepartments } from '../../services/db';
 
 interface NotificationsManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
@@ -10,9 +10,11 @@ interface NotificationsManagementProps {
 const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onRegisterReload }) => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
     userId: 'ALL',
+    departmentId: '',
     title: '',
     message: '',
     type: 'info' as 'info' | 'warning' | 'success' | 'error',
@@ -29,9 +31,13 @@ const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onReg
   }, [onRegisterReload]);
 
   const loadData = async () => {
-    const users = await getAllUsers();
+    const [users, depts, allNotifications] = await Promise.all([
+      getAllUsers(),
+      getDepartments(),
+      getAllNotifications()
+    ]);
     setEmployees(users);
-    const allNotifications = await getAllNotifications();
+    setDepartments(depts.filter(d => d.isActive));
     setNotifications(allNotifications);
   };
 
@@ -44,25 +50,33 @@ const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onReg
 
     try {
       let createdNotifications: Notification[] = [];
+      let employeesToNotify: User[] = [];
 
+      // Determine target employees
       if (formData.userId === 'ALL') {
-        // Send to all employees
-        const employeesToNotify = employees.filter(e => e.role !== UserRole.ADMIN);
-        for (const emp of employeesToNotify) {
-          const notification = await createNotification({
-            userId: emp.id,
-            title: formData.title.trim(),
-            message: formData.message.trim(),
-            read: false,
-            timestamp: Date.now(),
-            type: formData.type,
-          });
-          createdNotifications.push(notification);
+        if (formData.departmentId) {
+          // Send to all employees in selected department
+          const selectedDept = departments.find(d => d.id === formData.departmentId);
+          employeesToNotify = employees.filter(e => 
+            e.role !== UserRole.ADMIN && 
+            e.department === selectedDept?.name
+          );
+        } else {
+          // Send to all employees
+          employeesToNotify = employees.filter(e => e.role !== UserRole.ADMIN);
         }
       } else {
         // Send to specific user
+        const selectedUser = employees.find(e => e.id === formData.userId);
+        if (selectedUser) {
+          employeesToNotify = [selectedUser];
+        }
+      }
+
+      // Create notifications for all target employees
+      for (const emp of employeesToNotify) {
         const notification = await createNotification({
-          userId: formData.userId,
+          userId: emp.id,
           title: formData.title.trim(),
           message: formData.message.trim(),
           read: false,
@@ -74,7 +88,7 @@ const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onReg
 
       loadData();
       resetForm();
-      alert('Gửi thông báo thành công!');
+      alert(`Gửi thông báo thành công đến ${createdNotifications.length} người nhận!`);
     } catch (error: any) {
       alert(error?.message || 'Có lỗi xảy ra khi gửi thông báo');
     }
@@ -83,6 +97,7 @@ const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onReg
   const resetForm = () => {
     setFormData({
       userId: 'ALL',
+      departmentId: '',
       title: '',
       message: '',
       type: 'info',
@@ -135,7 +150,6 @@ const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onReg
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-slate-800">Quản lý thông báo</h2>
         <button
           onClick={() => setShowForm(true)}
           className="px-6 py-3 rounded-xl text-sm font-bold bg-blue-600 text-white shadow-lg hover:bg-blue-700 transition-colors"
@@ -152,7 +166,9 @@ const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onReg
               <label className="block text-xs font-bold text-slate-500 mb-1">Gửi đến</label>
               <select
                 value={formData.userId}
-                onChange={e => setFormData({ ...formData, userId: e.target.value })}
+                onChange={e => {
+                  setFormData({ ...formData, userId: e.target.value, departmentId: '' });
+                }}
                 className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm"
               >
                 <option value="ALL">Tất cả nhân viên</option>
@@ -161,6 +177,22 @@ const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onReg
                 ))}
               </select>
             </div>
+            {formData.userId === 'ALL' && (
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Phòng ban (tùy chọn)</label>
+                <select
+                  value={formData.departmentId}
+                  onChange={e => setFormData({ ...formData, departmentId: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm"
+                >
+                  <option value="">Tất cả phòng ban</option>
+                  {departments.map(dept => (
+                    <option key={dept.id} value={dept.id}>{dept.name} {dept.code && `(${dept.code})`}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-400 mt-1">Chọn phòng ban để gửi đến tất cả nhân viên trong phòng ban đó</p>
+              </div>
+            )}
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">Loại thông báo</label>
               <select

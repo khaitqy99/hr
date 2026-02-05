@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { User, UserRole, ContractType, EmployeeStatus, EMPLOYEE_STATUS_LABELS } from '../../types';
-import { getAllUsers, createUser } from '../../services/db';
+import { User, UserRole, ContractType, EmployeeStatus, EMPLOYEE_STATUS_LABELS, CONTRACT_TYPE_LABELS, Department } from '../../types';
+import { getAllUsers, createUser, getDepartments } from '../../services/db';
+import { exportToCSV } from '../../utils/export';
 
 interface UsersManagementProps {
   onEditUser: (user: User) => void;
@@ -16,6 +17,7 @@ const defaultUserForm = {
 
 const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegisterReload }) => {
   const [employees, setEmployees] = useState<User[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [showUserForm, setShowUserForm] = useState(false);
   const [userForm, setUserForm] = useState(defaultUserForm);
   const [userFormError, setUserFormError] = useState('');
@@ -32,8 +34,12 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
   }, [onRegisterReload]);
 
   const loadData = async () => {
-    const users = await getAllUsers();
+    const [users, depts] = await Promise.all([
+      getAllUsers(),
+      getDepartments()
+    ]);
     setEmployees(users);
+    setDepartments(depts.filter(d => d.isActive)); // Chỉ lấy phòng ban đang hoạt động
   };
 
   const validateForm = (): boolean => {
@@ -95,10 +101,30 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
     return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
   };
 
+  const handleExport = () => {
+    if (employees.length === 0) {
+      alert('Không có dữ liệu để xuất');
+      return;
+    }
+    const exportData = employees.map(emp => ({
+      'Họ tên': emp.name,
+      'Email': emp.email,
+      'Phòng ban': emp.department,
+      'Mã NV': emp.employeeCode || '',
+      'Chức danh': emp.jobTitle || '',
+      'Vai trò': emp.role === UserRole.ADMIN ? 'Admin' : 'Nhân viên',
+      'Loại hợp đồng': emp.contractType ? CONTRACT_TYPE_LABELS[emp.contractType] : '',
+      'Trạng thái': emp.status ? EMPLOYEE_STATUS_LABELS[emp.status] : '',
+      'Lương cơ bản': emp.grossSalary ? formatCurrency(emp.grossSalary) : '',
+      'Lương BHXH': emp.socialInsuranceSalary ? formatCurrency(emp.socialInsuranceSalary) : '',
+      'Lương học việc': emp.traineeSalary ? formatCurrency(emp.traineeSalary) : '',
+    }));
+    exportToCSV(exportData, `users_${Date.now()}.csv`);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-slate-800">Quản lý nhân viên</h2>
         <button
           type="button"
           onClick={() => { 
@@ -110,6 +136,16 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
           className="px-6 py-3 rounded-xl text-sm font-bold bg-blue-600 text-white shadow-lg hover:bg-blue-700 transition-colors"
         >
           {showUserForm ? 'Đóng form' : '+ Thêm nhân viên'}
+        </button>
+        <button
+          onClick={handleExport}
+          disabled={employees.length === 0}
+          className="px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+          </svg>
+          Xuất CSV
         </button>
       </div>
 
@@ -153,20 +189,30 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">Bộ phận *</label>
-              <input 
-                type="text" 
-                required 
-                value={userForm.department} 
+              <select
+                required
+                value={userForm.department}
                 onChange={e => {
                   setUserForm(f => ({ ...f, department: e.target.value }));
                   if (fieldErrors.department) setFieldErrors(prev => ({ ...prev, department: undefined }));
-                }} 
-                placeholder="IT / HR / Kinh doanh" 
+                }}
                 className={`w-full rounded-xl border px-4 py-2.5 text-sm ${
                   fieldErrors.department ? 'border-red-300 bg-red-50' : 'border-slate-200'
-                }`} 
-              />
+                }`}
+              >
+                <option value="">-- Chọn phòng ban --</option>
+                {departments.map(dept => (
+                  <option key={dept.id} value={dept.name}>
+                    {dept.name} {dept.code ? `(${dept.code})` : ''}
+                  </option>
+                ))}
+              </select>
               {fieldErrors.department && <span className="text-xs text-red-600 mt-1 block">{fieldErrors.department}</span>}
+              {departments.length === 0 && (
+                <p className="text-xs text-amber-600 mt-1">
+                  ⚠️ Chưa có phòng ban nào. Vui lòng tạo phòng ban trước.
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">Mã nhân viên</label>

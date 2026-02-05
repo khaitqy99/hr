@@ -74,10 +74,6 @@ const SystemConfigManagement: React.FC<SystemConfigManagementProps> = ({ onRegis
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-slate-800">Cấu hình hệ thống</h2>
-      </div>
-
       {Object.entries(groupedConfigs).map(([category, categoryConfigs]) => (
         <div key={category} className="bg-white p-6 rounded-2xl shadow-sm border border-sky-50">
           <h3 className="text-lg font-bold text-slate-700 mb-4">{getCategoryLabel(category)}</h3>

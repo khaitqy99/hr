@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { getAllUsers, getAllAttendance, getLeaveRequests, getShiftRegistrations, getAllPayrolls } from '../../services/db';
-import { UserRole, ShiftTime, OFF_TYPE_LABELS } from '../../types';
+import { getAllUsers, getAllAttendance, getShiftRegistrations, getAllPayrolls, getDepartments } from '../../services/db';
+import { UserRole, ShiftTime, OFF_TYPE_LABELS, Department, User } from '../../types';
+import { exportToCSV } from '../../utils/export';
 
 interface DataExportManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
@@ -9,66 +10,124 @@ interface DataExportManagementProps {
 const DataExportManagement: React.FC<DataExportManagementProps> = ({ onRegisterReload }) => {
   const [exportType, setExportType] = useState<string>('USERS');
   const [isExporting, setIsExporting] = useState(false);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [employees, setEmployees] = useState<User[]>([]);
+  
+  // Filters
+  const [selectedDepartment, setSelectedDepartment] = useState<string>('');
+  const [selectedEmployee, setSelectedEmployee] = useState<string>('');
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+  const [selectedMonth, setSelectedMonth] = useState<string>('');
 
   useEffect(() => {
-    // Component này không có loadData, nhưng vẫn đăng ký để nút reload không bị disable
+    loadInitialData();
     if (onRegisterReload) {
       onRegisterReload(async () => {
-        // No-op: component này chỉ export dữ liệu, không cần reload
+        await loadInitialData();
       });
     }
   }, [onRegisterReload]);
 
-  const exportToCSV = (data: any[], filename: string) => {
-    if (data.length === 0) {
-      alert('Không có dữ liệu để xuất');
-      return;
+  const loadInitialData = async () => {
+    const [depts, users] = await Promise.all([
+      getDepartments(),
+      getAllUsers()
+    ]);
+    setDepartments(depts.filter(d => d.isActive));
+    setEmployees(users.filter(u => u.role !== UserRole.ADMIN));
+    
+    // Set default month cho payroll
+    const now = new Date();
+    const currentMonth = `${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+    setSelectedMonth(currentMonth);
+  };
+
+
+  // Helper để filter theo thời gian
+  const filterByDateRange = <T extends { timestamp?: number; date?: number; createdAt?: number; startDate?: number; endDate?: number }>(
+    data: T[],
+    startDateStr: string,
+    endDateStr: string
+  ): T[] => {
+    if (!startDateStr && !endDateStr) return data;
+    
+    const start = startDateStr ? new Date(startDateStr + 'T00:00:00').getTime() : 0;
+    const end = endDateStr ? new Date(endDateStr + 'T23:59:59').getTime() : Date.now();
+    
+    return data.filter(item => {
+      const itemDate = item.timestamp || item.date || item.createdAt || item.startDate || item.endDate || 0;
+      return itemDate >= start && itemDate <= end;
+    });
+  };
+
+  // Helper để filter theo phòng ban và nhân viên
+  const filterByUser = <T extends { userId?: string }>(
+    data: T[],
+    department: string,
+    employeeId: string
+  ): T[] => {
+    let filtered = data;
+    
+    if (employeeId) {
+      filtered = filtered.filter(item => item.userId === employeeId);
+    } else if (department) {
+      const deptUserIds = employees
+        .filter(u => u.department === department)
+        .map(u => u.id);
+      filtered = filtered.filter(item => item.userId && deptUserIds.includes(item.userId));
     }
-
-    const headers = Object.keys(data[0]);
-    const csvContent = [
-      headers.join(','),
-      ...data.map(row => headers.map(header => {
-        const value = row[header];
-        if (value === null || value === undefined) return '';
-        if (typeof value === 'object') return JSON.stringify(value);
-        return String(value).replace(/,/g, ';');
-      }).join(','))
-    ].join('\n');
-
-    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', filename);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    
+    return filtered;
   };
 
   const handleExport = async () => {
     setIsExporting(true);
     try {
-      const now = new Date();
-      const currentMonth = `${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+      const month = selectedMonth || `${String(new Date().getMonth() + 1).padStart(2, '0')}-${new Date().getFullYear()}`;
       
       switch (exportType) {
-        case 'USERS':
-          const users = (await getAllUsers()).filter(u => u.role !== UserRole.ADMIN);
+        case 'USERS': {
+          let users = (await getAllUsers()).filter(u => u.role !== UserRole.ADMIN);
+          
+          // Filter theo phòng ban
+          if (selectedDepartment) {
+            users = users.filter(u => u.department === selectedDepartment);
+          }
+          
+          // Filter theo nhân viên cụ thể
+          if (selectedEmployee) {
+            users = users.filter(u => u.id === selectedEmployee);
+          }
+          
           exportToCSV(users, `users_${Date.now()}.csv`);
           break;
-        case 'ATTENDANCE':
-          // Tối ưu: Load với limit để tránh lag
-          const attendance = await getAllAttendance(1000);
+        }
+        case 'ATTENDANCE': {
+          let attendance = await getAllAttendance(5000); // Tăng limit để có thể filter tốt hơn
+          
+          // Filter theo thời gian
+          if (startDate || endDate) {
+            attendance = filterByDateRange(attendance, startDate, endDate);
+          }
+          
+          // Filter theo phòng ban/nhân viên
+          attendance = filterByUser(attendance, selectedDepartment, selectedEmployee);
+          
           exportToCSV(attendance, `attendance_${Date.now()}.csv`);
           break;
-        case 'LEAVE':
-          const leaves = await getLeaveRequests(undefined, UserRole.ADMIN);
-          exportToCSV(leaves, `leave_requests_${Date.now()}.csv`);
-          break;
+        }
         case 'SHIFTS': {
-          const shifts = await getShiftRegistrations(undefined, UserRole.ADMIN);
+          let shifts = await getShiftRegistrations(undefined, UserRole.ADMIN);
+          
+          // Filter theo thời gian
+          if (startDate || endDate) {
+            shifts = filterByDateRange(shifts, startDate, endDate);
+          }
+          
+          // Filter theo phòng ban/nhân viên
+          shifts = filterByUser(shifts, selectedDepartment, selectedEmployee);
+          
           const shiftsWithLabel = shifts.map(s => ({
             ...s,
             offTypeLabel: s.shift === ShiftTime.OFF && s.offType && OFF_TYPE_LABELS[s.offType] ? OFF_TYPE_LABELS[s.offType] : (s.shift === ShiftTime.OFF ? 'Ngày off' : '')
@@ -76,27 +135,38 @@ const DataExportManagement: React.FC<DataExportManagementProps> = ({ onRegisterR
           exportToCSV(shiftsWithLabel, `shift_registrations_${Date.now()}.csv`);
           break;
         }
-        case 'PAYROLL':
-          const payrolls = await getAllPayrolls(currentMonth);
-          exportToCSV(payrolls, `payroll_${currentMonth}_${Date.now()}.csv`);
+        case 'PAYROLL': {
+          let payrolls = await getAllPayrolls(month);
+          
+          // Filter theo phòng ban/nhân viên
+          payrolls = filterByUser(payrolls, selectedDepartment, selectedEmployee);
+          
+          exportToCSV(payrolls, `payroll_${month}_${Date.now()}.csv`);
           break;
-        case 'ALL':
-          // Export all data với pagination để tránh lag
-          // Tối ưu: Load từng loại dữ liệu một cách tuần tự và hiển thị progress
+        }
+        case 'ALL': {
           const allData: any = {};
           
-          // Load users (thường ít nên load hết)
-          allData.users = (await getAllUsers()).filter(u => u.role !== UserRole.ADMIN);
+          // Load users với filter
+          let users = (await getAllUsers()).filter(u => u.role !== UserRole.ADMIN);
+          if (selectedDepartment) users = users.filter(u => u.department === selectedDepartment);
+          if (selectedEmployee) users = users.filter(u => u.id === selectedEmployee);
+          allData.users = users;
           
-          // Load attendance với limit lớn hơn (1000 records)
-          allData.attendance = await getAllAttendance(1000);
+          // Load attendance với filter
+          let attendance = await getAllAttendance(5000);
+          if (startDate || endDate) attendance = filterByDateRange(attendance, startDate, endDate);
+          attendance = filterByUser(attendance, selectedDepartment, selectedEmployee);
+          allData.attendance = attendance;
           
-          // Load các loại còn lại
-          allData.leaves = await getLeaveRequests(undefined, UserRole.ADMIN);
-          allData.shifts = await getShiftRegistrations(undefined, UserRole.ADMIN);
-          allData.payrolls = await getAllPayrolls(currentMonth);
+          // Load shifts với filter
+          let shifts = await getShiftRegistrations(undefined, UserRole.ADMIN);
+          if (startDate || endDate) shifts = filterByDateRange(shifts, startDate, endDate);
+          shifts = filterByUser(shifts, selectedDepartment, selectedEmployee);
+          allData.shifts = shifts;
           
-          // Tối ưu: Sử dụng streaming để tạo file lớn
+          allData.payrolls = await getAllPayrolls(month);
+          
           const jsonData = JSON.stringify(allData, null, 2);
           const blob = new Blob([jsonData], { type: 'application/json' });
           const link = document.createElement('a');
@@ -106,12 +176,12 @@ const DataExportManagement: React.FC<DataExportManagementProps> = ({ onRegisterR
           link.style.visibility = 'hidden';
           document.body.appendChild(link);
           link.click();
-          // Cleanup sau khi download
           setTimeout(() => {
             URL.revokeObjectURL(url);
             document.body.removeChild(link);
           }, 100);
           break;
+        }
       }
       alert('Xuất dữ liệu thành công!');
     } catch (error) {
@@ -146,10 +216,6 @@ const DataExportManagement: React.FC<DataExportManagementProps> = ({ onRegisterR
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-slate-800">Xuất/Nhập dữ liệu</h2>
-      </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Export */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-sky-50">
@@ -159,17 +225,101 @@ const DataExportManagement: React.FC<DataExportManagementProps> = ({ onRegisterR
               <label className="block text-xs font-bold text-slate-500 mb-2">Chọn loại dữ liệu</label>
               <select
                 value={exportType}
-                onChange={e => setExportType(e.target.value)}
+                onChange={e => {
+                  setExportType(e.target.value);
+                  // Reset filters khi đổi loại export
+                  setSelectedDepartment('');
+                  setSelectedEmployee('');
+                  setStartDate('');
+                  setEndDate('');
+                }}
                 className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm"
               >
                 <option value="USERS">Danh sách nhân viên</option>
                 <option value="ATTENDANCE">Lịch sử chấm công</option>
-                <option value="LEAVE">Đơn nghỉ phép</option>
                 <option value="SHIFTS">Đăng ký ca</option>
                 <option value="PAYROLL">Bảng lương</option>
                 <option value="ALL">Tất cả (Backup JSON)</option>
               </select>
             </div>
+
+            {/* Filter theo phòng ban */}
+            {(exportType === 'USERS' || exportType === 'ATTENDANCE' || exportType === 'SHIFTS' || exportType === 'ALL') && (
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-2">Phòng ban (tùy chọn)</label>
+                <select
+                  value={selectedDepartment}
+                  onChange={e => {
+                    setSelectedDepartment(e.target.value);
+                    setSelectedEmployee(''); // Reset employee khi đổi department
+                  }}
+                  className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm"
+                >
+                  <option value="">Tất cả phòng ban</option>
+                  {departments.map(dept => (
+                    <option key={dept.id} value={dept.name}>{dept.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Filter theo nhân viên */}
+            {(exportType === 'USERS' || exportType === 'ATTENDANCE' || exportType === 'SHIFTS' || exportType === 'ALL') && (
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-2">Nhân viên (tùy chọn)</label>
+                <select
+                  value={selectedEmployee}
+                  onChange={e => setSelectedEmployee(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm"
+                >
+                  <option value="">Tất cả nhân viên</option>
+                  {employees
+                    .filter(emp => !selectedDepartment || emp.department === selectedDepartment)
+                    .map(emp => (
+                      <option key={emp.id} value={emp.id}>{emp.name} - {emp.department}</option>
+                    ))}
+                </select>
+              </div>
+            )}
+
+            {/* Filter theo thời gian */}
+            {(exportType === 'ATTENDANCE' || exportType === 'SHIFTS' || exportType === 'ALL') && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-2">Từ ngày</label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={e => setStartDate(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-2">Đến ngày</label>
+                  <input
+                    type="date"
+                    value={endDate}
+                    min={startDate}
+                    onChange={e => setEndDate(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Chọn tháng cho payroll */}
+            {exportType === 'PAYROLL' && (
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-2">Chọn tháng</label>
+                <input
+                  type="month"
+                  value={selectedMonth}
+                  onChange={e => setSelectedMonth(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm"
+                />
+              </div>
+            )}
+
             <button
               onClick={handleExport}
               disabled={isExporting}

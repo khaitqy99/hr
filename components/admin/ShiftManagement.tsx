@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ShiftRegistration, RequestStatus, User, UserRole, ShiftTime, OFF_TYPE_LABELS } from '../../types';
-import { getShiftRegistrations, updateShiftStatus, getAllUsers } from '../../services/db';
+import { createPortal } from 'react-dom';
+import { ShiftRegistration, RequestStatus, User, UserRole, ShiftTime, OFF_TYPE_LABELS, Holiday, Department } from '../../types';
+import { getShiftRegistrations, updateShiftStatus, getAllUsers, getHolidays, getDepartments } from '../../services/db';
+import { exportToCSV } from '../../utils/export';
 
 const DAY_LABELS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 const DEFAULT_IN = '09:00';
@@ -30,16 +32,25 @@ function dateToKey(ts: number): string {
   return toDateKey(d);
 }
 
+const DAY_NAMES = ['Chủ nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
+/** Format ngày để hiển thị: "Thứ 3, 10/2/2025" */
+function formatDateLabel(d: Date): string {
+  return `${DAY_NAMES[d.getDay()]}, ${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
+}
+
 interface ShiftManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
+  setView?: (view: string, options?: { adminPath?: string }) => void;
 }
 
 /** Modal từ chối: đơn (id) hoặc hàng loạt (userId) */
 type RejectTarget = { type: 'single'; id: string } | { type: 'bulk'; userId: string };
 
-const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) => {
+const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, setView }) => {
   const [shiftRequests, setShiftRequests] = useState<ShiftRegistration[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [weekStart, setWeekStart] = useState<Date>(() => getWeekStart(new Date()));
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [departmentFilter, setDepartmentFilter] = useState<string>('');
@@ -49,9 +60,13 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [rejectTarget, setRejectTarget] = useState<RejectTarget | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  /** Chi tiết ô được chọn: nhân viên + ngày (có hoặc không có đăng ký) */
+  const [cellDetail, setCellDetail] = useState<{ user: User; date: Date; reg: ShiftRegistration | undefined } | null>(null);
 
   useEffect(() => {
     loadData();
+    loadHolidays();
+    loadDepartments();
   }, []);
 
   useEffect(() => {
@@ -74,6 +89,24 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
       setMessage({ type: 'error', text: 'Không tải được dữ liệu. Thử lại sau.' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadHolidays = async () => {
+    try {
+      const allHolidays = await getHolidays();
+      setHolidays(allHolidays);
+    } catch (e) {
+      console.error('Error loading holidays:', e);
+    }
+  };
+
+  const loadDepartments = async () => {
+    try {
+      const allDepartments = await getDepartments();
+      setDepartments(allDepartments.filter(d => d.isActive)); // Chỉ lấy phòng ban đang hoạt động
+    } catch (e) {
+      console.error('Error loading departments:', e);
     }
   };
 
@@ -220,9 +253,10 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
       .filter((u) => !searchName.trim() || u.name.toLowerCase().includes(searchName.trim().toLowerCase()));
   }, [employees, departmentFilter, searchName]);
 
-  const departments = useMemo(
-    () => Array.from(new Set(employees.map((u) => u.department).filter(Boolean))).sort(),
-    [employees]
+  // Sử dụng departments từ bảng departments thay vì từ employees
+  const departmentOptions = useMemo(
+    () => departments.map(d => d.name).sort(),
+    [departments]
   );
 
   const weekStats = useMemo(() => {
@@ -253,12 +287,77 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
     return `${start.getDate()}/${start.getMonth() + 1} – ${end.getDate()}/${end.getMonth() + 1}/${end.getFullYear()}`;
   }, [weekDates]);
 
+  /** Kiểm tra xem một ngày có phải là ngày lễ không */
+  const getHolidayForDate = (date: Date): Holiday | null => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const day = date.getDate();
+
+    for (const holiday of holidays) {
+      const holidayDate = new Date(holiday.date);
+      const holidayYear = holidayDate.getFullYear();
+      const holidayMonth = holidayDate.getMonth();
+      const holidayDay = holidayDate.getDate();
+
+      // Kiểm tra ngày lễ cố định hoặc ngày lễ lặp lại hàng năm
+      if (holiday.isRecurring) {
+        // Ngày lễ lặp lại: chỉ cần khớp tháng và ngày
+        if (holidayMonth === month && holidayDay === day) {
+          return holiday;
+        }
+      } else {
+        // Ngày lễ cố định: phải khớp cả năm, tháng, ngày
+        if (holidayYear === year && holidayMonth === month && holidayDay === day) {
+          return holiday;
+        }
+      }
+    }
+    return null;
+  };
+
+  // Lấy shifts trong tuần hiện tại với filter
+  const getShiftsInWeek = useMemo(() => {
+    return shiftRequests.filter(s => weekDateKeys.has(dateToKey(s.date)))
+      .filter(s => {
+        if (!departmentFilter) return true;
+        const emp = employees.find(e => e.id === s.userId);
+        return emp?.department === departmentFilter;
+      })
+      .filter(s => {
+        if (!searchName.trim()) return true;
+        const emp = employees.find(e => e.id === s.userId);
+        return emp?.name.toLowerCase().includes(searchName.trim().toLowerCase());
+      });
+  }, [shiftRequests, weekDateKeys, departmentFilter, searchName, employees]);
+
+  const handleExport = () => {
+    if (getShiftsInWeek.length === 0) {
+      alert('Không có dữ liệu để xuất');
+      return;
+    }
+    const exportData = getShiftsInWeek.map(s => {
+      const emp = employees.find(e => e.id === s.userId);
+      return {
+        'Nhân viên': emp?.name || s.userId,
+        'Phòng ban': emp?.department || '',
+        'Ngày': new Date(s.date).toLocaleDateString('vi-VN'),
+        'Loại ca': s.shift === ShiftTime.OFF ? 
+          (s.offType && OFF_TYPE_LABELS[s.offType] ? OFF_TYPE_LABELS[s.offType] : 'Ngày off') : 
+          'Ca làm việc',
+        'Giờ vào': s.startTime || '',
+        'Giờ ra': s.endTime || '',
+        'Trạng thái': s.status === RequestStatus.PENDING ? 'Chờ duyệt' :
+                      s.status === RequestStatus.APPROVED ? 'Đã duyệt' : 'Từ chối',
+        'Lý do từ chối': s.rejectionReason || '',
+        'Ngày tạo': new Date(s.createdAt).toLocaleDateString('vi-VN'),
+      };
+    });
+    const filename = `shift_registrations_${weekRangeLabel.replace(/\s+/g, '_')}_${Date.now()}.csv`;
+    exportToCSV(exportData, filename);
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <h2 className="text-2xl font-bold text-slate-800">Quản lý đăng ký ca</h2>
-      </div>
-
       {message && (
         <div
           className={`rounded-xl px-4 py-2 text-sm font-medium ${
@@ -309,25 +408,51 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
             </span>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t border-slate-100">
-          <span className="text-xs font-medium text-slate-500">Lọc:</span>
-          <select
-            value={departmentFilter}
-            onChange={(e) => setDepartmentFilter(e.target.value)}
-            className="rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white text-slate-700"
-          >
-            <option value="">Tất cả bộ phận</option>
-            {departments.map((d) => (
-              <option key={d} value={d}>{d}</option>
-            ))}
-          </select>
-          <input
-            type="text"
-            placeholder="Tìm theo tên..."
-            value={searchName}
-            onChange={(e) => setSearchName(e.target.value)}
-            className="rounded-xl border border-slate-200 px-3 py-2 text-sm w-44 text-slate-700 placeholder:text-slate-400"
-          />
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-3 pt-3 border-t border-slate-100">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-xs font-medium text-slate-500">Lọc:</span>
+            <select
+              value={departmentFilter}
+              onChange={(e) => setDepartmentFilter(e.target.value)}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white text-slate-700"
+            >
+              <option value="">Tất cả bộ phận</option>
+              {departmentOptions.map((d) => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+            <input
+              type="text"
+              placeholder="Tìm theo tên..."
+              value={searchName}
+              onChange={(e) => setSearchName(e.target.value)}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm w-44 text-slate-700 placeholder:text-slate-400"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {setView && (
+              <button
+                onClick={() => setView('admin', { adminPath: 'payroll' })}
+                className="px-4 py-2 bg-green-600 text-white rounded-xl text-xs font-bold hover:bg-green-700 transition-colors flex items-center gap-2"
+                title="Chuyển đến trang tính lương"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
+                </svg>
+                Tính lương
+              </button>
+            )}
+            <button
+              onClick={handleExport}
+              disabled={loading || getShiftsInWeek.length === 0}
+              className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+              </svg>
+              Xuất CSV ({getShiftsInWeek.length})
+            </button>
+          </div>
         </div>
       </div>
 
@@ -382,11 +507,24 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
                 <th className="px-2 py-2 text-left text-xs font-bold text-slate-600 uppercase border-r border-b border-slate-300">
                   Bộ phận
                 </th>
-                {weekDates.map((d, i) => (
-                  <th key={toDateKey(d)} colSpan={2} className="px-1 py-2 text-center text-xs font-bold text-slate-700 border-r border-b border-slate-300">
-                    {DAY_LABELS[i]} {d.getDate()}/{d.getMonth() + 1}
-                  </th>
-                ))}
+                {weekDates.map((d, i) => {
+                  const holiday = getHolidayForDate(d);
+                  return (
+                    <th key={toDateKey(d)} colSpan={2} className={`px-1 py-2 text-center text-xs font-bold border-r border-b border-slate-300 ${holiday ? 'bg-yellow-50 text-yellow-800' : 'text-slate-700'}`}>
+                      <div className="flex flex-col items-center gap-0.5">
+                        <div className="flex items-center gap-1">
+                          <span>{DAY_LABELS[i]} {d.getDate()}/{d.getMonth() + 1}</span>
+                          {holiday && <span className="text-[10px]" title={holiday.name}>🎉</span>}
+                        </div>
+                        {holiday && (
+                          <span className="text-[9px] font-medium text-yellow-700 truncate max-w-[60px]" title={holiday.name}>
+                            {holiday.name}
+                          </span>
+                        )}
+                      </div>
+                    </th>
+                  );
+                })}
               </tr>
               <tr>
                 <th className="px-3 py-1 text-[10px] font-medium text-slate-500 border-r border-b border-slate-300 first:border-l" />
@@ -427,13 +565,29 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
                       </td>
                       {weekDates.map((date) => {
                         const reg = getShiftFor(emp.id, date);
+                        const openDetail = (e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          setCellDetail({ user: emp, date, reg });
+                        };
                         if (!reg) {
                           return (
                             <React.Fragment key={toDateKey(date)}>
-                              <td className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs text-slate-300">
+                              <td
+                                role="button"
+                                tabIndex={0}
+                                onClick={openDetail}
+                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e as unknown as React.MouseEvent); } }}
+                                className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs text-slate-300 cursor-pointer hover:bg-slate-100"
+                              >
                                 —
                               </td>
-                              <td className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs text-slate-300">
+                              <td
+                                role="button"
+                                tabIndex={0}
+                                onClick={openDetail}
+                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e as unknown as React.MouseEvent); } }}
+                                className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs text-slate-300 cursor-pointer hover:bg-slate-100"
+                              >
                                 —
                               </td>
                             </React.Fragment>
@@ -450,7 +604,11 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
                             <React.Fragment key={toDateKey(date)}>
                               <td
                                 colSpan={2}
-                                className="px-2 py-2 border-r border-b border-slate-200 bg-red-50/80 text-red-700 text-xs font-medium text-center align-top"
+                                role="button"
+                                tabIndex={0}
+                                onClick={openDetail}
+                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e as unknown as React.MouseEvent); } }}
+                                className="px-2 py-2 border-r border-b border-slate-200 bg-red-50/80 text-red-700 text-xs font-medium text-center align-top cursor-pointer hover:bg-red-100/80"
                               >
                                 <div className="flex flex-col items-center gap-1 relative">
                                   <span
@@ -461,11 +619,11 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
                                   </span>
                                   <span>{reg.offType && OFF_TYPE_LABELS[reg.offType] ? OFF_TYPE_LABELS[reg.offType] : 'Ngày off'}</span>
                                   {reg.status === RequestStatus.PENDING && (
-                                    <div className="flex gap-1 mt-1" onClick={(e) => e.stopPropagation()}>
+                                    <div className="flex gap-1 mt-1">
                                       <button
                                         type="button"
                                         disabled={actionLoadingId === reg.id}
-                                        onClick={() => handleAction(reg.id, RequestStatus.APPROVED)}
+                                        onClick={(e) => { e.stopPropagation(); handleAction(reg.id, RequestStatus.APPROVED); }}
                                         className="px-2 py-0.5 bg-blue-600 text-white rounded-lg text-[10px] font-medium hover:bg-blue-700 disabled:opacity-50"
                                         title="Chấp thuận"
                                       >
@@ -474,7 +632,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
                                       <button
                                         type="button"
                                         disabled={actionLoadingId === reg.id}
-                                        onClick={() => handleAction(reg.id, RequestStatus.REJECTED)}
+                                        onClick={(e) => { e.stopPropagation(); handleAction(reg.id, RequestStatus.REJECTED); }}
                                         className="px-2 py-0.5 bg-white border border-slate-300 text-slate-600 rounded-lg text-[10px] font-medium hover:bg-slate-50 disabled:opacity-50"
                                         title="Từ chối"
                                       >
@@ -492,8 +650,11 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
                         return (
                           <React.Fragment key={toDateKey(date)}>
                             <td
-                              className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs relative align-top"
-                              onClick={(e) => e.stopPropagation()}
+                              role="button"
+                              tabIndex={0}
+                              onClick={openDetail}
+                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e as unknown as React.MouseEvent); } }}
+                              className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs relative align-top cursor-pointer hover:bg-slate-50"
                             >
                               <div className="font-medium text-slate-800">{inTime}</div>
                               <div
@@ -507,7 +668,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
                                   <button
                                     type="button"
                                     disabled={actionLoadingId === reg.id}
-                                    onClick={() => handleAction(reg.id, RequestStatus.APPROVED)}
+                                    onClick={(e) => { e.stopPropagation(); handleAction(reg.id, RequestStatus.APPROVED); }}
                                     className="px-2 py-0.5 bg-blue-600 text-white rounded-lg text-[10px] font-medium hover:bg-blue-700 disabled:opacity-50"
                                     title="Chấp thuận"
                                   >
@@ -516,7 +677,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
                                   <button
                                     type="button"
                                     disabled={actionLoadingId === reg.id}
-                                    onClick={() => handleAction(reg.id, RequestStatus.REJECTED)}
+                                    onClick={(e) => { e.stopPropagation(); handleAction(reg.id, RequestStatus.REJECTED); }}
                                     className="px-2 py-0.5 bg-white border border-slate-300 text-slate-600 rounded-lg text-[10px] font-medium hover:bg-slate-50 disabled:opacity-50"
                                     title="Từ chối"
                                   >
@@ -525,7 +686,13 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
                                 </div>
                               )}
                             </td>
-                            <td className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs align-top font-medium text-slate-800">
+                            <td
+                              role="button"
+                              tabIndex={0}
+                              onClick={openDetail}
+                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e as unknown as React.MouseEvent); } }}
+                              className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs align-top font-medium text-slate-800 cursor-pointer hover:bg-slate-50"
+                            >
                               {outTime}
                             </td>
                           </React.Fragment>
@@ -540,8 +707,83 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
         </div>
       </div>
 
-      {/* Modal nhập lý do từ chối */}
-      {rejectTarget && (
+      {/* Modal chi tiết ô (nhân viên + ngày) */}
+      {cellDetail && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setCellDetail(null)}>
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-md w-full p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-slate-800">Chi tiết ngày</h3>
+            {getHolidayForDate(cellDetail.date) && (() => {
+              const holiday = getHolidayForDate(cellDetail.date);
+              return holiday ? (
+                <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-3 mb-2">
+                  <p className="text-sm font-bold text-yellow-800 flex items-center gap-2">
+                    <span>🎉</span>
+                    <span>{holiday.name}</span>
+                  </p>
+                  <p className="text-xs text-yellow-700 mt-1">
+                    {holiday.type === 'NATIONAL' ? 'Ngày lễ quốc gia' : 
+                     holiday.type === 'COMPANY' ? 'Ngày lễ công ty' : 
+                     'Ngày lễ địa phương'}
+                    {holiday.isRecurring && ' • Lặp lại hàng năm'}
+                  </p>
+                  {holiday.description && (
+                    <p className="text-xs text-yellow-600 mt-1 italic">{holiday.description}</p>
+                  )}
+                </div>
+              ) : null;
+            })()}
+            <div className="space-y-2 text-sm">
+              <p><span className="font-medium text-slate-600">Nhân viên:</span> {cellDetail.user.name}</p>
+              <p><span className="font-medium text-slate-600">Bộ phận:</span> {cellDetail.user.department || '—'}</p>
+              <p><span className="font-medium text-slate-600">Ngày:</span> {formatDateLabel(cellDetail.date)}</p>
+              <div className="pt-2 border-t border-slate-200">
+                {!cellDetail.reg ? (
+                  <p className="text-slate-500">Chưa đăng ký ca cho ngày này.</p>
+                ) : (
+                  <div className="space-y-2">
+                    <p>
+                      <span className="font-medium text-slate-600">Trạng thái:</span>{' '}
+                      {cellDetail.reg.status === RequestStatus.PENDING && 'Chờ duyệt'}
+                      {cellDetail.reg.status === RequestStatus.APPROVED && 'Đã duyệt'}
+                      {cellDetail.reg.status === RequestStatus.REJECTED && 'Từ chối'}
+                    </p>
+                    {cellDetail.reg.shift === ShiftTime.OFF ? (
+                      <p>
+                        <span className="font-medium text-slate-600">Loại:</span>{' '}
+                        {cellDetail.reg.offType && OFF_TYPE_LABELS[cellDetail.reg.offType] ? OFF_TYPE_LABELS[cellDetail.reg.offType] : 'Ngày off'}
+                      </p>
+                    ) : (
+                      <>
+                        <p><span className="font-medium text-slate-600">Giờ vào:</span> {cellDetail.reg.startTime ?? DEFAULT_IN}</p>
+                        <p><span className="font-medium text-slate-600">Giờ ra:</span> {cellDetail.reg.endTime ?? DEFAULT_OUT}</p>
+                      </>
+                    )}
+                    {cellDetail.reg.status === RequestStatus.REJECTED && cellDetail.reg.rejectionReason && (
+                      <p className="mt-2 pt-2 border-t border-slate-100">
+                        <span className="font-medium text-slate-600">Lý do từ chối:</span>{' '}
+                        <span className="text-red-700">{cellDetail.reg.rejectionReason}</span>
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setCellDetail(null)}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Modal nhập lý do từ chối - render qua Portal để overlay phủ toàn màn hình */}
+      {rejectTarget && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setRejectTarget(null)}>
           <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-md w-full p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-slate-800">Lý do từ chối</h3>
@@ -572,7 +814,8 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

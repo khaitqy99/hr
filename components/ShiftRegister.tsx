@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User, ShiftRegistration, ShiftTime, RequestStatus, OffType, OFF_TYPE_LABELS } from '../types';
-import { registerShift, getShiftRegistrations } from '../services/db';
+import { User, ShiftRegistration, ShiftTime, RequestStatus, OffType, OFF_TYPE_LABELS, Holiday } from '../types';
+import { registerShift, getShiftRegistrations, getHolidays } from '../services/db';
 import CustomSelect from './CustomSelect';
 
 interface ShiftRegisterProps {
@@ -39,6 +39,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showAllShifts, setShowAllShifts] = useState(false);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
   const weekDaysRef = useRef<HTMLDivElement>(null);
   const [currentMonth, setCurrentMonth] = useState<Date>(() => {
     const today = new Date();
@@ -48,6 +49,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
 
   useEffect(() => {
     loadShifts();
+    loadHolidays();
   }, [user.id]);
 
   useEffect(() => {
@@ -70,6 +72,11 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
     // Sắp xếp theo ngày giảm dần (mới nhất trước)
     allShifts.sort((a, b) => b.date - a.date);
     setShifts([...allShifts]); // Tạo array mới để force re-render
+  };
+
+  const loadHolidays = async () => {
+    const allHolidays = await getHolidays();
+    setHolidays(allHolidays);
   };
 
   // Chuyển Date sang YYYY-MM-DD theo giờ địa phương (tránh lùi 1 ngày khi dùng toISOString)
@@ -128,11 +135,19 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
 
     const dateStr = toLocalDateStr(date);
     const registered = getRegisteredShift(date);
+    const holiday = getHolidayForDate(date);
 
     // Click vào ngày đã đăng ký → mở/đóng popup chi tiết
     if (registered) {
       setExpandedDate(expandedDate === dateStr ? null : dateStr);
       return;
+    }
+
+    // Nếu là ngày lễ và chưa chọn, tự động gợi ý chọn "Ngày off" với loại "LE"
+    if (holiday && !selectedDates.includes(dateStr)) {
+      // Tự động set là ngày off với loại nghỉ lễ
+      setDateShifts(prev => ({ ...prev, [dateStr]: ShiftTime.OFF }));
+      setDateOffTypes(prev => ({ ...prev, [dateStr]: OffType.LE }));
     }
 
     // Đang có popup mở mà bấm sang ngày khác (chưa xác nhận) → bỏ chọn ngày đó, chọn ngày mới và mở popup
@@ -289,6 +304,36 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
     return days[date.getDay()];
   };
 
+  /** Kiểm tra xem một ngày có phải là ngày lễ không */
+  const getHolidayForDate = (date: Date): Holiday | null => {
+    const dateStr = toLocalDateStr(date);
+    const dateTimestamp = new Date(dateStr + 'T00:00:00').getTime();
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const day = date.getDate();
+
+    for (const holiday of holidays) {
+      const holidayDate = new Date(holiday.date);
+      const holidayYear = holidayDate.getFullYear();
+      const holidayMonth = holidayDate.getMonth();
+      const holidayDay = holidayDate.getDate();
+
+      // Kiểm tra ngày lễ cố định hoặc ngày lễ lặp lại hàng năm
+      if (holiday.isRecurring) {
+        // Ngày lễ lặp lại: chỉ cần khớp tháng và ngày
+        if (holidayMonth === month && holidayDay === day) {
+          return holiday;
+        }
+      } else {
+        // Ngày lễ cố định: phải khớp cả năm, tháng, ngày
+        if (holidayYear === year && holidayMonth === month && holidayDay === day) {
+          return holiday;
+        }
+      }
+    }
+    return null;
+  };
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!allDatesHaveShifts()) return;
@@ -425,6 +470,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                     const registeredShift = getRegisteredShift(date);
                     const isExpanded = expandedDate === dateStr;
                     const isRegistered = registeredShift !== null;
+                    const holiday = getHolidayForDate(date);
                     
                     // Kiểm tra xem ngày có thuộc tháng hiện tại không
                     const isCurrentMonth = date.getMonth() === currentMonth.getMonth();
@@ -472,6 +518,12 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                                 }`}>
                                     {date.getDate()}
                                 </span>
+                                {/* Badge ngày lễ */}
+                                {holiday && !isRegistered && (
+                                    <span className="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-yellow-400 border border-yellow-500 shadow-sm" title={holiday.name}>
+                                        <span className="text-[6px] font-bold text-yellow-900 flex items-center justify-center h-full">🎉</span>
+                                    </span>
+                                )}
                                 {isRegistered && registeredShift && (
                                     <span className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center shadow-sm ${
                                         registeredShift.shift === ShiftTime.OFF ? 'bg-slate-500' : 'bg-green-500'
@@ -494,6 +546,17 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                                             /* Chi tiết ngày đã đăng ký */
                                             <>
                                                 <p className="text-xs font-bold text-slate-500 uppercase">Chi tiết đã đăng ký</p>
+                                                {holiday && (
+                                                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2 mb-2">
+                                                        <p className="text-[10px] font-bold text-yellow-800 flex items-center gap-1">
+                                                            <span>🎉</span>
+                                                            <span>{holiday.name}</span>
+                                                        </p>
+                                                        {holiday.type === 'NATIONAL' && (
+                                                            <p className="text-[9px] text-yellow-700 mt-0.5">Ngày lễ quốc gia</p>
+                                                        )}
+                                                    </div>
+                                                )}
                                                 <div className="space-y-2 text-sm">
                                                     <p className="font-bold text-slate-800">
                                                         {registeredShift.shift === ShiftTime.OFF
@@ -526,6 +589,23 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                                             </>
                                         ) : (
                                             <>
+                                        {/* Cảnh báo ngày lễ */}
+                                        {holiday && (
+                                            <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-2 mb-2">
+                                                <p className="text-[10px] font-bold text-yellow-800 flex items-center gap-1 mb-1">
+                                                    <span>⚠️</span>
+                                                    <span>Ngày lễ: {holiday.name}</span>
+                                                </p>
+                                                <p className="text-[9px] text-yellow-700">
+                                                    {holiday.type === 'NATIONAL' ? 'Ngày lễ quốc gia' : 
+                                                     holiday.type === 'COMPANY' ? 'Ngày lễ công ty' : 
+                                                     'Ngày lễ địa phương'}
+                                                </p>
+                                                <p className="text-[9px] text-yellow-700 mt-1 font-medium">
+                                                    💡 Khuyến nghị: Chọn "Ngày off" với loại "LỄ - Nghỉ lễ"
+                                                </p>
+                                            </div>
+                                        )}
                                         {/* Chọn loại: Ca làm / Ngày off */}
                                         <div className="flex gap-1 p-1 rounded-xl bg-slate-100">
                                             <button

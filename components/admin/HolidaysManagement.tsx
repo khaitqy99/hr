@@ -10,9 +10,11 @@ const HolidaysManagement: React.FC<HolidaysManagementProps> = ({ onRegisterReloa
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingHoliday, setEditingHoliday] = useState<Holiday | null>(null);
+  const [isDateRange, setIsDateRange] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     date: '',
+    endDate: '',
     type: 'NATIONAL' as 'NATIONAL' | 'COMPANY' | 'REGIONAL',
     isRecurring: true,
     description: '',
@@ -40,11 +42,20 @@ const HolidaysManagement: React.FC<HolidaysManagementProps> = ({ onRegisterReloa
       return;
     }
 
+    if (isDateRange && !formData.endDate) {
+      alert('Vui lòng chọn ngày kết thúc');
+      return;
+    }
+
+    if (isDateRange && formData.endDate && formData.endDate < formData.date) {
+      alert('Ngày kết thúc phải sau ngày bắt đầu');
+      return;
+    }
+
     try {
-      const dateTimestamp = new Date(formData.date).setHours(0, 0, 0, 0);
-      
       if (editingHoliday) {
-        // Update
+        // Update - chỉ cho phép edit ngày lễ đơn
+        const dateTimestamp = new Date(formData.date).setHours(0, 0, 0, 0);
         await updateHoliday(editingHoliday.id, {
           name: formData.name.trim(),
           date: dateTimestamp,
@@ -53,14 +64,56 @@ const HolidaysManagement: React.FC<HolidaysManagementProps> = ({ onRegisterReloa
           description: formData.description.trim() || undefined,
         });
       } else {
-        // Create
-        await createHoliday({
-          name: formData.name.trim(),
-          date: dateTimestamp,
-          type: formData.type,
-          isRecurring: formData.isRecurring,
-          description: formData.description.trim() || undefined,
-        });
+        // Create - có thể tạo ngày lễ đơn hoặc nhiều ngày
+        if (isDateRange && formData.endDate) {
+          // Tạo nhiều ngày lễ cho khoảng thời gian
+          const startDate = new Date(formData.date + 'T00:00:00');
+          const endDate = new Date(formData.endDate + 'T00:00:00');
+          const dates: number[] = []; // Lưu timestamp thay vì Date object
+          
+          // Tạo mảng các ngày trong khoảng (timestamp)
+          const currentDate = new Date(startDate);
+          while (currentDate <= endDate) {
+            dates.push(new Date(currentDate).setHours(0, 0, 0, 0));
+            currentDate.setDate(currentDate.getDate() + 1);
+          }
+
+          // Tạo từng ngày lễ
+          let successCount = 0;
+          let errorCount = 0;
+          
+          for (const dateTimestamp of dates) {
+            try {
+              await createHoliday({
+                name: formData.name.trim(),
+                date: dateTimestamp,
+                type: formData.type,
+                isRecurring: formData.isRecurring,
+                description: formData.description.trim() || undefined,
+              });
+              successCount++;
+            } catch (error: any) {
+              console.error(`Error creating holiday for ${new Date(dateTimestamp).toLocaleDateString()}:`, error);
+              errorCount++;
+            }
+          }
+
+          if (errorCount > 0) {
+            alert(`Đã tạo ${successCount}/${dates.length} ngày lễ. ${errorCount} ngày lễ thất bại.`);
+          } else {
+            alert(`Đã tạo thành công ${successCount} ngày lễ`);
+          }
+        } else {
+          // Tạo ngày lễ đơn
+          const dateTimestamp = new Date(formData.date).setHours(0, 0, 0, 0);
+          await createHoliday({
+            name: formData.name.trim(),
+            date: dateTimestamp,
+            type: formData.type,
+            isRecurring: formData.isRecurring,
+            description: formData.description.trim() || undefined,
+          });
+        }
       }
       loadData();
       resetForm();
@@ -73,10 +126,12 @@ const HolidaysManagement: React.FC<HolidaysManagementProps> = ({ onRegisterReloa
     setFormData({
       name: '',
       date: '',
+      endDate: '',
       type: 'NATIONAL',
       isRecurring: true,
       description: '',
     });
+    setIsDateRange(false);
     setEditingHoliday(null);
     setShowForm(false);
   };
@@ -87,10 +142,12 @@ const HolidaysManagement: React.FC<HolidaysManagementProps> = ({ onRegisterReloa
     setFormData({
       name: holiday.name,
       date: date.toISOString().split('T')[0],
+      endDate: '',
       type: holiday.type,
       isRecurring: holiday.isRecurring,
       description: holiday.description || '',
     });
+    setIsDateRange(false); // Edit chỉ cho phép ngày đơn
     setShowForm(true);
   };
 
@@ -128,7 +185,6 @@ const HolidaysManagement: React.FC<HolidaysManagementProps> = ({ onRegisterReloa
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-slate-800">Quản lý ngày lễ</h2>
         <button
           onClick={() => { resetForm(); setShowForm(true); }}
           className="px-6 py-3 rounded-xl text-sm font-bold bg-blue-600 text-white shadow-lg hover:bg-blue-700 transition-colors"
@@ -154,16 +210,72 @@ const HolidaysManagement: React.FC<HolidaysManagementProps> = ({ onRegisterReloa
                 placeholder="Tết Nguyên Đán"
               />
             </div>
+            <div className="md:col-span-2">
+              <label className="flex items-center gap-2 mb-2">
+                <input
+                  type="checkbox"
+                  checked={isDateRange}
+                  onChange={e => {
+                    setIsDateRange(e.target.checked);
+                    if (!e.target.checked) {
+                      setFormData({ ...formData, endDate: '' });
+                    }
+                  }}
+                  disabled={!!editingHoliday}
+                  className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-xs font-bold text-slate-600">
+                  Ngày lễ nhiều ngày (từ ngày đến ngày)
+                </span>
+                {editingHoliday && (
+                  <span className="text-xs text-slate-400 italic">(Chỉnh sửa chỉ hỗ trợ ngày đơn)</span>
+                )}
+              </label>
+            </div>
             <div>
-              <label className="block text-xs font-bold text-slate-500 mb-1">Ngày *</label>
+              <label className="block text-xs font-bold text-slate-500 mb-1">
+                {isDateRange ? 'Ngày bắt đầu *' : 'Ngày *'}
+              </label>
               <input
                 type="date"
                 required
                 value={formData.date}
-                onChange={e => setFormData({ ...formData, date: e.target.value })}
+                onChange={e => {
+                  const newDate = e.target.value;
+                  // Tự động set endDate = startDate nếu chưa có và đang ở chế độ date range
+                  if (isDateRange && !formData.endDate) {
+                    setFormData({ ...formData, date: newDate, endDate: newDate });
+                  } else {
+                    setFormData({ ...formData, date: newDate });
+                  }
+                }}
                 className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm"
               />
             </div>
+            {isDateRange && (
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Ngày kết thúc *</label>
+                <input
+                  type="date"
+                  required={isDateRange}
+                  value={formData.endDate}
+                  min={formData.date}
+                  onChange={e => setFormData({ ...formData, endDate: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm"
+                />
+                {formData.date && formData.endDate && (() => {
+                  const start = new Date(formData.date);
+                  const end = new Date(formData.endDate);
+                  const diffTime = end.getTime() - start.getTime();
+                  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+                  return (
+                    <p className="text-xs text-slate-500 mt-1">
+                      Sẽ tạo <strong className="text-blue-600">{diffDays}</strong> ngày lễ ({start.toLocaleDateString('vi-VN')} đến {end.toLocaleDateString('vi-VN')})
+                    </p>
+                  );
+                })()}
+              </div>
+            )}
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">Loại</label>
               <select

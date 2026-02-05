@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { User, UserRole, ContractType, EmployeeStatus, CONTRACT_TYPE_LABELS, EMPLOYEE_STATUS_LABELS } from '../types';
-import { getAllUsers, updateUser } from '../services/db';
+import { User, UserRole, ContractType, EmployeeStatus, CONTRACT_TYPE_LABELS, EMPLOYEE_STATUS_LABELS, Department } from '../types';
+import { getAllUsers, updateUser, getDepartments } from '../services/db';
 
 interface EmployeeProfileProps {
   employeeId: string;
@@ -11,6 +11,7 @@ interface EmployeeProfileProps {
 
 const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUser, onBack, setView }) => {
   const [employee, setEmployee] = useState<User | null>(null);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [editForm, setEditForm] = useState({
     email: '',
     name: '',
@@ -30,7 +31,11 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
 
   useEffect(() => {
     const loadEmployee = async () => {
-      const employees = await getAllUsers();
+      const [employees, depts] = await Promise.all([
+        getAllUsers(),
+        getDepartments()
+      ]);
+      setDepartments(depts.filter(d => d.isActive)); // Chỉ lấy phòng ban đang hoạt động
       const found = employees.find((e: User) => e.id === employeeId);
       if (found) {
         setEmployee(found);
@@ -104,6 +109,150 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
     );
   }
 
+  const isViewingOwnProfile = currentUser.role === UserRole.EMPLOYEE && employeeId === currentUser.id;
+  const isAdmin = currentUser.role === UserRole.ADMIN;
+
+  // Mobile layout for employees viewing their own profile
+  if (isViewingOwnProfile) {
+    return (
+      <div className="space-y-6 fade-up">
+        {/* Header Card */}
+        <div className="bg-gradient-to-r from-blue-600 to-cyan-500 rounded-3xl p-6 text-white shadow-lg shadow-blue-200">
+          <div className="flex items-center space-x-4 mb-4">
+            {employee.avatarUrl ? (
+              <img 
+                src={employee.avatarUrl} 
+                alt={employee.name}
+                className="w-16 h-16 rounded-full object-cover border-2 border-white"
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement;
+                  target.style.display = 'none';
+                  const fallback = target.nextElementSibling as HTMLElement;
+                  if (fallback) fallback.style.display = 'flex';
+                }}
+              />
+            ) : null}
+            <div 
+              className={`w-16 h-16 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-white font-bold text-xl border-2 border-white ${employee.avatarUrl ? 'hidden' : ''}`}
+            >
+              {employee.name.charAt(0)}
+            </div>
+            <div className="flex-1">
+              <h2 className="text-xl font-bold">{employee.name}</h2>
+              <p className="text-sm text-blue-100">{employee.email}</p>
+              <p className="text-xs text-blue-200 mt-1">{employee.department}{employee.jobTitle ? ` · ${employee.jobTitle}` : ''}{employee.employeeCode ? ` · ${employee.employeeCode}` : ''}</p>
+            </div>
+          </div>
+        </div>
+        {/* Info Display */}
+        <div className="bg-white p-5 rounded-3xl shadow-sm border border-sky-50 space-y-4">
+          <h3 className="text-sm font-bold text-slate-700 mb-3">Thông tin chi tiết</h3>
+          
+          <div className="space-y-3">
+            {/* Thông tin cơ bản */}
+            <div className="pb-3 border-b border-slate-100">
+              <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Thông tin cơ bản</h4>
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-xs text-slate-500">Email:</span>
+                  <span className="text-sm font-medium text-slate-800">{employee.email}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-xs text-slate-500">Họ tên:</span>
+                  <span className="text-sm font-medium text-slate-800">{employee.name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-xs text-slate-500">Bộ phận:</span>
+                  <span className="text-sm font-medium text-slate-800">{employee.department}</span>
+                </div>
+                {employee.employeeCode && (
+                  <div className="flex justify-between">
+                    <span className="text-xs text-slate-500">Mã nhân viên:</span>
+                    <span className="text-sm font-medium text-slate-800">{employee.employeeCode}</span>
+                  </div>
+                )}
+                {employee.jobTitle && (
+                  <div className="flex justify-between">
+                    <span className="text-xs text-slate-500">Chức danh:</span>
+                    <span className="text-sm font-medium text-slate-800">{employee.jobTitle}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-xs text-slate-500">Vai trò:</span>
+                  <span className="text-sm font-medium text-slate-800">
+                    {employee.role === UserRole.ADMIN ? 'Admin' : 'Nhân viên'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Thông tin lương */}
+            {(employee.grossSalary != null || employee.socialInsuranceSalary != null || employee.traineeSalary != null) && (
+              <div className="pb-3 border-b border-slate-100">
+                <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Thông tin lương</h4>
+                <div className="space-y-2">
+                  {employee.grossSalary != null && (
+                    <div className="flex justify-between">
+                      <span className="text-xs text-slate-500">Lương thỏa thuận (gross):</span>
+                      <span className="text-sm font-bold text-blue-600">{formatCurrency(employee.grossSalary)}</span>
+                    </div>
+                  )}
+                  {employee.socialInsuranceSalary != null && (
+                    <div className="flex justify-between">
+                      <span className="text-xs text-slate-500">Lương BHXH:</span>
+                      <span className="text-sm font-medium text-slate-800">{formatCurrency(employee.socialInsuranceSalary)}</span>
+                    </div>
+                  )}
+                  {employee.traineeSalary != null && (
+                    <div className="flex justify-between">
+                      <span className="text-xs text-slate-500">Lương học việc:</span>
+                      <span className="text-sm font-medium text-slate-800">{formatCurrency(employee.traineeSalary)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Thông tin hợp đồng */}
+            <div>
+              <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Thông tin hợp đồng</h4>
+              <div className="space-y-2">
+                {employee.contractType && (
+                  <div className="flex justify-between">
+                    <span className="text-xs text-slate-500">Loại hợp đồng:</span>
+                    <span className="text-sm font-medium text-slate-800">{CONTRACT_TYPE_LABELS[employee.contractType]}</span>
+                  </div>
+                )}
+                {employee.startDate && (
+                  <div className="flex justify-between">
+                    <span className="text-xs text-slate-500">Ngày vào làm:</span>
+                    <span className="text-sm font-medium text-slate-800">{new Date(employee.startDate).toLocaleDateString('vi-VN')}</span>
+                  </div>
+                )}
+                {employee.status && (
+                  <div className="flex justify-between">
+                    <span className="text-xs text-slate-500">Trạng thái:</span>
+                    <span className={`text-xs font-bold px-2 py-1 rounded ${employee.status === EmployeeStatus.ACTIVE ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-500'}`}>
+                      {EMPLOYEE_STATUS_LABELS[employee.status]}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Note */}
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
+          <p className="text-xs text-blue-700 text-center">
+            💡 Liên hệ HR để cập nhật thông tin
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Desktop layout for admin viewing employee profile
   return (
     <div className="flex h-screen bg-slate-50">
       {/* Sidebar */}
@@ -206,7 +355,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                     <p className="text-xs text-slate-400 mt-1">{employee.department}{employee.jobTitle ? ` · ${employee.jobTitle}` : ''}{employee.employeeCode ? ` · ${employee.employeeCode}` : ''}</p>
                   </div>
                 </div>
-                {!isEditing && (
+                {!isEditing && isAdmin && (
                   <button 
                     onClick={() => setIsEditing(true)} 
                     className="w-full py-3 rounded-xl text-sm font-bold bg-blue-600 text-white shadow-md active:scale-[0.98]"
@@ -233,7 +382,24 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                   
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">Bộ phận *</label>
-                    <input type="text" required value={editForm.department} onChange={e => setEditForm(f => ({ ...f, department: e.target.value }))} placeholder="IT / HR / Kinh doanh" className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm" />
+                    <select
+                      required
+                      value={editForm.department}
+                      onChange={e => setEditForm(f => ({ ...f, department: e.target.value }))}
+                      className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm"
+                    >
+                      <option value="">-- Chọn phòng ban --</option>
+                      {departments.map(dept => (
+                        <option key={dept.id} value={dept.name}>
+                          {dept.name} {dept.code ? `(${dept.code})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {departments.length === 0 && (
+                      <p className="text-xs text-amber-600 mt-1">
+                        ⚠️ Chưa có phòng ban nào. Vui lòng tạo phòng ban trước.
+                      </p>
+                    )}
                   </div>
                   
                   <div className="grid grid-cols-2 gap-3">

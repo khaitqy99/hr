@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { User, UserRole, LeaveRequest, ShiftRegistration, AttendanceRecord, AttendanceType, EmployeeStatus } from '../../types';
-import { getAllUsers, getLeaveRequests, getShiftRegistrations, getAllAttendance } from '../../services/db';
+import { User, UserRole, ShiftRegistration, AttendanceRecord, AttendanceType, EmployeeStatus, Department } from '../../types';
+import { getAllUsers, getShiftRegistrations, getAllAttendance, getDepartments } from '../../services/db';
 
 interface ReportsDashboardProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
@@ -8,7 +8,7 @@ interface ReportsDashboardProps {
 
 const ReportsDashboard: React.FC<ReportsDashboardProps> = ({ onRegisterReload }) => {
   const [employees, setEmployees] = useState<User[]>([]);
-  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [shiftRequests, setShiftRequests] = useState<ShiftRegistration[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
 
@@ -23,12 +23,14 @@ const ReportsDashboard: React.FC<ReportsDashboardProps> = ({ onRegisterReload })
   }, [onRegisterReload]);
 
   const loadData = async () => {
-    const users = await getAllUsers();
-    const leaves = await getLeaveRequests(undefined, UserRole.ADMIN);
-    const shifts = await getShiftRegistrations(undefined, UserRole.ADMIN);
-    const attendance = await getAllAttendance();
+    const [users, depts, shifts, attendance] = await Promise.all([
+      getAllUsers(),
+      getDepartments(),
+      getShiftRegistrations(undefined, UserRole.ADMIN),
+      getAllAttendance()
+    ]);
     setEmployees(users);
-    setLeaveRequests(leaves);
+    setDepartments(depts.filter(d => d.isActive));
     setShiftRequests(shifts);
     setAttendanceRecords(attendance);
   };
@@ -44,8 +46,6 @@ const ReportsDashboard: React.FC<ReportsDashboardProps> = ({ onRegisterReload })
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-slate-800">Thống kê và Báo cáo</h2>
-
       {/* Summary Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-2xl border border-blue-200">
@@ -57,12 +57,6 @@ const ReportsDashboard: React.FC<ReportsDashboardProps> = ({ onRegisterReload })
             {employees.filter(e => e.status === EmployeeStatus.ACTIVE && e.role !== UserRole.ADMIN).length}
           </div>
           <div className="text-sm text-green-700 font-medium mt-2">Đang làm việc</div>
-        </div>
-        <div className="bg-gradient-to-br from-orange-50 to-orange-100 p-6 rounded-2xl border border-orange-200">
-          <div className="text-3xl font-bold text-orange-600">
-            {leaveRequests.filter(r => r.status === 'PENDING').length}
-          </div>
-          <div className="text-sm text-orange-700 font-medium mt-2">Đơn nghỉ phép chờ</div>
         </div>
         <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-6 rounded-2xl border border-purple-200">
           <div className="text-3xl font-bold text-purple-600">
@@ -77,16 +71,25 @@ const ReportsDashboard: React.FC<ReportsDashboardProps> = ({ onRegisterReload })
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-sky-50">
           <h3 className="text-lg font-bold text-slate-700 mb-4">Thống kê theo phòng ban</h3>
           <div className="space-y-3">
-            {Array.from(new Set(employees.map(e => e.department))).map(dept => {
-              const deptEmployees = employees.filter(e => e.department === dept && e.role !== UserRole.ADMIN);
-              const activeCount = deptEmployees.filter(e => e.status === EmployeeStatus.ACTIVE).length;
-              return (
-                <div key={dept} className="flex justify-between items-center p-4 bg-slate-50 rounded-xl">
-                  <span className="text-sm font-medium text-slate-700">{dept}</span>
-                  <span className="text-sm font-bold text-blue-600">{activeCount}/{deptEmployees.length}</span>
-                </div>
-              );
-            })}
+            {departments.length === 0 ? (
+              <p className="text-sm text-slate-400 text-center py-4">Chưa có phòng ban nào</p>
+            ) : (
+              departments.map(dept => {
+                const deptEmployees = employees.filter(e => e.department === dept.name && e.role !== UserRole.ADMIN);
+                const activeCount = deptEmployees.filter(e => e.status === EmployeeStatus.ACTIVE).length;
+                return (
+                  <div key={dept.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-xl">
+                    <div>
+                      <span className="text-sm font-medium text-slate-700">{dept.name}</span>
+                      {dept.code && (
+                        <span className="text-xs text-slate-500 ml-2">({dept.code})</span>
+                      )}
+                    </div>
+                    <span className="text-sm font-bold text-blue-600">{activeCount}/{deptEmployees.length}</span>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 
@@ -129,10 +132,6 @@ const ReportsDashboard: React.FC<ReportsDashboardProps> = ({ onRegisterReload })
           <div className="text-center p-4 bg-slate-50 rounded-xl">
             <div className="text-2xl font-bold text-slate-700">{attendanceRecords.length}</div>
             <div className="text-xs text-slate-500 mt-1">Bản ghi chấm công</div>
-          </div>
-          <div className="text-center p-4 bg-slate-50 rounded-xl">
-            <div className="text-2xl font-bold text-slate-700">{leaveRequests.length}</div>
-            <div className="text-xs text-slate-500 mt-1">Đơn nghỉ phép</div>
           </div>
           <div className="text-center p-4 bg-slate-50 rounded-xl">
             <div className="text-2xl font-bold text-slate-700">{shiftRequests.length}</div>

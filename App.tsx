@@ -16,19 +16,23 @@ import { getCurrentUser, syncAllOfflineData } from './services/db';
 import { sendOTP, verifyOTP } from './services/auth';
 
 // Admin sub-routes: path segment cho từng trang admin (đồng bộ với AdminPanel)
-const ADMIN_TAB_SEGMENTS = ['users', 'attendance', 'leave', 'shift', 'payroll', 'reports', 'departments', 'holidays', 'config', 'export', 'notifications', 'settings'];
+const ADMIN_TAB_SEGMENTS = ['users', 'attendance', 'shift', 'payroll', 'reports', 'departments', 'holidays', 'config', 'export', 'notifications', 'settings'];
 const DEFAULT_ADMIN_TAB = 'users';
 
 // Employee sub-routes: path segment cho từng trang nhân viên (đồng bộ với Layout nav)
-const EMPLOYEE_VIEW_SEGMENTS = ['dashboard', 'checkin', 'shifts', 'payroll', 'notifications'];
+const EMPLOYEE_VIEW_SEGMENTS = ['dashboard', 'checkin', 'shifts', 'payroll', 'notifications', 'profile'];
 const DEFAULT_EMPLOYEE_VIEW = 'dashboard';
 
-/** Parse /employee, /employee/dashboard, /employee/checkin, ... */
-function parseEmployeePath(path: string): { view: string } | null {
+/** Parse /employee, /employee/dashboard, /employee/checkin, /employee/profile, ... */
+function parseEmployeePath(path: string): { view: string; employeeId?: string } | null {
   if (!path.startsWith('/employee')) return null;
   const rest = path.slice('/employee'.length) || '/';
   const segments = rest.split('/').filter(Boolean);
   if (segments.length === 0) return { view: DEFAULT_EMPLOYEE_VIEW };
+  if (segments[0] === 'profile') {
+    // /employee/profile -> employee viewing own profile
+    return { view: 'employee-profile', employeeId: segments[1] }; // employeeId sẽ được set trong setView
+  }
   if (EMPLOYEE_VIEW_SEGMENTS.includes(segments[0])) return { view: segments[0] };
   return { view: DEFAULT_EMPLOYEE_VIEW };
 }
@@ -454,8 +458,15 @@ const App: React.FC = () => {
         path = `/admin/${adminTab}`;
       }
     } else {
-      const empView = EMPLOYEE_VIEW_SEGMENTS.includes(newView) ? newView : DEFAULT_EMPLOYEE_VIEW;
-      path = `/employee/${empView}`;
+      // Employee routes
+      if (newView === 'employee-profile' && employeeId) {
+        // Employee viewing own profile
+        path = `/employee/profile`;
+        setSelectedEmployeeId(employeeId);
+      } else {
+        const empView = EMPLOYEE_VIEW_SEGMENTS.includes(newView) ? newView : DEFAULT_EMPLOYEE_VIEW;
+        path = `/employee/${empView}`;
+      }
     }
 
     if (replace) {
@@ -466,6 +477,12 @@ const App: React.FC = () => {
   };
 
   const setView = (view: string, options?: { replace?: boolean; adminPath?: string; employeeId?: string }) => {
+    // Handle employee-profile view for employees viewing their own profile
+    if (view === 'employee-profile' && options?.employeeId && user.role === UserRole.EMPLOYEE && options.employeeId === user.id) {
+      setSelectedEmployeeId(user.id);
+      updateViewAndURL('employee-profile', options?.replace ?? false, undefined, options?.adminPath, user.id);
+      return;
+    }
     updateViewAndURL(view, options?.replace ?? false, undefined, options?.adminPath, options?.employeeId);
   };
 
@@ -484,6 +501,10 @@ const App: React.FC = () => {
       const employeeParsed = parseEmployeePath(path);
       if (employeeParsed && user.role === UserRole.EMPLOYEE) {
         setCurrentView(employeeParsed.view);
+        if (employeeParsed.view === 'employee-profile') {
+          // Set employeeId to current user's id when viewing own profile
+          setSelectedEmployeeId(user.id);
+        }
         return;
       }
       if (path.startsWith('/employee')) {
@@ -528,6 +549,10 @@ const App: React.FC = () => {
       const employeeParsed = parseEmployeePath(path);
       if (employeeParsed && parsedUser.role === UserRole.EMPLOYEE) {
         setCurrentView(employeeParsed.view);
+        if (employeeParsed.view === 'employee-profile') {
+          // Set employeeId to current user's id when viewing own profile
+          setSelectedEmployeeId(parsedUser.id);
+        }
         return;
       }
 
@@ -626,10 +651,10 @@ const App: React.FC = () => {
   const renderView = () => {
     const view = (() => {
       switch (currentView) {
-        case 'dashboard': return <Dashboard user={user} />;
+        case 'dashboard': return <Dashboard user={user} setView={setView} />;
         case 'checkin': return <CheckIn user={user} />;
         case 'shifts': return <ShiftRegister user={user} />;
-        case 'payroll': return <Payroll user={user} />;
+        case 'payroll': return <Payroll user={user} setView={setView} />;
         case 'notifications': return <NotificationsPanel user={user} />;
         case 'admin': 
           if (user.role !== UserRole.ADMIN) {
@@ -659,12 +684,20 @@ const App: React.FC = () => {
           if (!selectedEmployeeId) {
             return <div className="p-10 text-center text-slate-400">Không tìm thấy nhân viên</div>;
           }
+          // Determine back navigation based on user role
+          const isViewingOwnProfile = user.role === UserRole.EMPLOYEE && selectedEmployeeId === user.id;
           return (
           <EmployeeProfile
             employeeId={selectedEmployeeId}
             currentUser={user}
             onBack={() => {
-              updateViewAndURL('admin', false, undefined, adminTab);
+              if (isViewingOwnProfile) {
+                // Employee viewing own profile -> back to dashboard
+                updateViewAndURL('dashboard', false);
+              } else {
+                // Admin viewing employee profile -> back to admin panel
+                updateViewAndURL('admin', false, undefined, adminTab);
+              }
               setSelectedEmployeeId(null);
             }}
             setView={setView}
@@ -677,7 +710,8 @@ const App: React.FC = () => {
   };
 
   // Admin có layout riêng (desktop), không cần wrap trong Layout mobile
-  if (isAdminRoute(currentView, user.role)) {
+  // Employee-profile cũng có layout riêng (desktop) khi admin xem, nhưng nhân viên xem hồ sơ của mình thì dùng Layout mobile
+  if (isAdminRoute(currentView, user.role) || (currentView === 'employee-profile' && user.role === UserRole.ADMIN)) {
     return renderView();
   }
 

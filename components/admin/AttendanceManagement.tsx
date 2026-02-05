@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AttendanceRecord, AttendanceType, AttendanceStatus, User, UserRole } from '../../types';
 import { getAllAttendance, deleteAttendance, getAllUsers } from '../../services/db';
 import { deleteAttendancePhoto } from '../../services/storage';
+import { exportToCSV } from '../../utils/export';
 
 /**
  * Kiểm tra xem photoUrl có phải là base64 data URL không
@@ -25,9 +26,10 @@ const isValidUrl = (url: string): boolean => {
 
 interface AttendanceManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
+  setView?: (view: string, options?: { adminPath?: string }) => void;
 }
 
-const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterReload }) => {
+const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterReload, setView }) => {
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
   const [attendanceFilter, setAttendanceFilter] = useState<string>('ALL');
@@ -115,6 +117,32 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
 
   const filteredData = getFilteredData();
 
+  const handleExport = () => {
+    if (filteredData.length === 0) {
+      alert('Không có dữ liệu để xuất');
+      return;
+    }
+    // Format dữ liệu để export dễ đọc hơn
+    const exportData = filteredData.map(record => {
+      const employee = employees.find(e => e.id === record.userId);
+      return {
+        'Nhân viên': employee?.name || record.userId,
+        'Phòng ban': employee?.department || '',
+        'Thời gian': new Date(record.timestamp).toLocaleString('vi-VN'),
+        'Ngày': new Date(record.timestamp).toLocaleDateString('vi-VN'),
+        'Loại': record.type === AttendanceType.CHECK_IN ? 'Vào' : 'Ra',
+        'Trạng thái': getStatusLabel(record.status).label,
+        'Địa chỉ': record.location?.address || `${record.location?.lat}, ${record.location?.lng}`,
+        'Ghi chú': record.notes || '',
+      };
+    });
+    const dateRange = attendanceFilter === 'TODAY' ? 'hom_nay' : 
+                      attendanceFilter === 'WEEK' ? 'tuan_nay' :
+                      attendanceFilter === 'MONTH' ? 'thang_nay' : 'tat_ca';
+    const filename = `attendance_${dateRange}_${Date.now()}.csv`;
+    exportToCSV(exportData, filename);
+  };
+
   const getStatusLabel = (status: AttendanceStatus) => {
     switch (status) {
       case AttendanceStatus.ON_TIME:
@@ -132,12 +160,35 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-slate-800">Quản lý chấm công</h2>
-      </div>
-
       {/* Filters */}
       <div className="bg-white p-4 rounded-2xl shadow-sm border border-sky-50">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-bold text-slate-700">Bộ lọc</h3>
+          <div className="flex items-center gap-2">
+            {setView && (
+              <button
+                onClick={() => setView('admin', { adminPath: 'payroll' })}
+                className="px-4 py-2 bg-green-600 text-white rounded-xl text-xs font-bold hover:bg-green-700 transition-colors flex items-center gap-2"
+                title="Chuyển đến trang tính lương"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
+                </svg>
+                Tính lương
+              </button>
+            )}
+            <button
+              onClick={handleExport}
+              disabled={isLoading || filteredData.length === 0}
+              className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+              </svg>
+              Xuất CSV ({filteredData.length})
+            </button>
+          </div>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-2">Lọc theo thời gian</label>

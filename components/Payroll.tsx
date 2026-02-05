@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { User, PayrollRecord } from '../types';
-import { getPayroll } from '../services/db';
+import { getPayroll, calculateAttendanceStats, calculateLeaveDays, getShiftRegistrations } from '../services/db';
 
 interface PayrollProps {
   user: User;
+  setView?: (view: string) => void;
 }
 
-const Payroll: React.FC<PayrollProps> = ({ user }) => {
+const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
   // Set default month to current month
   const getCurrentMonth = () => {
     const now = new Date();
@@ -17,6 +18,12 @@ const Payroll: React.FC<PayrollProps> = ({ user }) => {
   const [data, setData] = useState<PayrollRecord | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [availableMonths, setAvailableMonths] = useState<string[]>([]);
+  const [payrollDetails, setPayrollDetails] = useState<{
+    attendanceDays: number;
+    leaveDays: number;
+    shiftDays: number;
+    otHours: number;
+  } | null>(null);
 
   // Generate month options (current month and 5 previous months)
   const generateMonthOptions = () => {
@@ -48,12 +55,55 @@ const Payroll: React.FC<PayrollProps> = ({ user }) => {
         const records = await getPayroll(user.id, selectedMonth);
         if (records.length > 0) {
           setData(records[0]);
+          
+          // Load chi tiết tính lương
+          try {
+            const [attendanceStats, leaveDays, shifts] = await Promise.all([
+              calculateAttendanceStats(user.id, selectedMonth),
+              calculateLeaveDays(user.id, selectedMonth),
+              getShiftRegistrations(user.id)
+            ]);
+            
+            // Tính số ngày làm việc từ shift registrations trong tháng
+            const [monthStr, yearStr] = selectedMonth.split('-');
+            const targetMonth = parseInt(monthStr);
+            const targetYear = parseInt(yearStr);
+            const monthStart = new Date(targetYear, targetMonth - 1, 1).getTime();
+            const monthEnd = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999).getTime();
+            
+            const shiftDays = new Set<string>();
+            shifts
+              .filter(shift => {
+                const shiftDate = new Date(shift.date);
+                return shift.status === 'APPROVED' &&
+                       shift.date >= monthStart &&
+                       shift.date <= monthEnd &&
+                       shift.shift !== 'OFF';
+              })
+              .forEach(shift => {
+                const date = new Date(shift.date);
+                const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                shiftDays.add(dateKey);
+              });
+            
+            setPayrollDetails({
+              attendanceDays: attendanceStats.actualWorkDays,
+              leaveDays,
+              shiftDays: shiftDays.size,
+              otHours: attendanceStats.otHours,
+            });
+          } catch (err) {
+            console.error('Error loading payroll details:', err);
+            setPayrollDetails(null);
+          }
         } else {
           setData(null);
+          setPayrollDetails(null);
         }
       } catch (error) {
         console.error('Error loading payroll:', error);
         setData(null);
+        setPayrollDetails(null);
       } finally {
         setIsLoading(false);
       }
@@ -177,6 +227,84 @@ const Payroll: React.FC<PayrollProps> = ({ user }) => {
             ))}
          </div>
       </div>
+
+      {/* Payroll Calculation Details */}
+      {payrollDetails && (
+        <div className="bg-white rounded-3xl shadow-sm border border-sky-50 overflow-hidden">
+          <div className="p-4 border-b border-slate-50 bg-slate-50/50">
+            <h3 className="text-sm font-bold text-slate-700">Chi tiết tính lương</h3>
+            <p className="text-xs text-slate-500 mt-1">Nguồn dữ liệu tính lương</p>
+          </div>
+          <div className="divide-y divide-slate-50">
+            <div className="p-4 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 font-medium">Ngày công từ chấm công</p>
+                  {setView && (
+                    <button
+                      onClick={() => setView('dashboard')}
+                      className="text-[10px] text-blue-600 hover:underline"
+                    >
+                      Xem chi tiết →
+                    </button>
+                  )}
+                </div>
+              </div>
+              <p className="text-sm font-bold text-slate-800">{payrollDetails.attendanceDays} ngày</p>
+            </div>
+            <div className="p-4 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 font-medium">Ngày nghỉ từ đơn nghỉ phép</p>
+                </div>
+              </div>
+              <p className="text-sm font-bold text-red-600">-{payrollDetails.leaveDays} ngày</p>
+            </div>
+            <div className="p-4 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 font-medium">Ca làm việc đã đăng ký</p>
+                  {setView && (
+                    <button
+                      onClick={() => setView('shifts')}
+                      className="text-[10px] text-blue-600 hover:underline"
+                    >
+                      Xem chi tiết →
+                    </button>
+                  )}
+                </div>
+              </div>
+              <p className="text-sm font-bold text-slate-800">{payrollDetails.shiftDays} ngày</p>
+            </div>
+            <div className="p-4 flex justify-between items-center bg-green-50/30">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-green-50 text-green-600 flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <p className="text-xs text-slate-500 font-medium">Giờ làm thêm (OT)</p>
+              </div>
+              <p className="text-sm font-bold text-green-600">+{payrollDetails.otHours}h</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Detailed List */}
       <div className="bg-white rounded-3xl shadow-sm border border-sky-50 overflow-hidden">
