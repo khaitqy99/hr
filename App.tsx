@@ -1,7 +1,11 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import Layout from './components/Layout';
 import EnvError from './components/EnvError';
+import SplashScreen from './components/SplashScreen';
+import InstallPrompt from './components/InstallPrompt';
+import UpdateNotification from './components/UpdateNotification';
 import { User, UserRole } from './types';
+import { setAppBadge, isInstalled } from './utils/pwa';
 
 // Lazy load routes - giảm bundle ban đầu, tải mượt hơn trên mobile
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -12,7 +16,7 @@ const Payroll = lazy(() => import('./components/Payroll'));
 const EmployeeProfile = lazy(() => import('./components/EmployeeProfile'));
 const SalaryManagement = lazy(() => import('./components/SalaryManagement'));
 const NotificationsPanel = lazy(() => import('./components/NotificationsPanel'));
-import { getCurrentUser, syncAllOfflineData } from './services/db';
+import { getCurrentUser, syncAllOfflineData, getNotifications } from './services/db';
 import { sendOTP, verifyOTP } from './services/auth';
 
 // Admin sub-routes: path segment cho từng trang admin (đồng bộ với AdminPanel)
@@ -425,6 +429,7 @@ const App: React.FC = () => {
     return <EnvError />;
   }
 
+  const [showSplash, setShowSplash] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [currentView, setCurrentView] = useState('dashboard');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
@@ -639,6 +644,44 @@ const App: React.FC = () => {
     };
   }, [user]);
 
+  // Update app badge based on notifications
+  useEffect(() => {
+    if (!user) {
+      setAppBadge(0);
+      return;
+    }
+
+    const updateBadge = async () => {
+      try {
+        const notifications = await getNotifications(user.id);
+        const unreadCount = notifications.filter(n => !n.read).length;
+        await setAppBadge(unreadCount);
+      } catch (error) {
+        console.error('Error updating badge:', error);
+      }
+    };
+
+    updateBadge();
+    const interval = setInterval(updateBadge, 60000); // Update every minute
+
+    return () => clearInterval(interval);
+  }, [user]);
+
+  // Show splash screen only on first load
+  useEffect(() => {
+    const hasSeenSplash = sessionStorage.getItem('has-seen-splash');
+    if (hasSeenSplash) {
+      setShowSplash(false);
+    } else {
+      sessionStorage.setItem('has-seen-splash', 'true');
+    }
+  }, []);
+
+  // Show splash screen
+  if (showSplash) {
+    return <SplashScreen onFinish={() => setShowSplash(false)} />;
+  }
+
   if (!user) return <LoginScreen onLogin={handleLogin} />;
 
   // Skeleton nhẹ cho lazy loading - không block main thread
@@ -716,11 +759,15 @@ const App: React.FC = () => {
   }
 
   return (
-    <Layout user={user} currentView={currentView} setView={setView} onLogout={handleLogout}>
-      <div className="max-w-md mx-auto min-h-full">
-        {renderView()}
-      </div>
-    </Layout>
+    <>
+      <UpdateNotification />
+      {isInstalled() && <InstallPrompt />}
+      <Layout user={user} currentView={currentView} setView={setView} onLogout={handleLogout}>
+        <div className="max-w-md mx-auto min-h-full">
+          {renderView()}
+        </div>
+      </Layout>
+    </>
   );
 };
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getAllUsers, getAllAttendance, getShiftRegistrations, getAllPayrolls, getDepartments } from '../../services/db';
 import { UserRole, ShiftTime, OFF_TYPE_LABELS, Department, User } from '../../types';
-import { exportToCSV } from '../../utils/export';
+import { exportToCSV, exportMultipleTablesToCSV } from '../../utils/export';
 
 interface DataExportManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
@@ -141,7 +141,106 @@ const DataExportManagement: React.FC<DataExportManagementProps> = ({ onRegisterR
           // Filter theo phòng ban/nhân viên
           payrolls = filterByUser(payrolls, selectedDepartment, selectedEmployee);
           
-          exportToCSV(payrolls, `payroll_${month}_${Date.now()}.csv`);
+          // Format dữ liệu bảng lương với tên nhân viên
+          const payrollData = payrolls.map(record => {
+            const employee = employees.find(e => e.id === record.userId);
+            return {
+              'Tên nhân viên': employee?.name || record.userId,
+              'Phòng ban': employee?.department || '',
+              'Tháng': record.month,
+              'Lương cơ bản': record.baseSalary,
+              'Ngày công chuẩn': record.standardWorkDays,
+              'Ngày công thực tế': record.actualWorkDays,
+              'Giờ làm thêm': record.otHours,
+              'Tiền làm thêm': record.otPay,
+              'Phụ cấp': record.allowance,
+              'Thưởng': record.bonus,
+              'Khấu trừ': record.deductions,
+              'Thực nhận': record.netSalary,
+              'Trạng thái': record.status === 'PAID' ? 'Đã thanh toán' : 'Chờ thanh toán',
+            };
+          });
+
+          // Lấy và lọc đăng ký ca theo tháng
+          let allShifts = await getShiftRegistrations(undefined, UserRole.ADMIN);
+          
+          // Parse month format "MM-YYYY"
+          const [monthStr, yearStr] = month.split('-');
+          const targetMonth = parseInt(monthStr);
+          const targetYear = parseInt(yearStr);
+          const monthStart = new Date(targetYear, targetMonth - 1, 1).getTime();
+          const monthEnd = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999).getTime();
+
+          // Filter theo tháng
+          allShifts = allShifts.filter(shift => {
+            return shift.date >= monthStart && shift.date <= monthEnd;
+          });
+
+          // Filter theo phòng ban/nhân viên
+          allShifts = filterByUser(allShifts, selectedDepartment, selectedEmployee);
+
+          // Format dữ liệu đăng ký ca với tên nhân viên
+          const shiftsData = allShifts.map(shift => {
+            const employee = employees.find(e => e.id === shift.userId);
+            const shiftDate = new Date(shift.date);
+            const dateStr = `${String(shiftDate.getDate()).padStart(2, '0')}/${String(shiftDate.getMonth() + 1).padStart(2, '0')}/${shiftDate.getFullYear()}`;
+            
+            // Chuyển đổi shift sang tiếng Việt
+            let shiftLabel = '';
+            switch (shift.shift) {
+              case 'MORNING':
+                shiftLabel = 'Ca sáng';
+                break;
+              case 'AFTERNOON':
+                shiftLabel = 'Ca chiều';
+                break;
+              case 'EVENING':
+                shiftLabel = 'Ca tối';
+                break;
+              case 'CUSTOM':
+                shiftLabel = `Ca tùy chỉnh (${shift.startTime || ''} - ${shift.endTime || ''})`;
+                break;
+              case 'OFF':
+                shiftLabel = 'Nghỉ';
+                break;
+              default:
+                shiftLabel = shift.shift;
+            }
+
+            // Chuyển đổi status sang tiếng Việt
+            let statusLabel = '';
+            switch (shift.status) {
+              case 'PENDING':
+                statusLabel = 'Chờ duyệt';
+                break;
+              case 'APPROVED':
+                statusLabel = 'Đã duyệt';
+                break;
+              case 'REJECTED':
+                statusLabel = 'Từ chối';
+                break;
+              default:
+                statusLabel = shift.status;
+            }
+
+            return {
+              'Tên nhân viên': employee?.name || shift.userId,
+              'Phòng ban': employee?.department || '',
+              'Ngày': dateStr,
+              'Ca làm việc': shiftLabel,
+              'Trạng thái': statusLabel,
+              'Lý do từ chối': shift.rejectionReason || '',
+            };
+          });
+
+          // Xuất chung một file CSV
+          const sections = [
+            { title: 'Bảng lương', data: payrollData },
+            { title: 'Bảng đăng ký ca', data: shiftsData },
+          ];
+
+          exportMultipleTablesToCSV(sections, `bang_luong_va_dang_ky_ca_${month}_${Date.now()}.csv`);
+          
           break;
         }
         case 'ALL': {

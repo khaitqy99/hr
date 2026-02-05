@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0c4a6e">
+  <title>Y99 HR - Offline</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: linear-gradient(to bottom, #0c4a6e, #075985, #0284c7);
+      color: white;
+      padding: 20px;
+      text-align: center;
+    }
+    .container {
+      max-width: 400px;
+      width: 100%;
+    }
+    .icon {
+      font-size: 64px;
+      margin-bottom: 24px;
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    h1 {
+      font-size: 24px;
+      font-weight: bold;
+      margin-bottom: 12px;
+    }
+    p {
+      font-size: 16px;
+      opacity: 0.9;
+      margin-bottom: 32px;
+      line-height: 1.5;
+    }
+    button {
+      background: white;
+      color: #0c4a6e;
+      border: none;
+      padding: 14px 28px;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    button:active {
+      transform: scale(0.95);
+    }
+    button:hover {
+      box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+    }
+    .status {
+      margin-top: 24px;
+      font-size: 14px;
+      opacity: 0.8;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">📡</div>
+    <h1>Không có kết nối mạng</h1>
+    <p>Vui lòng kiểm tra kết nối internet và thử lại.</p>
+    <button onclick="window.location.reload()">Thử lại</button>
+    <div class="status" id="status">Đang kiểm tra kết nối...</div>
+  </div>
+
+  <script>
+    // Check connection status
+    function updateStatus() {
+      const statusEl = document.getElementById('status');
+      if (navigator.onLine) {
+        statusEl.textContent = 'Đã kết nối! Đang tải lại...';
+        setTimeout(() => {
+          window.location.href = '/';
+        }, 1000);
+      } else {
+        statusEl.textContent = 'Chưa có kết nối mạng';
+      }
+    }
+
+    // Check on load
+    updateStatus();
+
+    // Listen for online event
+    window.addEventListener('online', () => {
+      updateStatus();
+    });
+
+    // Check periodically
+    setInterval(updateStatus, 3000);
+  </script>
+</body>
+</html>

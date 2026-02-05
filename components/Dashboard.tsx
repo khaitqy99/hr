@@ -1,6 +1,8 @@
 import React, { useEffect, useState, lazy, Suspense } from 'react';
 import { User, AttendanceRecord, AttendanceType, ShiftRegistration, ShiftTime, OFF_TYPE_LABELS } from '../types';
 import { getAttendance, getShiftRegistrations, getNotifications } from '../services/db';
+import PullToRefresh from './PullToRefresh';
+import { vibrate, HapticPatterns } from '../utils/pwa';
 
 // Lazy load Recharts - giảm ~100KB+ từ initial bundle, cải thiện FCP trên mobile
 const DashboardChart = lazy(() => import('./DashboardChart'));
@@ -15,31 +17,35 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
   const [todayShift, setTodayShift] = useState<ShiftRegistration | null>(null);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
 
+  const loadData = async () => {
+    try {
+      const [attendanceData, shifts, notifications] = await Promise.all([
+        getAttendance(user.id),
+        getShiftRegistrations(user.id),
+        getNotifications(user.id)
+      ]);
+      setAttendance(attendanceData);
+      
+      // Tìm ca đăng ký hôm nay
+      const today = new Date();
+      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0).getTime();
+      const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999).getTime();
+      const shift = shifts.find(s => s.date >= todayStart && s.date <= todayEnd && s.status === 'APPROVED');
+      setTodayShift(shift || null);
+      
+      // Đếm thông báo chưa đọc
+      const unread = notifications.filter(n => !n.read).length;
+      setUnreadNotifications(unread);
+      
+      // Haptic feedback on successful refresh
+      vibrate(HapticPatterns.light);
+    } catch (error) {
+      console.error('Error loading data:', error);
+      vibrate(HapticPatterns.error);
+    }
+  };
+
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        const [attendanceData, shifts, notifications] = await Promise.all([
-          getAttendance(user.id),
-          getShiftRegistrations(user.id),
-          getNotifications(user.id)
-        ]);
-        setAttendance(attendanceData);
-        
-        // Tìm ca đăng ký hôm nay
-        const today = new Date();
-        const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0).getTime();
-        const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999).getTime();
-        const shift = shifts.find(s => s.date >= todayStart && s.date <= todayEnd && s.status === 'APPROVED');
-        setTodayShift(shift || null);
-        
-        // Đếm thông báo chưa đọc
-        const unread = notifications.filter(n => !n.read).length;
-        setUnreadNotifications(unread);
-      } catch (error) {
-        console.error('Error loading data:', error);
-      }
-    };
-    
     loadData();
     // Reload every 30 seconds to get latest data
     let interval: NodeJS.Timeout | null = null;
@@ -139,7 +145,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
   };
 
   return (
-    <div className="space-y-6">
+    <PullToRefresh onRefresh={loadData}>
+      <div className="space-y-6">
       {/* Welcome Card - Ocean Gradient */}
       <div className="fade-up" style={{animationDelay: '0ms'}}>
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-600 to-cyan-500 p-6 text-white shadow-lg shadow-blue-200">
@@ -402,7 +409,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
           )}
         </div>
       </div>
-    </div>
+      </div>
+    </PullToRefresh>
   );
 };
 

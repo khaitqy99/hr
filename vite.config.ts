@@ -49,7 +49,7 @@ export default defineConfig(({ mode }) => {
       plugins: [
         react(),
         VitePWA({
-          registerType: 'autoUpdate',
+          registerType: 'prompt',
           includeAssets: ['favicon.svg', 'icon-192.png', 'icon-512.png'],
           strategies: 'injectManifest',
           srcDir: 'public',
@@ -63,8 +63,32 @@ export default defineConfig(({ mode }) => {
             display: 'standalone',
             orientation: 'portrait',
             scope: '/',
-            start_url: '/',
+            start_url: '/?utm_source=pwa',
             lang: 'vi',
+            categories: ['business', 'productivity', 'utilities'],
+            shortcuts: [
+              {
+                name: 'Chấm công',
+                short_name: 'Check-in',
+                description: 'Chấm công nhanh',
+                url: '/employee/checkin?utm_source=pwa_shortcut',
+                icons: [{ src: '/icon-192.png', sizes: '192x192' }]
+              },
+              {
+                name: 'Dashboard',
+                short_name: 'Dashboard',
+                description: 'Xem tổng quan',
+                url: '/employee/dashboard?utm_source=pwa_shortcut',
+                icons: [{ src: '/icon-192.png', sizes: '192x192' }]
+              },
+              {
+                name: 'Lịch làm việc',
+                short_name: 'Shifts',
+                description: 'Xem lịch làm việc',
+                url: '/employee/shifts?utm_source=pwa_shortcut',
+                icons: [{ src: '/icon-192.png', sizes: '192x192' }]
+              }
+            ],
             icons: [
               {
                 src: '/icon-192.png',
@@ -79,6 +103,25 @@ export default defineConfig(({ mode }) => {
                 purpose: 'any maskable',
               },
             ],
+            share_target: {
+              action: '/share',
+              method: 'POST',
+              enctype: 'multipart/form-data',
+              params: {
+                title: 'title',
+                text: 'text',
+                url: 'url'
+              }
+            },
+            screenshots: [
+              {
+                src: '/icon-512.png',
+                sizes: '512x512',
+                type: 'image/png',
+                form_factor: 'narrow',
+                label: 'Y99 HR Dashboard'
+              }
+            ]
           },
           injectManifest: {
             globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],

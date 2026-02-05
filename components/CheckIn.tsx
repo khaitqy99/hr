@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { User, AttendanceType, AttendanceStatus, AttendanceRecord, ShiftRegistration, ShiftTime } from '../types';
 import { saveAttendance, getAttendance, getShiftRegistrations, getOfficeLocation } from '../services/db';
 import { uploadAttendancePhoto } from '../services/storage';
+import { vibrate, HapticPatterns } from '../utils/pwa';
 
 const CUSTOM_SHIFT_HOURS = 9; // Ca CUSTOM: nhân viên làm đủ 9 tiếng
 
@@ -295,6 +296,10 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
       setLastRecord(record);
       if (record.type === AttendanceType.CHECK_IN) setTodayCheckIn(record);
       if (record.type === AttendanceType.CHECK_OUT) setTodayCheckOut(record);
+      
+      // Haptic feedback on success
+      vibrate(HapticPatterns.success);
+      
       if (photoUrlRef.current) {
         URL.revokeObjectURL(photoUrlRef.current);
         photoUrlRef.current = null;
@@ -304,6 +309,7 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
     } catch (error) {
       console.error('Error saving attendance:', error);
       setError('Lỗi khi lưu dữ liệu chấm công. Vui lòng thử lại.');
+      vibrate(HapticPatterns.error);
     } finally {
       setLoading(false);
     }

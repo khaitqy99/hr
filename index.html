@@ -10,6 +10,14 @@
     <meta name="apple-mobile-web-app-title" content="Y99 HR" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="512x512" href="/icon-512.png" />
+    <!-- Splash screens for iOS -->
+    <link rel="apple-touch-startup-image" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3)" href="/splash-iphone-14-pro-max.png" />
+    <link rel="apple-touch-startup-image" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3)" href="/splash-iphone-14-pro.png" />
+    <link rel="apple-touch-startup-image" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3)" href="/splash-iphone-13-pro-max.png" />
+    <link rel="apple-touch-startup-image" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)" href="/splash-iphone-13-pro.png" />
+    <link rel="apple-touch-startup-image" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3)" href="/splash-iphone-x.png" />
     <title>Y99 HR</title>
     <!-- Tailwind CSS CDN - Tối ưu loading cho mobile -->
     <!-- Preconnect để giảm latency -->
@@ -142,6 +150,34 @@
         .backdrop-blur-md { backdrop-filter: blur(8px); }
         .backdrop-blur-xl { backdrop-filter: blur(12px); }
         .backdrop-blur-2xl { backdrop-filter: blur(16px); }
+      }
+
+      /* Pull to refresh animation */
+      @keyframes slide-down {
+        from {
+          transform: translateY(-100%);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+      @keyframes slide-up {
+        from {
+          transform: translateY(100%);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+      .animate-slide-down {
+        animation: slide-down 0.3s ease-out;
+      }
+      .animate-slide-up {
+        animation: slide-up 0.3s ease-out;
       }
 
       /* iOS-specific optimizations */

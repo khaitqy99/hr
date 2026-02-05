@@ -64,7 +64,7 @@ if (typeof workbox !== 'undefined' && workbox) {
   // Cleanup outdated caches
   workbox.precaching.cleanupOutdatedCaches();
 
-  // Cache strategy cho navigation requests - tối ưu với timeout
+  // Cache strategy cho navigation requests - tối ưu với timeout và offline fallback
   workbox.routing.registerRoute(
     ({ request }) => request.mode === 'navigate',
     new workbox.strategies.NetworkFirst({
@@ -74,6 +74,14 @@ if (typeof workbox !== 'undefined' && workbox) {
         {
           cacheWillUpdate: async ({ response }) => {
             return response && response.status === 200 ? response : null;
+          },
+        },
+        {
+          handlerDidError: async () => {
+            // Return offline page if network fails and no cache
+            const cache = await caches.open('pages');
+            const cachedResponse = await cache.match('/offline.html');
+            return cachedResponse || new Response('Offline', { status: 503 });
           },
         },
       ],

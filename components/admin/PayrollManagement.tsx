@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { PayrollRecord, User, UserRole } from '../../types';
-import { getAllPayrolls, getAllUsers, calculatePayroll, createOrUpdatePayroll } from '../../services/db';
-import { exportToCSV } from '../../utils/export';
+import { PayrollRecord, User, UserRole, AttendanceRecord, AttendanceType, ShiftRegistration, OffType, Holiday, ContractType } from '../../types';
+import { getAllPayrolls, getAllUsers, calculatePayroll, createOrUpdatePayroll, getShiftRegistrations, getAllAttendance, getHolidays, getConfigNumber } from '../../services/db';
+import { exportMultipleTablesToCSV } from '../../utils/export';
 
 interface PayrollManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
@@ -89,13 +89,262 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
     return options;
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
     if (payrollRecords.length === 0) {
       alert('Không có dữ liệu để xuất');
       return;
     }
-    const filename = `payroll_${selectedMonth}_${Date.now()}.csv`;
-    exportToCSV(payrollRecords, filename);
+
+    try {
+      // Lấy tất cả dữ liệu cần thiết
+      const [allAttendance, allShifts, holidays] = await Promise.all([
+        getAllAttendance(10000), // Lấy nhiều records để đảm bảo có đủ dữ liệu
+        getShiftRegistrations(undefined, UserRole.ADMIN),
+        getHolidays(),
+      ]);
+
+      const [monthStr, yearStr] = selectedMonth.split('-');
+      const targetMonth = parseInt(monthStr);
+      const targetYear = parseInt(yearStr);
+      const monthStart = new Date(targetYear, targetMonth - 1, 1).getTime();
+      const monthEnd = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999).getTime();
+
+      // Lọc dữ liệu theo tháng
+      const attendanceInMonth = allAttendance.filter(record => {
+        return record.timestamp >= monthStart && record.timestamp <= monthEnd;
+      });
+
+      const shiftsInMonth = allShifts.filter(shift => {
+        return shift.date >= monthStart && shift.date <= monthEnd;
+      });
+
+      // Tạo danh sách các ngày trong tháng
+      const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
+      const dateColumns: string[] = [];
+      for (let day = 1; day <= daysInMonth; day++) {
+        const date = new Date(targetYear, targetMonth - 1, day);
+        const dateStr = `${String(day).padStart(2, '0')}/${String(targetMonth).padStart(2, '0')}/${targetYear}`;
+        dateColumns.push(dateStr);
+      }
+
+      // Lấy config
+      const [standardWorkDays, workHoursPerDay, overtimeRate] = await Promise.all([
+        getConfigNumber('standard_work_days', 27),
+        getConfigNumber('work_hours_per_day', 8),
+        getConfigNumber('overtime_rate', 1.5),
+      ]);
+
+      // Tạo dữ liệu CSV
+      const csvRows: any[] = [];
+
+      // Tạo header - chỉ giữ lại các cột có dữ liệu trong hệ thống
+      const headers = [
+        'Họ Tên',
+        'Bộ Phận',
+        'Lương Tổng',
+        'Ngày công - Số ngày',
+        'Ngày công - Lương',
+        'Tăng ca bắt buộc x1.5 - Số giờ',
+        'Tăng ca bắt buộc x1.5 - Lương',
+        'Phụ cấp',
+        'Thưởng',
+        'Khấu trừ',
+        'Thực nhận',
+        'Ghi Chú',
+      ];
+
+      // Thêm các cột ngày
+      dateColumns.forEach(dateStr => {
+        headers.push(`${dateStr} - IN`, `${dateStr} - OUT`);
+      });
+
+      csvRows.push(headers);
+
+      // Xử lý từng nhân viên
+      for (const payroll of payrollRecords) {
+        const employee = employees.find(e => e.id === payroll.userId);
+        if (!employee) continue;
+
+        // Lấy attendance của nhân viên trong tháng
+        const empAttendance = attendanceInMonth.filter(a => a.userId === payroll.userId);
+        
+        // Nhóm attendance theo ngày
+        const attendanceByDate: Record<string, { checkIn?: AttendanceRecord; checkOut?: AttendanceRecord }> = {};
+        empAttendance.forEach(record => {
+          const date = new Date(record.timestamp);
+          const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+          if (!attendanceByDate[dateKey]) {
+            attendanceByDate[dateKey] = {};
+          }
+          if (record.type === AttendanceType.CHECK_IN) {
+            attendanceByDate[dateKey].checkIn = record;
+          } else if (record.type === AttendanceType.CHECK_OUT) {
+            attendanceByDate[dateKey].checkOut = record;
+          }
+        });
+
+        // Lấy shifts của nhân viên trong tháng
+        const empShifts = shiftsInMonth.filter(s => s.userId === payroll.userId);
+
+        // Tính toán các giá trị - chỉ sử dụng dữ liệu có trong payroll record
+        const baseSalary = payroll.baseSalary;
+        
+        // Tính lương theo ngày công từ payroll (đã được tính trong hệ thống)
+        const workDaySalary = (baseSalary / standardWorkDays) * payroll.actualWorkDays;
+        
+        // Sử dụng OT hours và OT pay từ payroll (đã được tính trong hệ thống)
+        const mandatoryOTHours = payroll.otHours || 0;
+        const mandatoryOTSalary = payroll.otPay || 0;
+
+        // Tạo row cho nhân viên - chỉ các cột có dữ liệu trong hệ thống
+        const row: any[] = [
+          employee.name,
+          employee.department || '',
+          baseSalary.toLocaleString('vi-VN'),
+          payroll.actualWorkDays,
+          Math.round(workDaySalary).toLocaleString('vi-VN'),
+          mandatoryOTHours.toFixed(1),
+          Math.round(mandatoryOTSalary).toLocaleString('vi-VN'),
+          payroll.allowance.toLocaleString('vi-VN'),
+          payroll.bonus.toLocaleString('vi-VN'),
+          payroll.deductions.toLocaleString('vi-VN'),
+          payroll.netSalary.toLocaleString('vi-VN'),
+          '', // Ghi chú
+        ];
+
+        // Thêm dữ liệu IN/OUT cho từng ngày
+        const DEFAULT_IN = '09:00';
+        const DEFAULT_OUT = '18:00';
+        
+        dateColumns.forEach(dateStr => {
+          const [dayStr, monthStr, yearStr] = dateStr.split('/');
+          const dateKey = `${yearStr}-${monthStr.padStart(2, '0')}-${dayStr.padStart(2, '0')}`;
+          const dayAttendance = attendanceByDate[dateKey];
+          
+          // Tìm shift cho ngày này
+          const dayTimestamp = new Date(parseInt(yearStr), parseInt(monthStr) - 1, parseInt(dayStr)).getTime();
+          const dayShift = empShifts.find(s => {
+            const shiftDate = new Date(s.date);
+            return shiftDate.getDate() === parseInt(dayStr) && 
+                   shiftDate.getMonth() + 1 === parseInt(monthStr) &&
+                   shiftDate.getFullYear() === parseInt(yearStr);
+          });
+
+          let inValue = '';
+          let outValue = '';
+
+          // Kiểm tra ngày lễ
+          const date = new Date(parseInt(yearStr), parseInt(monthStr) - 1, parseInt(dayStr));
+          const isHolidayDate = holidays.some(h => {
+            const hDate = new Date(h.date);
+            if (h.isRecurring) {
+              return hDate.getMonth() === date.getMonth() && hDate.getDate() === date.getDate();
+            } else {
+              return hDate.getTime() === date.getTime();
+            }
+          });
+
+          // Logic hiển thị giống như phần đăng ký ca
+          if (isHolidayDate) {
+            inValue = 'LỄ';
+            outValue = 'LỄ';
+          } else if (dayShift) {
+            if (dayShift.shift === 'OFF') {
+              if (dayShift.offType === OffType.LE) {
+                inValue = 'LỄ';
+                outValue = 'LỄ';
+              } else {
+                // Hiển thị loại OFF
+                if (dayShift.offType === OffType.OFF_DK) {
+                  inValue = 'OFF DK';
+                } else if (dayShift.offType === OffType.OFF_PN) {
+                  inValue = 'OFF PN';
+                } else if (dayShift.offType === OffType.OFF_KL) {
+                  inValue = 'OFF KL';
+                } else if (dayShift.offType === OffType.CT) {
+                  inValue = 'CT';
+                } else {
+                  inValue = 'OFF';
+                }
+                outValue = '';
+              }
+            } else if (dayShift.shift === 'CUSTOM') {
+              // Nếu có attendance thực tế, ưu tiên hiển thị attendance
+              if (dayAttendance?.checkIn) {
+                const time = new Date(dayAttendance.checkIn.timestamp);
+                inValue = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
+              } else {
+                // Hiển thị giờ từ shift đăng ký
+                inValue = dayShift.startTime || DEFAULT_IN;
+              }
+              
+              if (dayAttendance?.checkOut) {
+                const time = new Date(dayAttendance.checkOut.timestamp);
+                outValue = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
+                // Kiểm tra có làm thêm không
+                if (dayAttendance.checkOut.status === 'OVERTIME') {
+                  outValue += ' BB';
+                }
+              } else {
+                // Hiển thị giờ từ shift đăng ký
+                outValue = dayShift.endTime || DEFAULT_OUT;
+              }
+              
+              // Nếu là học việc
+              if (employee.contractType === ContractType.TRIAL) {
+                inValue = 'HV';
+                outValue = 'HV';
+              }
+            }
+          } else {
+            // Không có shift đăng ký, chỉ hiển thị attendance nếu có
+            if (dayAttendance?.checkIn) {
+              const time = new Date(dayAttendance.checkIn.timestamp);
+              inValue = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
+            }
+            if (dayAttendance?.checkOut) {
+              const time = new Date(dayAttendance.checkOut.timestamp);
+              outValue = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
+              // Kiểm tra có làm thêm không
+              if (dayAttendance.checkOut.status === 'OVERTIME') {
+                outValue += ' BB';
+              }
+            }
+          }
+
+          row.push(inValue, outValue);
+        });
+
+        csvRows.push(row);
+      }
+
+      // Xuất CSV
+      const csvContent = csvRows.map(row => 
+        row.map((cell: any) => {
+          const str = String(cell);
+          if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+            return `"${str.replace(/"/g, '""')}"`;
+          }
+          return str;
+        }).join(',')
+      ).join('\n');
+
+      const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `bang_luong_chi_tiet_${selectedMonth}_${Date.now()}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      alert('Đã xuất thành công file CSV bảng lương chi tiết!');
+    } catch (error: any) {
+      alert('Lỗi khi xuất dữ liệu: ' + (error?.message || 'Vui lòng thử lại'));
+      console.error('Error exporting data:', error);
+    }
   };
 
   const handleRecalculateAll = async () => {
