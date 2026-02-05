@@ -34,6 +34,9 @@ interface ShiftManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
 }
 
+/** Modal từ chối: đơn (id) hoặc hàng loạt (userId) */
+type RejectTarget = { type: 'single'; id: string } | { type: 'bulk'; userId: string };
+
 const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) => {
   const [shiftRequests, setShiftRequests] = useState<ShiftRegistration[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
@@ -44,6 +47,8 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
   const [loading, setLoading] = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<RejectTarget | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
 
   useEffect(() => {
     loadData();
@@ -78,12 +83,17 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
   };
 
   const handleAction = async (id: string, status: RequestStatus) => {
+    if (status === RequestStatus.REJECTED) {
+      setRejectTarget({ type: 'single', id });
+      setRejectReason('');
+      return;
+    }
     setActionLoadingId(id);
     setMessage(null);
     try {
       await updateShiftStatus(id, status);
       await loadData();
-      showMsg('success', status === RequestStatus.APPROVED ? 'Đã chấp thuận.' : 'Đã từ chối.');
+      showMsg('success', 'Đã chấp thuận.');
     } catch (e) {
       showMsg('error', 'Cập nhật thất bại. Thử lại.');
     } finally {
@@ -92,6 +102,11 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
   };
 
   const handleBulkAction = async (userId: string, status: RequestStatus) => {
+    if (status === RequestStatus.REJECTED) {
+      setRejectTarget({ type: 'bulk', userId });
+      setRejectReason('');
+      return;
+    }
     const pendingInWeek = shiftRequests.filter(
       (r) =>
         r.userId === userId &&
@@ -106,12 +121,52 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
         await updateShiftStatus(r.id, status);
       }
       await loadData();
-      showMsg('success', `Đã ${status === RequestStatus.APPROVED ? 'chấp thuận' : 'từ chối'} ${pendingInWeek.length} đăng ký.`);
+      showMsg('success', `Đã chấp thuận ${pendingInWeek.length} đăng ký.`);
     } catch (e) {
       showMsg('error', 'Cập nhật thất bại. Thử lại.');
     } finally {
       setActionLoadingId(null);
     }
+  };
+
+  const handleConfirmReject = async () => {
+    if (!rejectTarget) return;
+    const reason = rejectReason.trim() || 'Không nêu lý do';
+    if (rejectTarget.type === 'single') {
+      setActionLoadingId(rejectTarget.id);
+      setMessage(null);
+      try {
+        await updateShiftStatus(rejectTarget.id, RequestStatus.REJECTED, reason);
+        await loadData();
+        showMsg('success', 'Đã từ chối.');
+      } catch (e) {
+        showMsg('error', 'Cập nhật thất bại. Thử lại.');
+      } finally {
+        setActionLoadingId(null);
+      }
+    } else {
+      const pendingInWeek = shiftRequests.filter(
+        (r) =>
+          r.userId === rejectTarget.userId &&
+          r.status === RequestStatus.PENDING &&
+          weekDateKeys.has(dateToKey(r.date))
+      );
+      setActionLoadingId(`bulk-${rejectTarget.userId}`);
+      setMessage(null);
+      try {
+        for (const r of pendingInWeek) {
+          await updateShiftStatus(r.id, RequestStatus.REJECTED, reason);
+        }
+        await loadData();
+        showMsg('success', `Đã từ chối ${pendingInWeek.length} đăng ký.`);
+      } catch (e) {
+        showMsg('error', 'Cập nhật thất bại. Thử lại.');
+      } finally {
+        setActionLoadingId(null);
+      }
+    }
+    setRejectTarget(null);
+    setRejectReason('');
   };
 
   const weekDates = useMemo(() => {
@@ -484,6 +539,41 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload }) =
           </table>
         </div>
       </div>
+
+      {/* Modal nhập lý do từ chối */}
+      {rejectTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setRejectTarget(null)}>
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-md w-full p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-slate-800">Lý do từ chối</h3>
+            <p className="text-sm text-slate-500">
+              {rejectTarget.type === 'single' ? 'Nhập lý do từ chối đăng ký ca này. Nhân viên sẽ xem được lý do.' : 'Nhập lý do từ chối (áp dụng cho tất cả đăng ký đang chờ trong tuần).'}
+            </p>
+            <textarea
+              value={rejectReason}
+              onChange={e => setRejectReason(e.target.value)}
+              placeholder="Ví dụ: Thiếu thông tin, không đúng quy định..."
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 min-h-[80px] resize-y"
+              rows={3}
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { setRejectTarget(null); setRejectReason(''); }}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmReject}
+                className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700 text-sm font-medium"
+              >
+                Xác nhận từ chối
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

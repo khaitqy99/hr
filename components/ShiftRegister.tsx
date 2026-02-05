@@ -698,13 +698,20 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                                     </p>
                                 </div>
                             </div>
-                            <span className={`text-[10px] font-bold px-2 py-1 rounded-lg uppercase ${
-                                shift.status === RequestStatus.APPROVED ? 'bg-green-50 text-green-600' :
-                                shift.status === RequestStatus.REJECTED ? 'bg-red-50 text-red-600' :
-                                'bg-orange-50 text-orange-600'
-                            }`}>
-                                {shift.status}
-                            </span>
+                            <div className="flex flex-col items-end gap-1">
+                                <span className={`text-[10px] font-bold px-2 py-1 rounded-lg uppercase ${
+                                    shift.status === RequestStatus.APPROVED ? 'bg-green-50 text-green-600' :
+                                    shift.status === RequestStatus.REJECTED ? 'bg-red-50 text-red-600' :
+                                    'bg-orange-50 text-orange-600'
+                                }`}>
+                                    {shift.status}
+                                </span>
+                                {shift.status === RequestStatus.REJECTED && shift.rejectionReason && (
+                                    <span className="text-[10px] text-red-600 text-right max-w-[140px]" title={shift.rejectionReason}>
+                                        Lý do: {shift.rejectionReason}
+                                    </span>
+                                )}
+                            </div>
                         </div>
                     ))}
                     {shifts.length > 7 && (

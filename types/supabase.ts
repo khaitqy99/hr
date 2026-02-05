@@ -149,6 +149,7 @@ export interface Database {
           end_time: string | null
           off_type: string | null
           status: string
+          rejection_reason: string | null
           created_at: number
         }
         Insert: {
@@ -160,6 +161,7 @@ export interface Database {
           end_time?: string | null
           off_type?: string | null
           status?: string
+          rejection_reason?: string | null
           created_at?: number
         }
         Update: {
@@ -171,6 +173,7 @@ export interface Database {
           end_time?: string | null
           off_type?: string | null
           status?: string
+          rejection_reason?: string | null
           created_at?: number
         }
       }

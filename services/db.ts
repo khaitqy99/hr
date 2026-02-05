@@ -684,6 +684,7 @@ export const getShiftRegistrations = async (userId?: string, role?: UserRole): P
         endTime: shift.end_time || undefined,
         offType: shift.off_type as any,
         status: shift.status as RequestStatus,
+        rejectionReason: shift.rejection_reason || undefined,
         createdAt: shift.created_at,
       }));
     } catch (error) {
@@ -730,12 +731,18 @@ export const registerShift = async (shift: ShiftRegistration): Promise<void> => 
   localStorage.setItem(SHIFTS_KEY, JSON.stringify(all));
 };
 
-export const updateShiftStatus = async (id: string, status: RequestStatus): Promise<void> => {
+export const updateShiftStatus = async (id: string, status: RequestStatus, rejectionReason?: string): Promise<void> => {
   if (isSupabaseAvailable()) {
     try {
+      const payload: { status: RequestStatus; rejection_reason?: string | null } = { status };
+      if (status === RequestStatus.REJECTED) {
+        payload.rejection_reason = rejectionReason?.trim() || null;
+      } else {
+        payload.rejection_reason = null;
+      }
       const { error } = await supabase
         .from('shift_registrations')
-        .update({ status })
+        .update(payload)
         .eq('id', id);
 
       if (error) throw new Error(`Lỗi cập nhật ca: ${error.message}`);
@@ -751,6 +758,11 @@ export const updateShiftStatus = async (id: string, status: RequestStatus): Prom
   const idx = all.findIndex((r: ShiftRegistration) => r.id === id);
   if (idx !== -1) {
     all[idx].status = status;
+    if (status === RequestStatus.REJECTED) {
+      all[idx].rejectionReason = rejectionReason?.trim() || undefined;
+    } else {
+      all[idx].rejectionReason = undefined;
+    }
     localStorage.setItem(SHIFTS_KEY, JSON.stringify(all));
   }
 };
