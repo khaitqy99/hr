@@ -238,33 +238,30 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
   return (
     <div className="layout-employee flex flex-col h-screen bg-sky-50 overflow-hidden">
       {/* Header - Glassmorphism */}
-      <header className="px-5 py-2.5 flex justify-between items-center sticky top-0 z-30 bg-white border-b border-sky-100">
-        <div className="flex items-center space-x-2.5">
-          <div className="relative">
+      <header className="px-5 py-2.5 flex justify-between items-center sticky top-0 z-30 bg-white border-b border-sky-100" ref={profileMenuRef}>
+        <button
+          type="button"
+          onClick={() => setShowProfileMenu(!showProfileMenu)}
+          className="flex items-center space-x-2.5 rounded-xl p-1 -m-1 text-left hover:bg-sky-50/80 active:bg-sky-100/80 transition-colors min-h-[44px] min-w-[44px]"
+          aria-label="Menu tài khoản"
+          aria-expanded={showProfileMenu}
+        >
+          <div className="relative flex-shrink-0">
             <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-cyan-400 p-[2px] shadow-lg shadow-blue-200/50">
-                <div className="w-full h-full rounded-full bg-white flex items-center justify-center text-blue-700 font-extrabold text-xs">
+              <div className="w-full h-full rounded-full bg-white flex items-center justify-center text-blue-700 font-extrabold text-xs">
                 {user.name.charAt(0)}
-                </div>
+              </div>
             </div>
-            <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-400 border-2 border-white rounded-full"></div>
+            <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-400 border-2 border-white rounded-full" aria-hidden />
           </div>
-          <div className="flex flex-col">
-            <h1 className="text-xs font-bold text-slate-800 leading-tight">{user.name}</h1>
+          <div className="flex flex-col min-w-0">
+            <h1 className="text-xs font-bold text-slate-800 leading-tight truncate">{user.name}</h1>
             <span className="text-[9px] font-semibold text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded-full w-fit mt-0.5">
-                {user.role}
+              {user.role}
             </span>
           </div>
-        </div>
-        <div className="relative" ref={profileMenuRef}>
-          <button 
-            onClick={() => setShowProfileMenu(!showProfileMenu)} 
-            className="p-2 rounded-full text-slate-400 hover:text-blue-500 hover:bg-blue-50 transition-colors"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className="w-4 h-4">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M17.982 18.725A7.488 7.488 0 0012 15.75a7.488 7.488 0 00-5.982 2.975m11.963 0a9 9 0 10-11.963 0m11.963 0A8.966 8.966 0 0112 21a8.966 8.966 0 01-5.982-2.275M15 9.75a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </button>
-          
+        </button>
+        <div className="relative flex-shrink-0 self-start">
           {showProfileMenu && (
             <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-slate-200 py-2 z-50">
               <button
