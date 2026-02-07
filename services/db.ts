@@ -1202,9 +1202,9 @@ export const calculatePayroll = async (
   otHours?: number, 
   allowance: number = 0, 
   bonus: number = 0,
-  useAttendance: boolean = true,
+  useAttendance: boolean = false,
   useLeave: boolean = true,
-  useShift: boolean = false
+  useShift: boolean = true
 ): Promise<PayrollRecord> => {
   const baseSalary = employee.grossSalary || employee.traineeSalary || 0;
   // Lấy các config từ system configs
@@ -1215,10 +1215,16 @@ export const calculatePayroll = async (
     getConfigNumber('work_hours_per_day', 8)
   ]);
   
-  // Auto-calculate from attendance if not provided and useAttendance is true
   let finalWorkDays = actualWorkDays;
-  let finalOtHours = otHours || 0;
+  let finalOtHours = otHours ?? 0;
   
+  // Ưu tiên ngày công từ đăng ký ca (shift) — không phụ thuộc check-in/check-out
+  if (useShift && actualWorkDays === undefined) {
+    const shiftWorkDays = await calculateShiftWorkDays(employee.id, month);
+    finalWorkDays = shiftWorkDays;
+  }
+  
+  // Nếu bật dùng chấm công: có thể lấy ngày công và giờ OT từ attendance (override hoặc bổ sung)
   if (useAttendance && (actualWorkDays === undefined || otHours === undefined)) {
     const attendanceStats = await calculateAttendanceStats(employee.id, month);
     if (actualWorkDays === undefined) {
@@ -1233,13 +1239,6 @@ export const calculatePayroll = async (
   if (useLeave && finalWorkDays !== undefined) {
     const leaveDays = await calculateLeaveDays(employee.id, month);
     finalWorkDays = Math.max(0, finalWorkDays - leaveDays);
-  }
-  
-  // Có thể sử dụng shift registrations để tính ngày công (nếu useShift = true)
-  // Nhưng hiện tại chúng ta ưu tiên attendance, chỉ dùng shift nếu không có attendance
-  if (useShift && finalWorkDays === undefined) {
-    const shiftWorkDays = await calculateShiftWorkDays(employee.id, month);
-    finalWorkDays = shiftWorkDays;
   }
   
   // Fallback to default if still undefined

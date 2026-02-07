@@ -60,7 +60,7 @@ Dữ liệu **ĐÃ ĐƯỢC ĐỒNG BỘ** với Supabase. Tất cả các chứ
 ### 6. ✅ **Payroll (Bảng lương)**
 - **Chức năng:**
   - Xem bảng lương theo tháng
-  - Tính toán lương tự động từ chấm công
+  - Tính toán lương tự động từ đăng ký ca (shift)
   - Quản lý lương (Admin)
 - **Files:** `components/Payroll.tsx`, `components/admin/PayrollManagement.tsx`, `components/SalaryManagement.tsx`
 - **E2E Status:** ❌ Chưa có test

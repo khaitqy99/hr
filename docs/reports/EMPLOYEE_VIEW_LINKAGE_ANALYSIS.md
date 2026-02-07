@@ -115,7 +115,7 @@
 - Biểu đồ phân bổ lương
 
 **Liên kết với các tab khác:**
-- ⚠️ **ATTENDANCE**: Lương được tính từ attendance nhưng không hiển thị chi tiết
+- ✅ **PAYROLL**: Lương được tính từ đăng ký ca (shift), không từ attendance
 - ⚠️ **SHIFTS**: Ca làm việc có thể ảnh hưởng đến lương nhưng không hiển thị
 - ⚠️ **LEAVE**: Ngày nghỉ được trừ vào lương nhưng không hiển thị
 - ❌ **DASHBOARD**: Không có link hoặc preview lương
@@ -124,17 +124,17 @@
 
 **Vấn đề phát hiện:**
 - Payroll chỉ hiển thị kết quả cuối cùng, không hiển thị cách tính
-- Không hiển thị chi tiết về ngày công tính từ attendance
+- Chi tiết ngày công hiển thị từ đăng ký ca (và ngày nghỉ phép)
 - Không hiển thị ngày nghỉ từ leave requests
 - Không hiển thị ca làm việc từ shift registrations
 
 **Cải thiện đề xuất:**
 - Thêm section "Chi tiết tính lương" hiển thị:
-  - Ngày công từ attendance
+  - Ngày công từ đăng ký ca (shift)
   - Ngày nghỉ từ leave requests
   - Ca làm việc từ shift registrations
-  - Giờ OT từ attendance
-- Thêm link đến Dashboard để xem chi tiết attendance
+  - Giờ OT từ bản ghi lương (có thể nhập tay)
+- Link đến Shifts để xem đăng ký ca
 - Thêm link đến Shifts để xem ca đăng ký
 
 ---
@@ -188,16 +188,16 @@
 #### 2. Payroll không hiển thị chi tiết tính lương
 **Vấn đề:**
 - Chỉ hiển thị kết quả cuối cùng
-- Không hiển thị cách tính từ attendance/shift/leave
+- Chi tiết tính lương: đăng ký ca, nghỉ phép (không dùng attendance)
 - Không có link đến các tab liên quan
 
-**Đề xuất:**
-- Thêm section "Chi tiết tính lương" với:
-  - Ngày công từ attendance
+**Hiện trạng:**
+- Section "Chi tiết tính lương" với:
+  - Ngày công từ đăng ký ca (shift)
   - Ngày nghỉ từ leave requests
   - Ca làm việc từ shift registrations
-  - Giờ OT từ attendance
-- Thêm links đến Dashboard và Shifts
+  - Giờ OT từ bản ghi lương
+- Links đến Shifts để xem đăng ký ca
 
 #### 3. Notifications không tích hợp với các tab khác
 **Vấn đề:**
@@ -224,7 +224,7 @@
 
 ### 🔴 Ưu tiên cao:
 1. **Dashboard**: Thêm hiển thị ca đăng ký hôm nay và badge thông báo
-2. **Payroll**: Thêm section chi tiết tính lương từ attendance/shift/leave
+2. **Payroll**: Section chi tiết tính lương từ đăng ký ca và nghỉ phép (đã có)
 3. **Thêm tab Leave**: Cho phép nhân viên xem và tạo đơn nghỉ phép
 
 ### 🟡 Ưu tiên trung bình:

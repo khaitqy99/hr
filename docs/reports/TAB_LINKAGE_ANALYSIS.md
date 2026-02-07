@@ -48,15 +48,13 @@
   - `getShiftRegistrations(user.id)` - Ca đăng ký hôm nay
   - `getNotifications(user.id)` - Số thông báo chưa đọc
 
-#### **2. Payroll → Dashboard & Shifts**
-- ✅ **Payroll → Dashboard**: Có link "Xem chi tiết →" trong phần "Ngày công từ chấm công"
-- ✅ **Payroll → Shifts**: Có link "Xem chi tiết →" trong phần "Ca làm việc đã đăng ký"
+#### **2. Payroll → Shifts**
+- ✅ **Payroll → Shifts**: Có link "Xem đăng ký ca →" / "Xem chi tiết →" trong phần ngày công và ca đăng ký
 
 **Dữ liệu được chia sẻ:**
-- Payroll sử dụng:
-  - `calculateAttendanceStats(user.id, month)` - Tính ngày công từ chấm công
-  - `calculateLeaveDays(user.id, month)` - Tính ngày nghỉ
-  - `getShiftRegistrations(user.id)` - Lấy ca đăng ký để tính số ngày làm việc
+- Payroll (tính lương theo **đăng ký ca**, không theo chấm công):
+  - `calculateLeaveDays(user.id, month)` - Ngày nghỉ phép
+  - `getShiftRegistrations(user.id)` - Ngày công từ ca đã duyệt (không OFF)
 
 #### **3. AdminPanel → EmployeeProfile**
 - ✅ **UsersManagement → EmployeeProfile**: Có function `handleEditUser` gọi `setView('employee-profile', { employeeId: emp.id })`
@@ -154,11 +152,8 @@
 CheckIn → saveAttendance() → attendance_records (DB)
          ↓
 Dashboard → getAttendance() → Hiển thị lịch sử
-         ↓
-Payroll → calculateAttendanceStats() → Tính ngày công
-         ↓
-PayrollManagement → getAllPayrolls() → Hiển thị bảng lương
 ```
+(Lương **không** tính từ chấm công; tính từ đăng ký ca.)
 
 ### **2. Luồng Đăng Ký Ca**
 ```
@@ -168,18 +163,18 @@ CheckIn → getShiftRegistrations() → Tính trạng thái ON_TIME/LATE
          ↓
 Dashboard → getShiftRegistrations() → Hiển thị ca hôm nay
          ↓
-Payroll → getShiftRegistrations() → Tính số ngày làm việc
+Payroll / calculatePayroll() → calculateShiftWorkDays() → Ngày công (tính lương)
          ↓
 ShiftManagement → getShiftRegistrations() → Quản lý đăng ký ca
 ```
 
 ### **3. Luồng Tính Lương**
 ```
-PayrollManagement → calculatePayroll() 
+PayrollManagement / SalaryManagement → calculatePayroll(useShift=true, useAttendance=false)
                  ↓
-                 → calculateAttendanceStats() → Ngày công
-                 → calculateLeaveDays() → Ngày nghỉ
-                 → getShiftRegistrations() → Ca làm việc
+                 → calculateShiftWorkDays() → Ngày công từ đăng ký ca
+                 → calculateLeaveDays() → Ngày nghỉ (trừ ra khỏi ngày công)
+                 → getShiftRegistrations() → Ca làm việc (hiển thị chi tiết)
                  ↓
                  → createOrUpdatePayroll() → payroll_records (DB)
                  ↓
@@ -280,7 +275,7 @@ EmployeeProfile → updateUser() → users (DB)
 | Dashboard | getAttendance(user.id), getShiftRegistrations(user.id), getNotifications(user.id) | Theo nhân viên | ✅ |
 | CheckIn | getAttendance(user.id), getShiftRegistrations(user.id), getOfficeLocation() | Theo nhân viên | ✅ |
 | ShiftRegister | getShiftRegistrations(user.id), getHolidays() | Theo nhân viên | ✅ |
-| Payroll (NV) | getPayroll(user.id), calculateAttendanceStats(user.id), getShiftRegistrations(user.id) | Theo nhân viên | ✅ |
+| Payroll (NV) | getPayroll(user.id), calculateLeaveDays(), getShiftRegistrations(user.id) — ngày công từ đăng ký ca | Theo nhân viên | ✅ |
 | NotificationsPanel | getNotifications(user.id) | Theo nhân viên | ✅ |
 | AttendanceManagement | getAllAttendance(500), getAllUsers() | Toàn hệ thống | ✅ |
 | ShiftManagement | getShiftRegistrations(undefined, UserRole.ADMIN), getAllUsers() | Toàn hệ thống | ✅ |
@@ -294,7 +289,7 @@ EmployeeProfile → updateUser() → users (DB)
 | Dashboard | Biểu đồ 5 ngày gần nhất, giờ làm = checkOut - checkIn | ✅ |
 | Dashboard | Ca hôm nay: lọc shift APPROVED + cùng ngày | ✅ |
 | Dashboard | Giờ tuần: Thứ 2–CN, tính từ cặp check-in/check-out | ✅ |
-| Payroll (NV) | Ngày công từ chấm công, ca đăng ký, ngày nghỉ phép | ✅ |
+| Payroll (NV) | Ngày công từ đăng ký ca, ngày nghỉ phép, giờ OT (từ bản ghi lương) | ✅ |
 | Payroll (NV) | Tháng: MM-YYYY, availableMonths từ getPayroll | ✅ |
 | ShiftManagement | Lưới theo tuần, lọc phòng ban + tìm tên | ✅ |
 | ShiftManagement | Ngày lễ hiển thị badge trên calendar | ✅ |

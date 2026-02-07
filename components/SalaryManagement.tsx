@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { User, UserRole, PayrollRecord } from '../types';
-import { getAllUsers, getPayroll, createOrUpdatePayroll, calculatePayroll, calculateAttendanceStats, getIncompleteAttendanceDays } from '../services/db';
+import { getAllUsers, getPayroll, createOrUpdatePayroll, calculatePayroll, calculateShiftWorkDays, getIncompleteAttendanceDays } from '../services/db';
 
 interface SalaryManagementProps {
   user: User;
@@ -18,10 +18,10 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
     allowance: 0,
     bonus: 0,
   });
-  const [attendanceStats, setAttendanceStats] = useState<{ actualWorkDays: number; otHours: number } | null>(null);
+  const [shiftWorkDays, setShiftWorkDays] = useState<number | null>(null);
   const [incompleteDays, setIncompleteDays] = useState<{ date: string; hasCheckIn: boolean; hasCheckOut: boolean }[]>([]);
   const [isCalculating, setIsCalculating] = useState(false);
-  const [useAttendanceData, setUseAttendanceData] = useState(true);
+  const [useShiftData, setUseShiftData] = useState(true); // Ngày công từ đăng ký ca (mặc định)
 
   useEffect(() => {
     const loadEmployees = async () => {
@@ -42,27 +42,19 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
       if (selectedEmployee && selectedMonth) {
         const records = await getPayroll(selectedEmployee.id, selectedMonth);
         setPayrollRecords(records);
-        
-        // Load attendance stats và ngày thiếu check-in/check-out
-        const [stats, incomplete] = await Promise.all([
-          calculateAttendanceStats(selectedEmployee.id, selectedMonth),
+        const [days, incomplete] = await Promise.all([
+          calculateShiftWorkDays(selectedEmployee.id, selectedMonth),
           getIncompleteAttendanceDays(selectedEmployee.id, selectedMonth),
         ]);
-        setAttendanceStats(stats);
+        setShiftWorkDays(days);
         setIncompleteDays(incomplete);
-
-        // Auto-fill form with attendance data if useAttendanceData is true
-        if (useAttendanceData) {
-          setSalaryForm(prev => ({
-            ...prev,
-            actualWorkDays: stats.actualWorkDays,
-            otHours: stats.otHours,
-          }));
+        if (useShiftData) {
+          setSalaryForm(prev => ({ ...prev, actualWorkDays: days, otHours: 0 }));
         }
       }
     };
     loadPayrollData();
-  }, [selectedEmployee, selectedMonth, useAttendanceData]);
+  }, [selectedEmployee, selectedMonth, useShiftData]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
@@ -76,11 +68,13 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
       const payroll = await calculatePayroll(
         selectedEmployee,
         selectedMonth,
-        useAttendanceData ? undefined : salaryForm.actualWorkDays,
-        useAttendanceData ? undefined : salaryForm.otHours,
+        useShiftData ? undefined : salaryForm.actualWorkDays,
+        salaryForm.otHours, // OT có thể nhập tay kể cả khi tính theo đăng ký ca
         salaryForm.allowance,
         salaryForm.bonus,
-        useAttendanceData
+        false, // useAttendance - không dùng chấm công
+        true,  // useLeave
+        useShiftData // useShift - ngày công từ đăng ký ca
       );
       
       await createOrUpdatePayroll(payroll);
@@ -161,7 +155,7 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
             <div className="flex items-center space-x-4">
               <div>
                 <h1 className="text-lg font-bold text-slate-800 leading-tight">Tính lương</h1>
-                <p className="text-xs text-slate-500 mt-0.5 leading-tight">Tính lương cho nhân viên dựa trên chấm công</p>
+                <p className="text-xs text-slate-500 mt-0.5 leading-tight">Tính lương cho nhân viên dựa trên đăng ký ca</p>
               </div>
             </div>
             <div className="flex items-center space-x-4">
@@ -301,39 +295,29 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
                     </div>
                   )}
 
-                  {/* Attendance Stats Display */}
-                  {selectedMonth && attendanceStats && (
+                  {/* Ngày công từ đăng ký ca */}
+                  {selectedMonth && shiftWorkDays !== null && (
                     <div className="bg-green-50 border border-green-200 rounded-xl p-4">
                       <div className="flex items-center justify-between mb-3">
-                        <span className="text-xs font-bold text-green-700">Thống kê chấm công tháng {selectedMonth}</span>
+                        <span className="text-xs font-bold text-green-700">Đăng ký ca tháng {selectedMonth}</span>
                         <label className="flex items-center space-x-2 cursor-pointer">
                           <input
                             type="checkbox"
-                            checked={useAttendanceData}
+                            checked={useShiftData}
                             onChange={(e) => {
-                              setUseAttendanceData(e.target.checked);
-                              if (e.target.checked && attendanceStats) {
-                                setSalaryForm(prev => ({
-                                  ...prev,
-                                  actualWorkDays: attendanceStats.actualWorkDays,
-                                  otHours: attendanceStats.otHours,
-                                }));
+                              setUseShiftData(e.target.checked);
+                              if (e.target.checked && shiftWorkDays !== null) {
+                                setSalaryForm(prev => ({ ...prev, actualWorkDays: shiftWorkDays, otHours: 0 }));
                               }
                             }}
                             className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
                           />
-                          <span className="text-xs font-medium text-green-700">Tự động từ chấm công</span>
+                          <span className="text-xs font-medium text-green-700">Tự động từ đăng ký ca</span>
                         </label>
                       </div>
-                      <div className="grid grid-cols-2 gap-3 text-sm">
-                        <div>
-                          <span className="text-slate-600">Ngày công:</span>
-                          <span className="font-bold text-green-700 ml-2">{attendanceStats.actualWorkDays} ngày</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-600">Giờ OT:</span>
-                          <span className="font-bold text-green-700 ml-2">{attendanceStats.otHours}h</span>
-                        </div>
+                      <div className="text-sm">
+                        <span className="text-slate-600">Ngày công (ca đã duyệt, không OFF):</span>
+                        <span className="font-bold text-green-700 ml-2">{shiftWorkDays} ngày</span>
                       </div>
                     </div>
                   )}
@@ -346,8 +330,8 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
                         <div>
                           <label className="block text-xs font-bold text-slate-500 mb-1">
                             Ngày công thực tế
-                            {useAttendanceData && attendanceStats && (
-                              <span className="text-green-600 ml-2">(Tự động: {attendanceStats.actualWorkDays})</span>
+                            {useShiftData && shiftWorkDays !== null && (
+                              <span className="text-green-600 ml-2">(Từ đăng ký ca: {shiftWorkDays})</span>
                             )}
                           </label>
                           <input
@@ -359,15 +343,15 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
                               const value = Number(e.target.value);
                               setSalaryForm(f => ({ ...f, actualWorkDays: value >= 0 ? value : 0 }));
                             }}
-                            disabled={useAttendanceData}
-                            className={`w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm ${useAttendanceData ? 'bg-slate-100 text-slate-500' : ''}`}
+                            disabled={useShiftData}
+                            className={`w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm ${useShiftData ? 'bg-slate-100 text-slate-500' : ''}`}
                           />
                         </div>
                         <div>
                           <label className="block text-xs font-bold text-slate-500 mb-1">
-                            Giờ làm thêm (OT)
-                            {useAttendanceData && attendanceStats && (
-                              <span className="text-green-600 ml-2">(Tự động: {attendanceStats.otHours}h)</span>
+                            Giờ làm thêm (OT) — nhập tay nếu có
+                            {useShiftData && (
+                              <span className="text-slate-400 ml-2">(Tính lương theo ca, không lấy từ chấm công)</span>
                             )}
                           </label>
                           <input
@@ -379,8 +363,8 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
                               const value = Number(e.target.value);
                               setSalaryForm(f => ({ ...f, otHours: value >= 0 ? value : 0 }));
                             }}
-                            disabled={useAttendanceData}
-                            className={`w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm ${useAttendanceData ? 'bg-slate-100 text-slate-500' : ''}`}
+                            disabled={false}
+                            className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm"
                           />
                         </div>
                         <div>
@@ -413,26 +397,25 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
                           onClick={handleCalculateSalary}
                           disabled={isCalculating || !selectedEmployee || (!selectedEmployee.grossSalary && !selectedEmployee.traineeSalary)}
                           className={`w-full py-3 rounded-xl text-sm font-bold shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${
-                            useAttendanceData 
-                              ? 'bg-green-600 text-white hover:bg-green-700' 
+                            useShiftData
+                              ? 'bg-green-600 text-white hover:bg-green-700'
                               : 'bg-blue-600 text-white hover:bg-blue-700'
                           }`}
                         >
-                          {isCalculating ? 'Đang tính...' : useAttendanceData ? 'Tính lương từ chấm công' : 'Tính lương'}
+                          {isCalculating ? 'Đang tính...' : useShiftData ? 'Tính lương từ đăng ký ca' : 'Tính lương'}
                         </button>
                         {!selectedEmployee?.grossSalary && !selectedEmployee?.traineeSalary && (
                           <p className="text-xs text-red-500 text-center">Nhân viên chưa có thông tin lương cơ bản</p>
                         )}
-                        {useAttendanceData && attendanceStats && attendanceStats.actualWorkDays === 0 && (
-                          <p className="text-xs text-orange-500 text-center">Chưa có dữ liệu chấm công cho tháng này</p>
+                        {useShiftData && shiftWorkDays !== null && shiftWorkDays === 0 && (
+                          <p className="text-xs text-orange-500 text-center">Chưa có đăng ký ca đã duyệt cho tháng này</p>
                         )}
-                        {useAttendanceData && incompleteDays.length > 0 && (
+                        {!useShiftData && incompleteDays.length > 0 && (
                           <div className="mt-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-left">
-                            <p className="text-xs font-bold text-amber-800 mb-1">Ngày thiếu chấm công (không tính vào lương):</p>
+                            <p className="text-xs font-bold text-amber-800 mb-1">Ngày thiếu chấm công (tham khảo):</p>
                             <p className="text-xs text-amber-700 mb-2">
                               {incompleteDays.map(d => `${d.date} (${d.hasCheckIn ? 'có vào' : 'thiếu vào'}, ${d.hasCheckOut ? 'có ra' : 'thiếu ra'})`).join(', ')}
                             </p>
-                            <p className="text-xs text-amber-600">Nếu được bù công, hãy tắt &quot;Dùng dữ liệu chấm công&quot; và nhập tay số ngày công.</p>
                           </div>
                         )}
                       </div>

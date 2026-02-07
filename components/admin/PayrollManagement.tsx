@@ -353,7 +353,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       return;
     }
 
-    if (!confirm(`Bạn có chắc muốn tính lại lương cho tất cả nhân viên trong tháng ${selectedMonth}?\n\nLưu ý: Thao tác này sẽ tính lại từ dữ liệu chấm công, nghỉ phép và đăng ký ca.`)) {
+    if (!confirm(`Bạn có chắc muốn tính lại lương cho tất cả nhân viên trong tháng ${selectedMonth}?\n\nLưu ý: Thao tác này sẽ tính lại từ đăng ký ca và nghỉ phép (không dùng chấm công).`)) {
       return;
     }
 
@@ -367,17 +367,17 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
 
       for (const employee of activeEmployees) {
         try {
-          // Tính lại lương với tích hợp attendance, leave và shift
+          // Tính lương dựa trên đăng ký ca (shift), không phụ thuộc check-in/check-out
           const payroll = await calculatePayroll(
             employee,
             selectedMonth,
-            undefined, // actualWorkDays - sẽ tính từ attendance
-            undefined, // otHours - sẽ tính từ attendance
+            undefined, // actualWorkDays - lấy từ đăng ký ca
+            undefined, // otHours
             0, // allowance
             0, // bonus
-            true, // useAttendance
-            true, // useLeave - trừ ngày nghỉ
-            false // useShift - không dùng shift làm nguồn chính
+            false, // useAttendance - không dùng chấm công
+            true, // useLeave - trừ ngày nghỉ phép
+            true // useShift - ngày công từ đăng ký ca
           );
 
           // Lấy payroll hiện tại để giữ lại allowance và bonus nếu có
