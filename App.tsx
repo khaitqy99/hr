@@ -18,6 +18,7 @@ const SalaryManagement = lazy(() => import('./components/SalaryManagement'));
 const NotificationsPanel = lazy(() => import('./components/NotificationsPanel'));
 import { getCurrentUser, syncAllOfflineData, getNotifications } from './services/db';
 import { sendOTP, verifyOTP } from './services/auth';
+import { useDataEvents } from './utils/useDataEvents';
 
 // Admin sub-routes: path segment cho từng trang admin (đồng bộ với AdminPanel)
 const ADMIN_TAB_SEGMENTS = ['users', 'attendance', 'shift', 'payroll', 'reports', 'departments', 'holidays', 'config', 'export', 'notifications', 'settings'];
@@ -652,6 +653,7 @@ const App: React.FC = () => {
   }, [user]);
 
   // Update app badge based on notifications
+  // Sử dụng event system thay vì polling để giảm số lượng requests
   useEffect(() => {
     if (!user) {
       setAppBadge(0);
@@ -668,11 +670,32 @@ const App: React.FC = () => {
       }
     };
 
+    // Update badge ngay khi mount
     updateBadge();
-    const interval = setInterval(updateBadge, 60000); // Update every minute
+    
+    // Update badge khi có thay đổi notifications (thay vì polling mỗi phút)
+    // Polling backup mỗi 2 phút để đảm bảo badge luôn được cập nhật
+    const interval = setInterval(updateBadge, 120000); // 2 phút (giảm từ 1 phút)
 
     return () => clearInterval(interval);
   }, [user]);
+
+  // Listen to notification events để update badge ngay lập tức khi có thay đổi
+  useDataEvents(
+    ['notifications:created', 'notifications:updated'],
+    async () => {
+      if (user) {
+        try {
+          const notifications = await getNotifications(user.id);
+          const unreadCount = notifications.filter(n => !n.read).length;
+          await setAppBadge(unreadCount);
+        } catch (error) {
+          console.error('Error updating badge from event:', error);
+        }
+      }
+    },
+    !!user
+  );
 
   // Show splash screen only on first load
   useEffect(() => {
@@ -695,6 +718,30 @@ const App: React.FC = () => {
   const RouteFallback = () => (
     <div className="flex items-center justify-center min-h-[200px] py-12" aria-hidden="true">
       <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+
+  const EMPLOYEE_TABS = ['dashboard', 'checkin', 'shifts', 'payroll', 'notifications'] as const;
+
+  /** Tất cả tab nhân viên mount sẵn, chỉ ẩn/hiện — giống app native, không re-render */
+  const renderEmployeeTabs = () => (
+    <div className="max-w-md mx-auto min-h-full">
+      {EMPLOYEE_TABS.map((view) => (
+        <div
+          key={view}
+          className="w-full min-h-full"
+          style={{ display: currentView === view ? 'block' : 'none' }}
+          hidden={currentView !== view}
+        >
+          <Suspense fallback={<RouteFallback />}>
+            {view === 'dashboard' && <Dashboard user={user} setView={setView} />}
+            {view === 'checkin' && <CheckIn user={user} />}
+            {view === 'shifts' && <ShiftRegister user={user} />}
+            {view === 'payroll' && <Payroll user={user} setView={setView} />}
+            {view === 'notifications' && <NotificationsPanel user={user} setView={setView} />}
+          </Suspense>
+        </div>
+      ))}
     </div>
   );
 
@@ -765,14 +812,14 @@ const App: React.FC = () => {
     return renderView();
   }
 
+  const isEmployeeTabView = EMPLOYEE_TABS.includes(currentView as typeof EMPLOYEE_TABS[number]);
+
   return (
     <>
       <UpdateNotification />
       {!isInstalled() && <InstallPrompt />}
       <Layout user={user} currentView={currentView} setView={setView} onLogout={handleLogout}>
-        <div className="max-w-md mx-auto min-h-full">
-          {renderView()}
-        </div>
+        {isEmployeeTabView ? renderEmployeeTabs() : renderView()}
       </Layout>
     </>
   );

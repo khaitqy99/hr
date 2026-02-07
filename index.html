@@ -91,14 +91,29 @@
           font-size: 16px !important;
         }
       }
+      /* Ẩn toàn bộ thanh cuộn trong dự án */
+      html, body, * {
+        scrollbar-width: none !important;
+        -ms-overflow-style: none !important;
+      }
+      html::-webkit-scrollbar,
+      body::-webkit-scrollbar,
+      *::-webkit-scrollbar {
+        display: none !important;
+      }
       /* Hide scrollbar và tối ưu scroll trên iOS */
       .no-scrollbar::-webkit-scrollbar { display: none; }
       .no-scrollbar { 
         -ms-overflow-style: none; 
         scrollbar-width: none;
-        /* Tối ưu scroll performance trên iOS */
         -webkit-overflow-scrolling: touch;
         overflow-scrolling: touch;
+      }
+      /* Ẩn hoàn toàn thanh cuộn trang employee (dashboard, checkin, shifts, ...) */
+      .layout-employee main::-webkit-scrollbar { display: none !important; }
+      .layout-employee main {
+        -ms-overflow-style: none !important;
+        scrollbar-width: none !important;
       }
       
       /* Ocean Animations - Tối ưu cho mobile */
@@ -132,7 +147,7 @@
         transform: translateY(10px);
       }
       @keyframes fadeUp { 
-        to { opacity: 1; transform: translateY(0); } 
+        to { opacity: 1; transform: none; } 
       }
 
       /* Page Transitions - Tối ưu cho iOS: đơn giản hóa và giảm complexity */
@@ -150,11 +165,18 @@
 
       @keyframes pageEnterRight {
         0% { opacity: 0; transform: translateX(30px); }
-        100% { opacity: 1; transform: translateX(0); }
+        100% { opacity: 1; transform: none; }
       }
       @keyframes pageEnterLeft {
         0% { opacity: 0; transform: translateX(-30px); }
-        100% { opacity: 1; transform: translateX(0); }
+        100% { opacity: 1; transform: none; }
+      }
+
+      /* Trạng thái idle sau khi animation xong — không chạy animation mới, tránh nháy */
+      .content-idle {
+        opacity: 1;
+        transform: none;
+        animation: none;
       }
 
       /* Bottom bar - Tối ưu transitions cho iOS */
@@ -243,13 +265,6 @@
         /* Tối ưu scrolling trên iOS */
         * {
           -webkit-overflow-scrolling: touch;
-        }
-        
-        /* Giảm repaints trên iOS */
-        .animate-enter-right,
-        .animate-enter-left {
-          backface-visibility: hidden;
-          perspective: 1000px;
         }
         
         /* Tối ưu images trên iOS */

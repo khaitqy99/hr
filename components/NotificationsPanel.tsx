@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import type { Notification, User } from '../types';
 import { getNotifications, markNotificationAsRead } from '../services/db';
+import { sendLocalNotification, getNotificationPermission } from '../services/push';
+import { supabase } from '../services/supabase';
+import { isSupabaseAvailable } from '../services/db';
 
 interface NotificationsPanelProps {
   user: User;
@@ -60,7 +63,7 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user, setView }
 
   useEffect(() => {
     loadNotifications();
-    // Reload notifications every 30 seconds
+    // Reload notifications every 60 seconds (tăng từ 30s để giảm số lượng requests)
     // Chỉ reload khi tab đang active để tránh lãng phí tài nguyên
     let interval: NodeJS.Timeout | null = null;
     const handleVisibilityChange = () => {
@@ -71,12 +74,12 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user, setView }
         }
       } else {
         loadNotifications();
-        interval = setInterval(loadNotifications, 30000);
+        interval = setInterval(loadNotifications, 60000); // 60 giây
       }
     };
     
     if (!document.hidden) {
-      interval = setInterval(loadNotifications, 30000);
+      interval = setInterval(loadNotifications, 60000); // 60 giây
     }
     
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -86,6 +89,61 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user, setView }
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [user.id]);
+
+  // Supabase Realtime subscription để nhận notifications real-time (giống zenpush)
+  useEffect(() => {
+    if (!isSupabaseAvailable() || !user) return;
+
+    console.log('🔔 [HR] Setting up Supabase Realtime subscription for notifications...');
+
+    // Subscribe to notifications table changes
+    const channel = supabase
+      .channel(`notifications:${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${user.id}`,
+        },
+        async (payload) => {
+          console.log('📨 [HR] Realtime notification received:', payload);
+          const newNotification = payload.new as any;
+          
+          // Hiển thị push notification NGAY LẬP TỨC (giống zenpush)
+          const permission = getNotificationPermission();
+          if (permission === 'granted') {
+            try {
+              await sendLocalNotification({
+                title: newNotification.title,
+                body: newNotification.message,
+                icon: '/icon-192.png',
+                url: '/employee/notifications',
+                tag: `notification-${newNotification.id}`,
+                data: {
+                  notificationId: newNotification.id,
+                  type: newNotification.type,
+                },
+              });
+            } catch (error) {
+              console.error('❌ [HR] Error showing push notification:', error);
+            }
+          }
+          
+          // Sau đó reload notifications để cập nhật UI
+          loadNotifications();
+        }
+      )
+      .subscribe((status) => {
+        console.log('🔔 [HR] Realtime subscription status:', status);
+      });
+
+    return () => {
+      console.log('🔔 [HR] Cleaning up Realtime subscription');
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
 
   const loadNotifications = async () => {
     try {

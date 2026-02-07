@@ -1,9 +1,9 @@
-import { User, UserRole, AttendanceRecord, LeaveRequest, Notification, RequestStatus, LeaveType, ShiftRegistration, PayrollRecord, ContractType, EmployeeStatus, AttendanceType, Department, Holiday, SystemConfig } from '../types';
+import { User, UserRole, AttendanceRecord, LeaveRequest, Notification, RequestStatus, LeaveType, ShiftRegistration, PayrollRecord, ContractType, EmployeeStatus, AttendanceType, Department, Holiday, SystemConfig, OffType } from '../types';
 import { supabase } from './supabase';
 import { emitUserEvent, emitAttendanceEvent, emitShiftEvent, emitPayrollEvent, emitDepartmentEvent, emitHolidayEvent, emitConfigEvent, emitNotificationEvent } from './events';
 
 // Helper để check Supabase connection
-const isSupabaseAvailable = (): boolean => {
+export const isSupabaseAvailable = (): boolean => {
   const url = import.meta.env.VITE_SUPABASE_URL;
   const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
   return !!(url && key && url !== 'https://your-project.supabase.co');
@@ -874,7 +874,12 @@ export const getShiftRegistrations = async (userId?: string, role?: UserRole): P
   return all.filter((r: ShiftRegistration) => r.userId === userId).sort((a: ShiftRegistration, b: ShiftRegistration) => b.date - a.date);
 };
 
-export const registerShift = async (shift: ShiftRegistration): Promise<void> => {
+/** Đăng ký ca. options.initialStatus: Admin có thể truyền APPROVED để tạo ca và duyệt luôn. */
+export const registerShift = async (
+  shift: ShiftRegistration,
+  options?: { initialStatus?: RequestStatus }
+): Promise<void> => {
+  const status = options?.initialStatus ?? shift.status;
   if (isSupabaseAvailable()) {
     try {
       const { error } = await supabase
@@ -886,16 +891,14 @@ export const registerShift = async (shift: ShiftRegistration): Promise<void> => 
           start_time: shift.startTime || null,
           end_time: shift.endTime || null,
           off_type: shift.offType || null,
-          status: shift.status,
+          status,
           created_at: shift.createdAt,
         });
 
       if (error) throw new Error(`Lỗi đăng ký ca: ${error.message}`);
 
-      // Emit event và invalidate cache
       invalidateShiftsCache();
       await emitShiftEvent('created', shift.id);
-
       return;
     } catch (error) {
       console.error('Error registering shift in Supabase:', error);
@@ -903,12 +906,10 @@ export const registerShift = async (shift: ShiftRegistration): Promise<void> => 
     }
   }
 
-  // Fallback to localStorage
   const all = JSON.parse(localStorage.getItem(SHIFTS_KEY) || '[]');
-  all.push(shift);
+  const shiftToSave = { ...shift, status };
+  all.push(shiftToSave);
   localStorage.setItem(SHIFTS_KEY, JSON.stringify(all));
-
-  // Emit event và invalidate cache
   invalidateShiftsCache();
   await emitShiftEvent('created', shift.id);
 };
@@ -953,6 +954,59 @@ export const updateShiftStatus = async (id: string, status: RequestStatus, rejec
     localStorage.setItem(SHIFTS_KEY, JSON.stringify(all));
 
     // Emit event và invalidate cache
+    invalidateShiftsCache();
+    await emitShiftEvent('updated', id);
+  }
+};
+
+/** Cập nhật nội dung ca đã đăng ký (đổi lịch). Nhân viên: chuyển PENDING. Admin: keepStatus=true giữ nguyên trạng thái. */
+export const updateShiftRegistration = async (
+  id: string,
+  data: { shift: string; startTime?: string | null; endTime?: string | null; offType?: string | null },
+  options?: { keepStatus?: boolean }
+): Promise<void> => {
+  const setPending = !options?.keepStatus;
+  if (isSupabaseAvailable()) {
+    try {
+      const payload: Record<string, unknown> = {
+        shift: data.shift,
+        start_time: data.startTime || null,
+        end_time: data.endTime || null,
+        off_type: data.offType || null,
+        rejection_reason: null,
+      };
+      if (setPending) {
+        (payload as Record<string, RequestStatus>).status = RequestStatus.PENDING;
+      }
+      const { error } = await supabase
+        .from('shift_registrations')
+        .update(payload)
+        .eq('id', id);
+
+      if (error) throw new Error(`Lỗi đổi lịch: ${error.message}`);
+
+      invalidateShiftsCache();
+      await emitShiftEvent('updated', id);
+      return;
+    } catch (error) {
+      console.error('Error updating shift registration:', error);
+      throw error;
+    }
+  }
+
+  const all = JSON.parse(localStorage.getItem(SHIFTS_KEY) || '[]');
+  const idx = all.findIndex((r: ShiftRegistration) => r.id === id);
+  if (idx !== -1) {
+    all[idx] = {
+      ...all[idx],
+      shift: data.shift,
+      startTime: data.startTime || undefined,
+      endTime: data.endTime || undefined,
+      offType: (data.offType as OffType) || undefined,
+      status: setPending ? RequestStatus.PENDING : all[idx].status,
+      rejectionReason: undefined,
+    };
+    localStorage.setItem(SHIFTS_KEY, JSON.stringify(all));
     invalidateShiftsCache();
     await emitShiftEvent('updated', id);
   }

@@ -63,7 +63,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
 
   useEffect(() => {
     loadData();
-    // Reload every 30 seconds to get latest data
+    // Reload every 60 seconds to get latest data (tăng từ 30s để giảm số lượng requests)
     let interval: NodeJS.Timeout | null = null;
     const handleVisibilityChange = () => {
       if (document.hidden) {
@@ -73,12 +73,12 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
         }
       } else {
         loadData();
-        interval = setInterval(loadData, 30000);
+        interval = setInterval(loadData, 60000); // 60 giây
       }
     };
     
     if (!document.hidden) {
-      interval = setInterval(loadData, 30000);
+      interval = setInterval(loadData, 60000); // 60 giây
     }
     
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -180,20 +180,18 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
       {/* Welcome Card - Ocean Gradient */}
       <div className="fade-up" style={{animationDelay: '0ms'}}>
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-600 to-cyan-500 p-6 text-white shadow-lg shadow-blue-200">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-white opacity-10 rounded-full blur-3xl -mr-10 -mt-10"></div>
-          <div className="absolute bottom-0 left-0 w-24 h-24 bg-blue-900 opacity-20 rounded-full blur-2xl -ml-6 -mb-6"></div>
+          <div className="absolute top-0 right-0 w-32 h-32 bg-white opacity-10 rounded-full -mr-10 -mt-10"></div>
+          <div className="absolute bottom-0 left-0 w-24 h-24 bg-blue-900 opacity-20 rounded-full -ml-6 -mb-6"></div>
           
           {/* Địa chỉ và badge thông báo ở góc phải trên */}
           <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
-            <div className="bg-white/20 backdrop-blur-md px-2 py-0.5 rounded-full border border-white/20">
-              <span className="text-[10px] font-bold">99B Nguyễn Trãi</span>
-            </div>
+            <span className="text-[10px] font-bold">99B Nguyễn Trãi</span>
             {unreadNotifications > 0 && setView && (
               <button
                 onClick={() => setView('notifications')}
-                className="relative bg-white/20 backdrop-blur-md px-2 py-0.5 rounded-full border border-white/20 hover:bg-white/30 transition-colors"
+                className="relative flex items-center justify-center w-10 h-10 rounded-full border border-white/20 bg-white/25 hover:bg-white/35 transition-colors"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 text-white">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 text-white shrink-0">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
                 </svg>
                 {unreadNotifications > 0 && (
@@ -215,36 +213,34 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
             
             {/* Ca đăng ký hôm nay */}
             {todayShift && (
-              <div className="mb-3 bg-white/10 backdrop-blur-sm rounded-xl p-2 border border-white/20">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-blue-100">Ca hôm nay:</span>
-                    {todayShift.shift === ShiftTime.OFF ? (
-                      <span className="text-xs font-bold text-white bg-white/20 px-2 py-0.5 rounded-lg">
-                        {todayShift.offType && OFF_TYPE_LABELS[todayShift.offType] ? OFF_TYPE_LABELS[todayShift.offType] : 'Nghỉ'}
-                      </span>
-                    ) : (
-                      <span className="text-xs font-bold text-white bg-white/20 px-2 py-0.5 rounded-lg">
-                        {todayShift.startTime && todayShift.endTime 
-                          ? `${todayShift.startTime} - ${todayShift.endTime}`
-                          : 'Ca làm việc'}
-                      </span>
-                    )}
-                  </div>
-                  {setView && (
-                    <button
-                      onClick={() => setView('shifts')}
-                      className="text-xs text-blue-100 hover:text-white underline"
-                    >
-                      Xem chi tiết
-                    </button>
+              <div className="mb-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-blue-100">Ca hôm nay:</span>
+                  {todayShift.shift === ShiftTime.OFF ? (
+                    <span className="text-xs font-bold text-white">
+                      {todayShift.offType && OFF_TYPE_LABELS[todayShift.offType] ? OFF_TYPE_LABELS[todayShift.offType] : 'Nghỉ'}
+                    </span>
+                  ) : (
+                    <span className="text-xs font-bold text-white">
+                      {todayShift.startTime && todayShift.endTime 
+                        ? `${todayShift.startTime} - ${todayShift.endTime}`
+                        : 'Ca làm việc'}
+                    </span>
                   )}
                 </div>
+                {setView && (
+                  <button
+                    onClick={() => setView('shifts')}
+                    className="text-xs text-blue-100 hover:text-white underline"
+                  >
+                    Xem chi tiết
+                  </button>
+                )}
               </div>
             )}
             
             <div className="flex space-x-2 mt-2">
-                <div className="flex-1 bg-black/10 rounded-2xl p-3 backdrop-blur-sm min-w-0">
+                <div className="flex-1 bg-black/10 rounded-2xl p-3 min-w-0">
                     <p className="text-xs text-blue-100 mb-1">Giờ vào</p>
                     <p className="text-base sm:text-lg font-bold truncate">
                       {(() => {
@@ -262,7 +258,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
                       })()}
                     </p>
                 </div>
-                <div className="flex-1 bg-black/10 rounded-2xl p-3 backdrop-blur-sm min-w-0">
+                <div className="flex-1 bg-black/10 rounded-2xl p-3 min-w-0">
                     <p className="text-xs text-blue-100 mb-1">Giờ ra</p>
                     <p className="text-base sm:text-lg font-bold truncate">
                       {(() => {
@@ -280,7 +276,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
                       })()}
                     </p>
                 </div>
-                <div className="flex-1 bg-black/10 rounded-2xl p-3 backdrop-blur-sm min-w-0">
+                <div className="flex-1 bg-black/10 rounded-2xl p-3 min-w-0">
                     <p className="text-xs text-blue-100 mb-1">Giờ làm</p>
                     <p className="text-base sm:text-lg font-bold">{chartData[4]?.hours ?? 0}h</p>
                 </div>
@@ -428,9 +424,17 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
                         {new Date(record.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
                      </span>
                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                        record.status === 'ON_TIME' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'
+                        record.status === 'ON_TIME' || !record.status ? 'bg-green-100 text-green-600' :
+                        record.status === 'OVERTIME' ? 'bg-blue-100 text-blue-600' :
+                        record.status === 'LATE' ? 'bg-orange-100 text-orange-600' :
+                        record.status === 'EARLY_LEAVE' ? 'bg-amber-100 text-amber-600' :
+                        'bg-slate-100 text-slate-600'
                      }`}>
-                        {record.status === 'ON_TIME' ? 'Đúng giờ' : 'Trễ/Sớm'}
+                        {record.status === 'ON_TIME' || !record.status ? 'Đúng giờ' :
+                         record.status === 'OVERTIME' ? 'Tăng ca' :
+                         record.status === 'LATE' ? 'Trễ' :
+                         record.status === 'EARLY_LEAVE' ? 'Về sớm' :
+                         'Trễ/Sớm'}
                      </span>
                   </div>
                 </div>

@@ -120,11 +120,21 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
     return `Tháng ${m}/${y}`;
   };
 
-  // Show loading state
+  // Loading: giữ layout, không thay toàn bộ nội dung bằng "Đang tải..."
   if (isLoading) {
     return (
-      <div className="p-8 text-center text-slate-400">
-        <div className="animate-pulse">Đang tải dữ liệu lương...</div>
+      <div className="space-y-6 fade-up">
+        <div className="flex justify-between items-center bg-white p-4 rounded-3xl shadow-sm border border-sky-50">
+          <div>
+            <h2 className="text-lg font-bold text-slate-800">Bảng lương</h2>
+            <p className="text-xs text-slate-400 font-medium">Chi tiết thu nhập</p>
+          </div>
+          <div className="h-10 w-24 rounded-xl bg-slate-100 animate-pulse" />
+        </div>
+        <div className="rounded-3xl bg-slate-100/80 p-8 flex flex-col items-center justify-center gap-3 min-h-[160px]">
+          <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm text-slate-500 font-medium">Đang tải dữ liệu lương...</p>
+        </div>
       </div>
     );
   }

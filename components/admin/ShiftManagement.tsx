@@ -1,12 +1,32 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { ShiftRegistration, RequestStatus, User, UserRole, ShiftTime, OFF_TYPE_LABELS, Holiday, Department } from '../../types';
-import { getShiftRegistrations, updateShiftStatus, getAllUsers, getHolidays, getDepartments } from '../../services/db';
+import { ShiftRegistration, RequestStatus, User, UserRole, ShiftTime, OFF_TYPE_LABELS, Holiday, Department, OffType } from '../../types';
+import { getShiftRegistrations, updateShiftStatus, updateShiftRegistration, registerShift, getAllUsers, getHolidays, getDepartments } from '../../services/db';
 import { exportToCSV } from '../../utils/export';
+import CustomSelect from '../CustomSelect';
 
 const DAY_LABELS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 const DEFAULT_IN = '09:00';
 const DEFAULT_OUT = '18:00';
+const CUSTOM_SHIFT_HOURS = 9;
+
+const TIME_OPTIONS: string[] = (() => {
+  const opts: string[] = [];
+  for (let h = 5; h <= 23; h++) {
+    opts.push(`${String(h).padStart(2, '0')}:00`);
+    if (h < 23) opts.push(`${String(h).padStart(2, '0')}:30`);
+  }
+  return opts;
+})();
+
+function startTimePlus9Hours(startTime: string): string {
+  const [h, m] = startTime.split(':').map(Number);
+  let totalMinutes = h * 60 + m + CUSTOM_SHIFT_HOURS * 60;
+  if (totalMinutes >= 24 * 60) totalMinutes = 23 * 60 + 59;
+  const eh = Math.floor(totalMinutes / 60);
+  const em = totalMinutes % 60;
+  return `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
+}
 
 /** Lấy thứ Hai đầu tuần (0h) của một ngày */
 function getWeekStart(d: Date): Date {
@@ -62,6 +82,15 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
   const [rejectReason, setRejectReason] = useState('');
   /** Chi tiết ô được chọn: nhân viên + ngày (có hoặc không có đăng ký) */
   const [cellDetail, setCellDetail] = useState<{ user: User; date: Date; reg: ShiftRegistration | undefined } | null>(null);
+  /** Chế độ modal: view | edit (đổi lịch) | add (thêm ca) */
+  const [cellEditMode, setCellEditMode] = useState<'view' | 'edit' | 'add'>('view');
+  /** Form đổi/thêm ca: Admin sửa lịch cho nhân viên */
+  const [editForm, setEditForm] = useState<{
+    shift: ShiftTime;
+    startTime: string;
+    offType: OffType;
+  }>({ shift: ShiftTime.CUSTOM, startTime: '09:00', offType: OffType.OFF_PN });
+  const [cellActionLoading, setCellActionLoading] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -330,6 +359,77 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       });
   }, [shiftRequests, weekDateKeys, departmentFilter, searchName, employees]);
 
+  const enterEditMode = (reg: ShiftRegistration) => {
+    setCellEditMode('edit');
+    setEditForm({
+      shift: reg.shift,
+      startTime: reg.shift === ShiftTime.CUSTOM && reg.startTime ? reg.startTime : '09:00',
+      offType: reg.offType || OffType.OFF_PN,
+    });
+  };
+
+  const enterAddMode = () => {
+    setCellEditMode('add');
+    setEditForm({
+      shift: ShiftTime.CUSTOM,
+      startTime: '09:00',
+      offType: OffType.OFF_PN,
+    });
+  };
+
+  const exitCellEdit = () => {
+    setCellEditMode('view');
+  };
+
+  const isEditFormValid = (): boolean => {
+    if (editForm.shift === ShiftTime.OFF) return true;
+    return !!editForm.startTime;
+  };
+
+  const handleSaveEdit = async () => {
+    if (!cellDetail || !isEditFormValid()) return;
+    setCellActionLoading(true);
+    setMessage(null);
+    try {
+      if (cellEditMode === 'edit' && cellDetail.reg) {
+        await updateShiftRegistration(cellDetail.reg.id, {
+          shift: editForm.shift,
+          startTime: editForm.shift === ShiftTime.CUSTOM ? editForm.startTime : null,
+          endTime: editForm.shift === ShiftTime.CUSTOM ? startTimePlus9Hours(editForm.startTime) : null,
+          offType: editForm.shift === ShiftTime.OFF ? editForm.offType : null,
+        }, { keepStatus: true });
+        showMsg('success', 'Đã cập nhật lịch.');
+      } else if (cellEditMode === 'add') {
+        const [y, m, d] = [
+          cellDetail.date.getFullYear(),
+          cellDetail.date.getMonth(),
+          cellDetail.date.getDate(),
+        ];
+        const dateTs = new Date(y, m, d, 0, 0, 0, 0).getTime();
+        const newShift: ShiftRegistration = {
+          id: `admin-${Date.now()}`,
+          userId: cellDetail.user.id,
+          date: dateTs,
+          shift: editForm.shift,
+          startTime: editForm.shift === ShiftTime.CUSTOM ? editForm.startTime : undefined,
+          endTime: editForm.shift === ShiftTime.CUSTOM ? startTimePlus9Hours(editForm.startTime) : undefined,
+          offType: editForm.shift === ShiftTime.OFF ? editForm.offType : undefined,
+          status: RequestStatus.APPROVED,
+          createdAt: Date.now(),
+        };
+        await registerShift(newShift, { initialStatus: RequestStatus.APPROVED });
+        showMsg('success', 'Đã thêm ca cho nhân viên.');
+      }
+      await loadData();
+      setCellDetail(null);
+      exitCellEdit();
+    } catch (e) {
+      showMsg('error', 'Thao tác thất bại. Thử lại.');
+    } finally {
+      setCellActionLoading(false);
+    }
+  };
+
   const handleExport = () => {
     if (getShiftsInWeek.length === 0) {
       alert('Không có dữ liệu để xuất');
@@ -579,6 +679,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                         const reg = getShiftFor(emp.id, date);
                         const openDetail = (e: React.MouseEvent) => {
                           e.stopPropagation();
+                          setCellEditMode('view');
                           setCellDetail({ user: emp, date, reg });
                         };
                         if (!reg) {
@@ -719,11 +820,13 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
         </div>
       </div>
 
-      {/* Modal chi tiết ô (nhân viên + ngày) */}
+      {/* Modal chi tiết ô (nhân viên + ngày) - view / đổi lịch / thêm ca */}
       {cellDetail && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setCellDetail(null)}>
-          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-md w-full p-6 space-y-4" onClick={e => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-slate-800">Chi tiết ngày</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => { setCellDetail(null); exitCellEdit(); }}>
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-md w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-slate-800">
+              {cellEditMode === 'edit' ? 'Đổi lịch' : cellEditMode === 'add' ? 'Thêm ca' : 'Chi tiết ngày'}
+            </h3>
             {getHolidayForDate(cellDetail.date) && (() => {
               const holiday = getHolidayForDate(cellDetail.date);
               return holiday ? (
@@ -733,8 +836,8 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                     <span>{holiday.name}</span>
                   </p>
                   <p className="text-xs text-yellow-700 mt-1">
-                    {holiday.type === 'NATIONAL' ? 'Ngày lễ quốc gia' : 
-                     holiday.type === 'COMPANY' ? 'Ngày lễ công ty' : 
+                    {holiday.type === 'NATIONAL' ? 'Ngày lễ quốc gia' :
+                     holiday.type === 'COMPANY' ? 'Ngày lễ công ty' :
                      'Ngày lễ địa phương'}
                     {holiday.isRecurring && ' • Lặp lại hàng năm'}
                   </p>
@@ -763,47 +866,137 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
               </p>
               <p><span className="font-medium text-slate-600">Bộ phận:</span> {cellDetail.user.department || '—'}</p>
               <p><span className="font-medium text-slate-600">Ngày:</span> {formatDateLabel(cellDetail.date)}</p>
-              <div className="pt-2 border-t border-slate-200">
-                {!cellDetail.reg ? (
-                  <p className="text-slate-500">Chưa đăng ký ca cho ngày này.</p>
+            </div>
+
+            {(cellEditMode === 'edit' || cellEditMode === 'add') ? (
+              <div className="space-y-4 pt-2 border-t border-slate-200">
+                <div className="flex gap-1 p-1 rounded-xl bg-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setEditForm(prev => ({ ...prev, shift: ShiftTime.CUSTOM }))}
+                    className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      editForm.shift === ShiftTime.CUSTOM ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    Ca làm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditForm(prev => ({ ...prev, shift: ShiftTime.OFF }))}
+                    className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      editForm.shift === ShiftTime.OFF ? 'bg-slate-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    Ngày off
+                  </button>
+                </div>
+                {editForm.shift === ShiftTime.OFF ? (
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-600">Loại off:</label>
+                    <CustomSelect
+                      options={Object.entries(OFF_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
+                      value={editForm.offType}
+                      onChange={(v) => setEditForm(prev => ({ ...prev, offType: v as OffType }))}
+                      placeholder="Chọn loại off"
+                    />
+                  </div>
                 ) : (
                   <div className="space-y-2">
-                    <p>
-                      <span className="font-medium text-slate-600">Trạng thái:</span>{' '}
-                      {cellDetail.reg.status === RequestStatus.PENDING && 'Chờ duyệt'}
-                      {cellDetail.reg.status === RequestStatus.APPROVED && 'Đã duyệt'}
-                      {cellDetail.reg.status === RequestStatus.REJECTED && 'Từ chối'}
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs font-bold text-slate-600 w-20">Giờ vào:</label>
+                      <CustomSelect
+                        options={TIME_OPTIONS.map((t) => ({ value: t, label: t }))}
+                        value={editForm.startTime}
+                        onChange={(v) => setEditForm(prev => ({ ...prev, startTime: v }))}
+                        placeholder="Chọn giờ vào"
+                        className="flex-1"
+                      />
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Giờ ra: {editForm.startTime ? startTimePlus9Hours(editForm.startTime) : '—'} (9 tiếng)
                     </p>
-                    {cellDetail.reg.shift === ShiftTime.OFF ? (
-                      <p>
-                        <span className="font-medium text-slate-600">Loại:</span>{' '}
-                        {cellDetail.reg.offType && OFF_TYPE_LABELS[cellDetail.reg.offType] ? OFF_TYPE_LABELS[cellDetail.reg.offType] : 'Ngày off'}
-                      </p>
-                    ) : (
-                      <>
-                        <p><span className="font-medium text-slate-600">Giờ vào:</span> {cellDetail.reg.startTime ?? DEFAULT_IN}</p>
-                        <p><span className="font-medium text-slate-600">Giờ ra:</span> {cellDetail.reg.endTime ?? DEFAULT_OUT}</p>
-                      </>
-                    )}
-                    {cellDetail.reg.status === RequestStatus.REJECTED && cellDetail.reg.rejectionReason && (
-                      <p className="mt-2 pt-2 border-t border-slate-100">
-                        <span className="font-medium text-slate-600">Lý do từ chối:</span>{' '}
-                        <span className="text-red-700">{cellDetail.reg.rejectionReason}</span>
-                      </p>
-                    )}
                   </div>
                 )}
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveEdit}
+                    disabled={cellActionLoading || !isEditFormValid()}
+                    className="flex-1 px-4 py-2 rounded-xl bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-50 text-sm"
+                  >
+                    {cellActionLoading ? 'Đang lưu...' : 'Lưu'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={exitCellEdit}
+                    disabled={cellActionLoading}
+                    className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium"
+                  >
+                    Hủy
+                  </button>
+                </div>
               </div>
-            </div>
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => setCellDetail(null)}
-                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium"
-              >
-                Đóng
-              </button>
-            </div>
+            ) : (
+              <>
+                <div className="pt-2 border-t border-slate-200">
+                  {!cellDetail.reg ? (
+                    <p className="text-slate-500">Chưa đăng ký ca cho ngày này.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      <p>
+                        <span className="font-medium text-slate-600">Trạng thái:</span>{' '}
+                        {cellDetail.reg.status === RequestStatus.PENDING && 'Chờ duyệt'}
+                        {cellDetail.reg.status === RequestStatus.APPROVED && 'Đã duyệt'}
+                        {cellDetail.reg.status === RequestStatus.REJECTED && 'Từ chối'}
+                      </p>
+                      {cellDetail.reg.shift === ShiftTime.OFF ? (
+                        <p>
+                          <span className="font-medium text-slate-600">Loại:</span>{' '}
+                          {cellDetail.reg.offType && OFF_TYPE_LABELS[cellDetail.reg.offType] ? OFF_TYPE_LABELS[cellDetail.reg.offType] : 'Ngày off'}
+                        </p>
+                      ) : (
+                        <>
+                          <p><span className="font-medium text-slate-600">Giờ vào:</span> {cellDetail.reg.startTime ?? DEFAULT_IN}</p>
+                          <p><span className="font-medium text-slate-600">Giờ ra:</span> {cellDetail.reg.endTime ?? DEFAULT_OUT}</p>
+                        </>
+                      )}
+                      {cellDetail.reg.status === RequestStatus.REJECTED && cellDetail.reg.rejectionReason && (
+                        <p className="mt-2 pt-2 border-t border-slate-100">
+                          <span className="font-medium text-slate-600">Lý do từ chối:</span>{' '}
+                          <span className="text-red-700">{cellDetail.reg.rejectionReason}</span>
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2 pt-2">
+                  {cellDetail.reg ? (
+                    <button
+                      type="button"
+                      onClick={() => enterEditMode(cellDetail.reg!)}
+                      className="flex-1 px-4 py-2 rounded-xl bg-blue-600 text-white font-medium hover:bg-blue-700 text-sm"
+                    >
+                      Đổi lịch
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={enterAddMode}
+                      className="flex-1 px-4 py-2 rounded-xl bg-green-600 text-white font-medium hover:bg-green-700 text-sm"
+                    >
+                      Thêm ca
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setCellDetail(null)}
+                    className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium"
+                  >
+                    Đóng
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>,
         document.body

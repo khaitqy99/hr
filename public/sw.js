@@ -97,7 +97,7 @@ if (typeof workbox !== 'undefined' && workbox) {
       plugins: [
         new workbox.expiration.ExpirationPlugin({
           maxEntries: 50,
-          maxAgeSeconds: 60 * 5, // Cache 5 phút
+          maxAgeSeconds: 60 * 10, // Cache 10 phút (tăng từ 5 phút để giảm requests)
         }),
       ],
     })
@@ -145,5 +145,98 @@ self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
+});
+
+// ============ PUSH NOTIFICATIONS HANDLERS (Quan trọng cho mobile) ============
+
+// Xử lý khi nhận được push notification (từ server hoặc local)
+self.addEventListener('push', (event) => {
+  console.log('📨 [SW] Push event received');
+  
+  let notificationData = {
+    title: 'Y99 HR',
+    body: 'Bạn có thông báo mới',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    url: '/employee/notifications',
+  };
+
+  if (event.data) {
+    try {
+      const data = event.data.json();
+      notificationData = {
+        title: data.title || notificationData.title,
+        body: data.body || data.message || notificationData.body,
+        icon: data.icon || notificationData.icon,
+        badge: data.badge || notificationData.badge,
+        url: data.url || data.actionUrl || notificationData.url,
+        tag: data.tag || data.id || 'hr-notification',
+        requireInteraction: data.requireInteraction || false,
+        silent: data.silent || false,
+        vibrate: data.vibrate || [100, 50, 100],
+        data: {
+          ...data,
+          url: data.url || data.actionUrl || '/employee/notifications',
+        },
+      };
+    } catch (e) {
+      console.warn('⚠️ [SW] Could not parse push data:', e);
+    }
+  }
+
+  const options = {
+    body: notificationData.body,
+    icon: notificationData.icon,
+    badge: notificationData.badge,
+    vibrate: notificationData.vibrate,
+    tag: notificationData.tag,
+    requireInteraction: notificationData.requireInteraction,
+    silent: notificationData.silent,
+    data: notificationData.data,
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(notificationData.title, options)
+  );
+});
+
+// Xử lý khi user click vào notification (quan trọng cho mobile)
+self.addEventListener('notificationclick', (event) => {
+  console.log('👆 [SW] Notification clicked');
+  console.log('👆 [SW] Notification data:', event.notification.data);
+  
+  event.notification.close();
+  
+  const urlToOpen = event.notification.data?.url || '/employee/notifications';
+  console.log('🔗 [SW] URL to open:', urlToOpen);
+  
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      console.log('🪟 [SW] Found clients:', clientList.length);
+      
+      // Kiểm tra xem có cửa sổ nào đang mở URL này không
+      for (let i = 0; i < clientList.length; i++) {
+        const client = clientList[i];
+        console.log(`🪟 [SW] Client ${i}:`, client.url);
+        if (client.url === urlToOpen && 'focus' in client) {
+          console.log('✅ [SW] Focusing existing window');
+          return client.focus();
+        }
+      }
+      
+      // Nếu không có cửa sổ nào mở, mở cửa sổ mới
+      if (clients.openWindow) {
+        console.log('🆕 [SW] Opening new window');
+        return clients.openWindow(urlToOpen);
+      }
+    }).catch((error) => {
+      console.error('❌ [SW] Error handling notification click:', error);
+    })
+  );
+});
+
+// Xử lý khi notification đóng (optional, để log)
+self.addEventListener('notificationclose', (event) => {
+  console.log('ℹ️ [SW] Notification closed:', event.notification.tag);
 });
 

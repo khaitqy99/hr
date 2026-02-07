@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, ShiftRegistration, ShiftTime, RequestStatus, OffType, OFF_TYPE_LABELS, Holiday } from '../types';
-import { registerShift, getShiftRegistrations, getHolidays } from '../services/db';
+import { registerShift, getShiftRegistrations, getHolidays, updateShiftRegistration } from '../services/db';
 import CustomSelect from './CustomSelect';
 
 interface ShiftRegisterProps {
@@ -38,8 +38,8 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
   const [dateOffTypes, setDateOffTypes] = useState<Record<string, OffType>>({});
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [showAllShifts, setShowAllShifts] = useState(false);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [editingShiftId, setEditingShiftId] = useState<string | null>(null);
   const weekDaysRef = useRef<HTMLDivElement>(null);
   const [currentMonth, setCurrentMonth] = useState<Date>(() => {
     const today = new Date();
@@ -56,6 +56,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
     const handleClickOutside = (event: MouseEvent) => {
       if (expandedDate && weekDaysRef.current && !weekDaysRef.current.contains(event.target as Node)) {
         setExpandedDate(null);
+        setEditingShiftId(null);
       }
     };
 
@@ -256,9 +257,10 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
       const offType = dateOffTypes[dateStr];
       return offType && OFF_TYPE_LABELS[offType] ? OFF_TYPE_LABELS[offType] : '';
     }
-    const st = dateCustomTimes[dateStr]?.startTime;
-    if (st) return `${st}-${startTimePlus9Hours(st)} (9h)`;
-    return '';
+    const ct = dateCustomTimes[dateStr];
+    if (!ct?.startTime) return '';
+    const et = ct.endTime || startTimePlus9Hours(ct.startTime);
+    return `${ct.startTime}-${et}`;
   };
 
   const isOffDate = (dateStr: string): boolean => dateShifts[dateStr] === ShiftTime.OFF;
@@ -334,6 +336,80 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
     return null;
   };
 
+  const enterEditMode = (registeredShift: ShiftRegistration, dateStr: string) => {
+    setEditingShiftId(registeredShift.id);
+    setDateShifts(prev => ({ ...prev, [dateStr]: registeredShift.shift }));
+    if (registeredShift.shift === ShiftTime.CUSTOM && registeredShift.startTime) {
+      setDateCustomTimes(prev => ({
+        ...prev,
+        [dateStr]: {
+          startTime: registeredShift.startTime || '',
+          endTime: registeredShift.endTime || startTimePlus9Hours(registeredShift.startTime)
+        }
+      }));
+    } else if (registeredShift.shift === ShiftTime.OFF) {
+      setDateOffTypes(prev => ({ ...prev, [dateStr]: registeredShift.offType || OffType.OFF_PN }));
+    }
+  };
+
+  const exitEditMode = (dateStr: string) => {
+    setEditingShiftId(null);
+    const newDateShifts = { ...dateShifts };
+    delete newDateShifts[dateStr];
+    setDateShifts(newDateShifts);
+    const newCustomTimes = { ...dateCustomTimes };
+    delete newCustomTimes[dateStr];
+    setDateCustomTimes(newCustomTimes);
+    const newOffTypes = { ...dateOffTypes };
+    delete newOffTypes[dateStr];
+    setDateOffTypes(newOffTypes);
+  };
+
+  const allDatesHaveShiftsForEdit = (dateStr: string): boolean => {
+    const shift = dateShifts[dateStr];
+    if (shift === ShiftTime.OFF) return !!dateOffTypes[dateStr];
+    return !!(dateCustomTimes[dateStr]?.startTime);
+  };
+
+  const handleSaveChange = async (dateStr: string) => {
+    if (!editingShiftId || !allDatesHaveShiftsForEdit(dateStr)) return;
+    setLoading(true);
+    try {
+      const shiftType = dateShifts[dateStr];
+      const customTime = dateCustomTimes[dateStr];
+      const offType = dateOffTypes[dateStr];
+      if (shiftType === ShiftTime.OFF) {
+        await updateShiftRegistration(editingShiftId, {
+          shift: ShiftTime.OFF,
+          startTime: null,
+          endTime: null,
+          offType: offType || OffType.OFF_PN
+        });
+      } else if (customTime?.startTime) {
+        const endTime = customTime.endTime || startTimePlus9Hours(customTime.startTime);
+        await updateShiftRegistration(editingShiftId, {
+          shift: ShiftTime.CUSTOM,
+          startTime: customTime.startTime,
+          endTime,
+          offType: null
+        });
+      } else {
+        setLoading(false);
+        return;
+      }
+      const updatedShifts = await getShiftRegistrations(user.id);
+      updatedShifts.sort((a, b) => b.date - a.date);
+      setShifts([...updatedShifts]);
+      exitEditMode(dateStr);
+      setExpandedDate(null);
+    } catch (error: any) {
+      console.error('Error updating shift:', error);
+      alert('Lỗi khi đổi lịch: ' + (error?.message || 'Vui lòng thử lại'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!allDatesHaveShifts()) return;
@@ -358,7 +434,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
         };
       }
       if (!customTime?.startTime) return null;
-      const endTime = startTimePlus9Hours(customTime.startTime);
+      const endTime = customTime.endTime || startTimePlus9Hours(customTime.startTime);
       return {
         id: `${Date.now()}-${index}`,
         userId: user.id,
@@ -453,15 +529,16 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
             </div>
             
             {/* Calendar Grid Header */}
-            <div className="grid grid-cols-7 gap-1 mb-2">
+            <div className="grid grid-cols-7 gap-1.5 sm:gap-1 mb-2">
                 {['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'].map((day, idx) => (
                     <div key={idx} className="text-center text-[10px] font-bold text-slate-400 py-1">
                         {day}
                     </div>
                 ))}
             </div>
+
             
-            <div ref={weekDaysRef} className="grid grid-cols-7 gap-1 relative min-h-[300px]">
+            <div ref={weekDaysRef} className="grid grid-cols-7 gap-1.5 sm:gap-1 relative min-h-[300px]">
                 {getMonthDays().map((date, index) => {
                     const selected = isDateSelected(date);
                     const today = isToday(date);
@@ -489,11 +566,15 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                                 type="button"
                                 onClick={() => toggleDate(date)}
                                 disabled={!isCurrentMonth}
-                                className={`relative w-full flex flex-col items-center justify-center p-2 rounded-xl border-2 transition-all ${
+                                className={`relative w-full flex flex-col items-center justify-center p-0.5 rounded-lg border-2 transition-all ${
                                     !isCurrentMonth
                                         ? 'opacity-30 cursor-not-allowed bg-slate-50 border-slate-100 text-slate-400'
                                         : isRegistered
-                                        ? (registeredShift?.shift === ShiftTime.OFF ? 'bg-slate-100 border-slate-400 text-slate-600 shadow-sm cursor-pointer hover:bg-slate-200' : 'bg-green-50 border-green-500 text-green-700 shadow-sm cursor-pointer hover:bg-green-100')
+                                        ? registeredShift?.shift === ShiftTime.OFF
+                                            ? 'bg-slate-100 border-slate-400 text-slate-600 shadow-sm cursor-pointer hover:bg-slate-200'
+                                            : registeredShift?.status === RequestStatus.REJECTED
+                                            ? 'bg-rose-50 border-rose-500 text-rose-700 shadow-sm cursor-pointer hover:bg-rose-100'
+                                            : 'bg-green-50 border-green-500 text-green-700 shadow-sm cursor-pointer hover:bg-green-100'
                                         : selected
                                         ? isOffDate(dateStr)
                                             ? 'bg-slate-100 border-slate-400 text-slate-700 shadow-sm'
@@ -502,12 +583,18 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                                             : 'bg-orange-50 border-orange-400 text-orange-700 shadow-sm'
                                         : today
                                         ? 'bg-cyan-50 border-cyan-300 text-cyan-700'
+                                        : holiday
+                                        ? 'bg-amber-50/70 border-amber-200 text-slate-600 hover:bg-amber-50 hover:border-amber-300'
                                         : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-slate-300'
                                 }`}
                             >
-                                <span className={`text-sm font-bold ${
+                                <span className={`text-xs font-bold ${
                                     isRegistered 
-                                        ? (registeredShift?.shift === ShiftTime.OFF ? 'text-slate-600' : 'text-green-700')
+                                        ? registeredShift?.shift === ShiftTime.OFF 
+                                            ? 'text-slate-600' 
+                                            : registeredShift?.status === RequestStatus.REJECTED 
+                                            ? 'text-rose-700' 
+                                            : 'text-green-700'
                                         : selected 
                                         ? isOffDate(dateStr)
                                             ? 'text-slate-700'
@@ -518,18 +605,38 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                                 }`}>
                                     {date.getDate()}
                                 </span>
-                                {/* Badge ngày lễ */}
-                                {holiday && !isRegistered && (
-                                    <span className="absolute -top-1 -left-1 w-3 h-3 rounded-full bg-yellow-400 border border-yellow-500 shadow-sm" title={holiday.name}>
-                                        <span className="text-[6px] font-bold text-yellow-900 flex items-center justify-center h-full">🎉</span>
+                                {isRegistered && registeredShift && registeredShift.shift !== ShiftTime.OFF && registeredShift.startTime && (
+                                    <span className="text-[8px] font-medium opacity-90 mt-0.5 leading-tight">
+                                        {registeredShift.startTime.slice(0, 2)}–{(registeredShift.endTime || startTimePlus9Hours(registeredShift.startTime)).slice(0, 2)}
                                     </span>
                                 )}
+                                {/* Badge ngày lễ — luôn hiển thị để nhân viên biết */}
+                                {holiday && isCurrentMonth && (
+                                    <span className="absolute -top-1 -left-1 w-3.5 h-3.5 rounded-full bg-amber-400 border border-amber-500 shadow-sm flex items-center justify-center" title={holiday.name}>
+                                        <span className="text-[7px] leading-none">🎉</span>
+                                    </span>
+                                )}
+                                {/* Badge trạng thái — circular như corner badge */}
                                 {isRegistered && registeredShift && (
                                     <span className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center shadow-sm ${
-                                        registeredShift.shift === ShiftTime.OFF ? 'bg-slate-500' : 'bg-green-500'
-                                    }`}>
+                                        registeredShift.status === RequestStatus.APPROVED
+                                            ? (registeredShift.shift === ShiftTime.OFF ? 'bg-emerald-500' : 'bg-green-500')
+                                            : registeredShift.status === RequestStatus.REJECTED
+                                            ? 'bg-rose-500'
+                                            : 'bg-amber-500'
+                                    }`} title={
+                                        registeredShift.status === RequestStatus.APPROVED ? 'Đã duyệt' :
+                                        registeredShift.status === RequestStatus.REJECTED ? 'Từ chối' : 'Chờ duyệt'
+                                    }>
                                         {registeredShift.shift === ShiftTime.OFF ? (
                                             <span className="text-[8px] font-bold text-white">O</span>
+                                        ) : registeredShift.status === RequestStatus.REJECTED ? (
+                                            <span className="text-[8px] font-bold text-white">!</span>
+                                        ) : registeredShift.status === RequestStatus.PENDING ? (
+                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" fill="none" className="w-2.5 h-2.5">
+                                                <path d="M6 3v3l2 1" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+                                                <circle cx="6" cy="6" r="4.5" stroke="white" strokeWidth="1.5" fill="none"/>
+                                            </svg>
                                         ) : (
                                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" fill="none" className="w-2.5 h-2.5">
                                                 <path d="M10 3L4.5 8.5L2 6" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -540,146 +647,247 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                             </button>
                             
                             {isExpanded && (
-                                <div className={`absolute top-full ${getMenuPosition()} mt-2 z-50 bg-white rounded-2xl shadow-xl border-2 ${isRegistered ? 'border-slate-200' : 'border-blue-200'} p-3 w-[260px]`}>
+                                <div className={`absolute top-full ${getMenuPosition()} mt-2 z-50 bg-white rounded-2xl shadow-lg shadow-blue-200/30 border border-sky-100 p-4 w-[260px]`}>
                                     <div className="space-y-3">
                                         {isRegistered && registeredShift ? (
-                                            /* Chi tiết ngày đã đăng ký */
+                                            editingShiftId === registeredShift.id ? (
+                                            /* Form đổi lịch */
                                             <>
-                                                <p className="text-xs font-bold text-slate-500 uppercase">Chi tiết đã đăng ký</p>
+                                                <p className="text-xs font-bold text-slate-500 uppercase">Đổi lịch</p>
                                                 {holiday && (
                                                     <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2 mb-2">
                                                         <p className="text-[10px] font-bold text-yellow-800 flex items-center gap-1">
                                                             <span>🎉</span>
                                                             <span>{holiday.name}</span>
                                                         </p>
-                                                        {holiday.type === 'NATIONAL' && (
-                                                            <p className="text-[9px] text-yellow-700 mt-0.5">Ngày lễ quốc gia</p>
-                                                        )}
                                                     </div>
                                                 )}
-                                                <div className="space-y-2 text-sm">
-                                                    <p className="font-bold text-slate-800">
-                                                        {registeredShift.shift === ShiftTime.OFF
-                                                            ? (registeredShift.offType && OFF_TYPE_LABELS[registeredShift.offType] ? OFF_TYPE_LABELS[registeredShift.offType] : 'Ngày off')
-                                                            : 'Ca làm việc'}
-                                                    </p>
-                                                    {registeredShift.shift === ShiftTime.CUSTOM && registeredShift.startTime && (
-                                                        <p className="text-slate-600 text-xs">
-                                                            {registeredShift.startTime} – {registeredShift.endTime || startTimePlus9Hours(registeredShift.startTime)} (9h)
-                                                        </p>
-                                                    )}
-                                                    <p className="text-slate-500 text-xs">
-                                                        {new Date(registeredShift.date).toLocaleDateString('vi-VN', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
-                                                    </p>
-                                                    <span className={`inline-block text-[10px] font-bold px-2 py-1 rounded-lg ${
-                                                        registeredShift.status === RequestStatus.APPROVED ? 'bg-green-50 text-green-600' :
-                                                        registeredShift.status === RequestStatus.REJECTED ? 'bg-red-50 text-red-600' :
-                                                        'bg-orange-50 text-orange-600'
-                                                    }`}>
-                                                        {registeredShift.status === RequestStatus.APPROVED ? 'Đã duyệt' : registeredShift.status === RequestStatus.REJECTED ? 'Từ chối' : 'Chờ duyệt'}
-                                                    </span>
+                                                <div className="flex gap-1 p-1 rounded-xl bg-slate-100">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setDateAsOff(dateStr, false)}
+                                                        className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
+                                                            !isOffDate(dateStr)
+                                                                ? 'bg-blue-600 text-white shadow-sm'
+                                                                : 'text-slate-600 hover:bg-slate-200'
+                                                        }`}
+                                                    >
+                                                        Ca làm
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setDateAsOff(dateStr, true)}
+                                                        className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
+                                                            isOffDate(dateStr)
+                                                                ? 'bg-slate-600 text-white shadow-sm'
+                                                                : 'text-slate-600 hover:bg-slate-200'
+                                                        }`}
+                                                    >
+                                                        Ngày off
+                                                    </button>
                                                 </div>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setExpandedDate(null)}
-                                                    className="w-full py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200 transition-all"
-                                                >
-                                                    Đóng
-                                                </button>
-                                            </>
-                                        ) : (
-                                            <>
-                                        {/* Cảnh báo ngày lễ */}
-                                        {holiday && (
-                                            <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-2 mb-2">
-                                                <p className="text-[10px] font-bold text-yellow-800 flex items-center gap-1 mb-1">
-                                                    <span>⚠️</span>
-                                                    <span>Ngày lễ: {holiday.name}</span>
-                                                </p>
-                                                <p className="text-[9px] text-yellow-700">
-                                                    {holiday.type === 'NATIONAL' ? 'Ngày lễ quốc gia' : 
-                                                     holiday.type === 'COMPANY' ? 'Ngày lễ công ty' : 
-                                                     'Ngày lễ địa phương'}
-                                                </p>
-                                                <p className="text-[9px] text-yellow-700 mt-1 font-medium">
-                                                    💡 Khuyến nghị: Chọn "Ngày off" với loại "LỄ - Nghỉ lễ"
-                                                </p>
-                                            </div>
-                                        )}
-                                        {/* Chọn loại: Ca làm / Ngày off */}
-                                        <div className="flex gap-1 p-1 rounded-xl bg-slate-100">
-                                            <button
-                                                type="button"
-                                                onClick={() => setDateAsOff(dateStr, false)}
-                                                className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
-                                                    !isOffDate(dateStr)
-                                                        ? 'bg-blue-600 text-white shadow-sm'
-                                                        : 'text-slate-600 hover:bg-slate-200'
-                                                }`}
-                                            >
-                                                Ca làm
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setDateAsOff(dateStr, true)}
-                                                className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
-                                                    isOffDate(dateStr)
-                                                        ? 'bg-slate-600 text-white shadow-sm'
-                                                        : 'text-slate-600 hover:bg-slate-200'
-                                                }`}
-                                            >
-                                                Ngày off
-                                            </button>
-                                        </div>
-                                        {isOffDate(dateStr) ? (
-                                            <div className="space-y-2">
-                                                <label className="text-[10px] font-bold text-slate-600">Loại off:</label>
-                                                <CustomSelect
-                                                    options={Object.entries(OFF_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
-                                                    value={dateOffTypes[dateStr] || ''}
-                                                    onChange={(v) => updateOffType(dateStr, v as OffType)}
-                                                    placeholder="Chọn loại off"
-                                                />
-                                            </div>
-                                        ) : (
-                                            <>
-                                                <div className="flex items-center gap-2">
-                                                    <label className="text-[10px] font-bold text-slate-600 w-16">Giờ vào:</label>
-                                                    <div className="flex-1">
+                                                {isOffDate(dateStr) ? (
+                                                    <div className="space-y-2">
+                                                        <label className="text-[10px] font-bold text-slate-600">Loại off:</label>
                                                         <CustomSelect
-                                                            options={TIME_OPTIONS.map((t) => ({ value: t, label: t }))}
-                                                            value={dateCustomTimes[dateStr]?.startTime || ''}
-                                                            onChange={(v) => updateCustomTime(dateStr, 'startTime', v)}
-                                                            placeholder="Chọn giờ vào"
+                                                            options={Object.entries(OFF_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
+                                                            value={dateOffTypes[dateStr] || ''}
+                                                            onChange={(v) => updateOffType(dateStr, v as OffType)}
+                                                            placeholder="Chọn loại off"
                                                         />
                                                     </div>
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    <label className="text-[10px] font-bold text-slate-600 w-16">Giờ ra:</label>
-                                                    <p className="text-sm font-medium text-slate-700 flex-1">
-                                                        {dateCustomTimes[dateStr]?.startTime
-                                                            ? `${startTimePlus9Hours(dateCustomTimes[dateStr].startTime)} (tự động, 9 tiếng)`
-                                                            : '—'}
-                                                    </p>
+                                                ) : (
+                                                    <div className="space-y-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <label className="text-[10px] font-bold text-slate-600 w-16">Giờ vào:</label>
+                                                            <div className="flex-1">
+                                                                <CustomSelect
+                                                                    options={TIME_OPTIONS.map((t) => ({ value: t, label: t }))}
+                                                                    value={dateCustomTimes[dateStr]?.startTime || ''}
+                                                                    onChange={(v) => updateCustomTime(dateStr, 'startTime', v)}
+                                                                    placeholder="Chọn giờ vào"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <label className="text-[10px] font-bold text-slate-600 w-16">Giờ ra:</label>
+                                                            <div className="flex-1">
+                                                                <CustomSelect
+                                                                    options={TIME_OPTIONS.map((t) => ({ value: t, label: t }))}
+                                                                    value={dateCustomTimes[dateStr]?.endTime || (dateCustomTimes[dateStr]?.startTime ? startTimePlus9Hours(dateCustomTimes[dateStr].startTime) : '')}
+                                                                    onChange={(v) => updateCustomTime(dateStr, 'endTime', v)}
+                                                                    placeholder="Chọn giờ ra"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                <div className="flex gap-2 pt-2 border-t border-slate-200">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleSaveChange(dateStr)}
+                                                        disabled={loading || !allDatesHaveShiftsForEdit(dateStr)}
+                                                        className="flex-1 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-all disabled:opacity-50"
+                                                    >
+                                                        {loading ? 'Đang lưu...' : 'Lưu thay đổi'}
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => exitEditMode(dateStr)}
+                                                        className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-bold hover:bg-slate-200 transition-all"
+                                                    >
+                                                        Hủy
+                                                    </button>
                                                 </div>
                                             </>
-                                        )}
-                                        <div className="flex gap-2 pt-2 border-t border-slate-200">
-                                            <button
-                                                type="button"
-                                                onClick={() => setExpandedDate(null)}
-                                                className="flex-1 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-all"
-                                            >
-                                                Xác nhận
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => removeDate(dateStr)}
-                                                className="px-3 py-1.5 rounded-lg bg-red-50 text-red-600 text-xs font-bold hover:bg-red-100 transition-all"
-                                            >
-                                                Bỏ chọn
-                                            </button>
-                                        </div>
+                                            ) : (
+                                            /* Chi tiết ngày đã đăng ký - gọn nhẹ, thanh thoát */
+                                            <>
+                                                {holiday && (
+                                                    <div className="mb-3 flex items-center gap-1.5 text-amber-600 text-[11px]">
+                                                        <span>🎉</span>
+                                                        <span>{holiday.name}</span>
+                                                    </div>
+                                                )}
+                                                <div className="space-y-2">
+                                                    <p className="text-slate-400 text-[11px]">
+                                                        {new Date(registeredShift.date).toLocaleDateString('vi-VN', { weekday: 'long', day: 'numeric', month: 'long' })}
+                                                    </p>
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <p className="text-sm font-semibold text-slate-800">
+                                                            {registeredShift.shift === ShiftTime.OFF
+                                                                ? (registeredShift.offType && OFF_TYPE_LABELS[registeredShift.offType] ? OFF_TYPE_LABELS[registeredShift.offType] : 'Ngày off')
+                                                                : registeredShift.startTime
+                                                                ? `${registeredShift.startTime} – ${registeredShift.endTime || startTimePlus9Hours(registeredShift.startTime)}`
+                                                                : 'Ca làm việc'}
+                                                        </p>
+                                                        <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0 ${
+                                                            registeredShift.status === RequestStatus.APPROVED ? 'bg-emerald-50 text-emerald-600' :
+                                                            registeredShift.status === RequestStatus.REJECTED ? 'bg-rose-50 text-rose-600' :
+                                                            'bg-amber-50 text-amber-600'
+                                                        }`}>
+                                                            {registeredShift.status === RequestStatus.APPROVED ? 'Đã duyệt' : registeredShift.status === RequestStatus.REJECTED ? 'Từ chối' : 'Chờ duyệt'}
+                                                        </span>
+                                                    </div>
+                                                    {registeredShift.status === RequestStatus.REJECTED && (
+                                                        <div className="mt-2 p-2.5 rounded-xl bg-rose-50 border border-rose-100">
+                                                            <p className="text-[11px] font-medium text-rose-700">
+                                                                Ca này đã bị từ chối. Vui lòng đổi lịch để đăng ký lại.
+                                                            </p>
+                                                            {registeredShift.rejectionReason && (
+                                                                <p className="text-[10px] text-rose-600 mt-1">
+                                                                    Lý do: {registeredShift.rejectionReason}
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <div className="flex gap-2 pt-3 mt-3 border-t border-slate-100">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => enterEditMode(registeredShift, dateStr)}
+                                                        className={`flex-1 py-2 rounded-xl text-xs font-medium transition-colors ${
+                                                            registeredShift.status === RequestStatus.REJECTED
+                                                                ? 'bg-rose-600 text-white hover:bg-rose-700'
+                                                                : 'bg-slate-900 text-white hover:bg-slate-800'
+                                                        }`}
+                                                    >
+                                                        Đổi lịch
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setExpandedDate(null)}
+                                                        className="px-4 py-2 rounded-xl text-slate-500 text-xs font-medium hover:bg-slate-50 hover:text-slate-700 transition-colors"
+                                                    >
+                                                        Đóng
+                                                    </button>
+                                                </div>
+                                            </>
+                                            )
+                                        ) : (
+                                            /* Form đăng ký mới — đồng bộ màu sắc với dự án (blue/sky/cyan) */
+                                            <>
+                                                {holiday && (
+                                                    <div className="mb-2 flex items-center gap-1.5 text-amber-600 text-[11px]">
+                                                        <span>🎉</span>
+                                                        <span>{holiday.name}</span>
+                                                    </div>
+                                                )}
+                                                <p className="text-slate-500 text-xs font-medium mb-3">
+                                                    {new Date(dateStr + 'T12:00:00').toLocaleDateString('vi-VN', { weekday: 'long', day: 'numeric', month: 'long' })}
+                                                </p>
+                                                <div className="flex gap-1 p-1 rounded-xl bg-sky-50 border border-sky-100 mb-3">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setDateAsOff(dateStr, false)}
+                                                        className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${
+                                                            !isOffDate(dateStr)
+                                                                ? 'bg-blue-600 text-white shadow-sm'
+                                                                : 'text-slate-600 hover:bg-white/80'
+                                                        }`}
+                                                    >
+                                                        Ca làm
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setDateAsOff(dateStr, true)}
+                                                        className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${
+                                                            isOffDate(dateStr)
+                                                                ? 'bg-slate-600 text-white shadow-sm'
+                                                                : 'text-slate-600 hover:bg-white/80'
+                                                        }`}
+                                                    >
+                                                        Ngày off
+                                                    </button>
+                                                </div>
+                                                {isOffDate(dateStr) ? (
+                                                    <div className="mb-3">
+                                                        <p className="text-[11px] text-slate-600 font-medium mb-1.5">Loại off</p>
+                                                        <CustomSelect
+                                                            options={Object.entries(OFF_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
+                                                            value={dateOffTypes[dateStr] || ''}
+                                                            onChange={(v) => updateOffType(dateStr, v as OffType)}
+                                                            placeholder="Chọn loại off"
+                                                        />
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex items-end gap-3 mb-3">
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-[11px] text-slate-600 font-medium mb-1.5">Giờ vào</p>
+                                                            <CustomSelect
+                                                                options={TIME_OPTIONS.map((t) => ({ value: t, label: t }))}
+                                                                value={dateCustomTimes[dateStr]?.startTime || ''}
+                                                                onChange={(v) => updateCustomTime(dateStr, 'startTime', v)}
+                                                                placeholder="Chọn giờ"
+                                                            />
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-[11px] text-slate-600 font-medium mb-1.5">Giờ ra</p>
+                                                            <CustomSelect
+                                                                options={TIME_OPTIONS.map((t) => ({ value: t, label: t }))}
+                                                                value={dateCustomTimes[dateStr]?.endTime || (dateCustomTimes[dateStr]?.startTime ? startTimePlus9Hours(dateCustomTimes[dateStr].startTime) : '')}
+                                                                onChange={(v) => updateCustomTime(dateStr, 'endTime', v)}
+                                                                placeholder="Chọn giờ"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                <div className="flex gap-2 pt-3 border-t border-sky-100">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setExpandedDate(null)}
+                                                        className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-colors shadow-sm"
+                                                    >
+                                                        Xác nhận
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => removeDate(dateStr)}
+                                                        className="px-4 py-2.5 rounded-xl text-slate-600 text-xs font-medium hover:bg-sky-50 border border-sky-200 transition-colors"
+                                                    >
+                                                        Bỏ chọn
+                                                    </button>
+                                                </div>
                                             </>
                                         )}
                                     </div>
@@ -740,15 +948,23 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
         </button>
       </form>
 
-      {/* History List */}
+      {/* History List - theo tháng hiện tại */}
+      {(() => {
+        const shiftsInMonth = shifts.filter(s => {
+          const d = new Date(s.date);
+          return d.getFullYear() === currentMonth.getFullYear() && d.getMonth() === currentMonth.getMonth();
+        }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        return (
       <div>
-        <h3 className="text-sm font-bold text-slate-700 mb-3 ml-2">Lịch đã đăng ký</h3>
+        <h3 className="text-sm font-bold text-slate-700 mb-3 ml-2">
+          Lịch đã đăng ký — {currentMonth.toLocaleDateString('vi-VN', { month: 'long', year: 'numeric' })}
+        </h3>
         <div className="space-y-3 pb-4">
-            {shifts.length === 0 ? (
-                <div className="text-center py-8 text-slate-400 text-xs font-medium">Chưa có ca làm hoặc ngày off nào được đăng ký.</div>
+            {shiftsInMonth.length === 0 ? (
+                <div className="text-center py-8 text-slate-400 text-xs font-medium">Chưa có ca đăng ký trong tháng này.</div>
             ) : (
                 <>
-                    {(showAllShifts ? shifts : shifts.slice(0, 7)).map(shift => (
+                    {shiftsInMonth.map(shift => (
                         <div key={shift.id} className={`p-4 rounded-3xl shadow-sm border flex items-center justify-between ${
                             shift.shift === ShiftTime.OFF ? 'bg-slate-50 border-slate-200' : 'bg-white border-sky-50'
                         }`}>
@@ -791,21 +1007,28 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                                         Lý do: {shift.rejectionReason}
                                     </span>
                                 )}
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const d = new Date(shift.date);
+                                        const dateStr = toLocalDateStr(d);
+                                        setCurrentMonth(new Date(d.getFullYear(), d.getMonth(), 1));
+                                        setExpandedDate(dateStr);
+                                        enterEditMode(shift, dateStr);
+                                    }}
+                                    className="text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:underline"
+                                >
+                                    Đổi lịch
+                                </button>
                             </div>
                         </div>
                     ))}
-                    {shifts.length > 7 && (
-                        <button
-                            onClick={() => setShowAllShifts(!showAllShifts)}
-                            className="w-full py-3 rounded-2xl bg-slate-50 hover:bg-slate-100 text-slate-600 text-sm font-bold transition-all border border-slate-200"
-                        >
-                            {showAllShifts ? 'Thu gọn' : `Xem thêm ${shifts.length - 7} ca làm`}
-                        </button>
-                    )}
                 </>
             )}
         </div>
       </div>
+        );
+      })()}
     </div>
   );
 };

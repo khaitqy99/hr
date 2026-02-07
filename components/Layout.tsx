@@ -16,9 +16,8 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
   const minSwipeDistance = 80; // px required to trigger swipe
   const maxVerticalRatio = 0.5; // vuốt ngang phải rõ: |dx| > |dy| * (1/0.5) = 2 lần
 
-  // Animation Direction State
-  const [animClass, setAnimClass] = useState('fade-up');
-  
+  const mainRef = useRef<HTMLElement>(null);
+
   // Profile Menu State
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
@@ -45,18 +44,13 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
     views = ['dashboard', 'checkin', 'shifts', 'payroll', 'notifications'];
   }
 
-  // Wrapper to set view and calculate animation direction instantly
+  // Scroll về đầu khi chuyển tab — giống app native
+  useEffect(() => {
+    if (mainRef.current) mainRef.current.scrollTop = 0;
+  }, [currentView]);
+
   const handleSetView = (newView: string) => {
     if (newView === currentView) return;
-    
-    const prevIndex = views.indexOf(currentView);
-    const currIndex = views.indexOf(newView);
-
-    if (currIndex > prevIndex) {
-        setAnimClass('animate-enter-right');
-    } else {
-        setAnimClass('animate-enter-left');
-    }
     setView(newView);
   };
 
@@ -242,9 +236,9 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
   }
 
   return (
-    <div className="flex flex-col h-screen bg-sky-50/50 overflow-hidden">
+    <div className="layout-employee flex flex-col h-screen bg-sky-50 overflow-hidden">
       {/* Header - Glassmorphism */}
-      <header className="px-5 py-2.5 flex justify-between items-center sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-sky-100/50">
+      <header className="px-5 py-2.5 flex justify-between items-center sticky top-0 z-30 bg-white border-b border-sky-100">
         <div className="flex items-center space-x-2.5">
           <div className="relative">
             <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-cyan-400 p-[2px] shadow-lg shadow-blue-200/50">
@@ -317,32 +311,26 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
         </div>
       </header>
 
-      {/* Main Content with Swipe Handlers & Animation Wrapper */}
+      {/* Main Content — không dùng key để giữ mount, chuyển tab instant như app native */}
       <main 
+        ref={mainRef}
         className="flex-1 overflow-y-auto px-5 pb-32 pt-4 no-scrollbar touch-pan-y overflow-x-hidden"
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
         style={{
-          // Tối ưu scroll performance trên iOS
           WebkitOverflowScrolling: 'touch',
-          // Force GPU acceleration cho scroll
           transform: 'translateZ(0)',
         }}
       >
-        {/* Using key={currentView} forces React to destroy and recreate this div, triggering the CSS animation */}
-        {/* Tối ưu: chỉ dùng will-change khi đang animate, không dùng liên tục */}
-        <div key={currentView} className={`w-full min-h-full ${animClass}`} style={{
-          // Chỉ enable will-change khi đang có animation
-          willChange: animClass !== 'fade-up' ? 'transform, opacity' : 'auto',
-        }}>
-            {children}
+        <div className="w-full min-h-full">
+          {children}
         </div>
       </main>
 
       {/* Bottom Navigation - Pill trượt khi chuyển tab, safe-area cho iOS notch */}
       <nav className="fixed left-1/2 -translate-x-1/2 w-[92%] max-w-[400px] z-40" style={{ bottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}>
-        <div ref={navContainerRef} className="nav-bar-wrap relative bg-white/90 backdrop-blur-2xl rounded-full shadow-[0_20px_40px_-12px_rgba(0,0,0,0.12)] border-2 border-sky-200 p-1.5 flex justify-between items-center gap-0.5">
+        <div ref={navContainerRef} className="nav-bar-wrap relative bg-white rounded-full shadow-[0_20px_40px_-12px_rgba(0,0,0,0.12)] border-2 border-sky-200 p-1.5 flex justify-between items-center gap-0.5">
           {/* Pill trượt theo tab active — blue/cyan đồng bộ với dự án */}
           <div
             className="nav-sliding-pill absolute left-0 top-0 rounded-full bg-gradient-to-r from-blue-600 to-cyan-500 shadow-lg shadow-blue-500/30 pointer-events-none"

@@ -86,7 +86,7 @@ const PullToRefresh: React.FC<PullToRefreshProps> = ({
   const shouldShowSpinner = pullProgress > 0.5;
 
   return (
-    <div ref={containerRef} className="relative h-full overflow-auto">
+    <div ref={containerRef} className="relative h-full overflow-auto no-scrollbar">
       {/* Pull to refresh indicator */}
       {isPulling && (
         <div
@@ -121,10 +121,10 @@ const PullToRefresh: React.FC<PullToRefreshProps> = ({
         </div>
       )}
 
-      {/* Content */}
+      {/* Content - dùng transform: none khi idle để tránh blur do GPU compositing */}
       <div
         style={{
-          transform: isPulling ? `translateY(${Math.min(pullDistance, threshold * 1.2)}px)` : 'translateY(0)',
+          transform: isPulling ? `translateY(${Math.min(pullDistance, threshold * 1.2)}px)` : undefined,
           transition: isPulling ? 'none' : 'transform 0.3s ease-out',
         }}
       >

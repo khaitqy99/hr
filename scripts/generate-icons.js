@@ -7,35 +7,41 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, '..', 'public');
 const logoPath = path.join(__dirname, '..', 'logoy.png');
 
-// Đọc logo PNG
+const TRANSPARENT = { r: 0, g: 0, b: 0, alpha: 0 };
+// Safe zone: logo chỉ dùng ~80% khung để không bị cắt khi OS bo góc icon (iOS/Android)
+const SAFE_ZONE_RATIO = 0.8;
+
+// Đọc logo PNG (giữ alpha từ nguồn)
 const logoBuffer = fs.readFileSync(logoPath);
 
-// Copy logo ra public, giữ nguyên tỉ lệ (chỉ giới hạn cạnh dài nhất = 128px)
+// Copy logo ra public, giữ nguyên tỉ lệ, nền trong suốt
 await sharp(logoBuffer)
-  .resize(128, 128, { fit: 'inside', withoutEnlargement: true })
-  .png()
+  .resize(128, 128, { fit: 'inside', withoutEnlargement: true, background: TRANSPARENT })
+  .png({ palette: false })
   .toFile(path.join(publicDir, 'logo.png'));
-console.log('✅ Generated logo.png (aspect ratio preserved)');
+console.log('✅ Generated logo.png (aspect ratio preserved, no background)');
 
-// Generate các icon sizes từ logo
+// Generate các icon sizes: logo nằm trong safe zone, nền trong suốt
 for (const size of [192, 512]) {
-  await sharp(logoBuffer)
-    .resize(size, size, {
-      fit: 'contain',
-      background: { r: 0, g: 0, b: 0, alpha: 0 } // Transparent background
-    })
+  const innerSize = Math.round(size * SAFE_ZONE_RATIO);
+  const padding = Math.round((size - innerSize) / 2);
+  const resizedLogo = await sharp(logoBuffer)
+    .resize(innerSize, innerSize, { fit: 'contain', background: TRANSPARENT })
+    .png()
+    .toBuffer();
+  await sharp({
+    create: { width: size, height: size, channels: 4, background: TRANSPARENT }
+  })
+    .composite([{ input: resizedLogo, left: padding, top: padding }])
     .png()
     .toFile(path.join(publicDir, `icon-${size}.png`));
-  console.log(`✅ Generated icon-${size}.png`);
+  console.log(`✅ Generated icon-${size}.png (safe zone, no background)`);
 }
 
-// Generate favicon.svg từ logo (resize nhỏ)
+// Generate favicon.svg từ logo (resize nhỏ, nền trong suốt)
 const faviconSize = 32;
 const faviconBuffer = await sharp(logoBuffer)
-  .resize(faviconSize, faviconSize, {
-    fit: 'contain',
-    background: { r: 0, g: 0, b: 0, alpha: 0 }
-  })
+  .resize(faviconSize, faviconSize, { fit: 'contain', background: TRANSPARENT })
   .png()
   .toBuffer();
 
@@ -46,4 +52,4 @@ const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://
 </svg>`;
 
 fs.writeFileSync(path.join(publicDir, 'favicon.svg'), svgContent);
-console.log(`✅ Generated favicon.svg`);
+console.log(`✅ Generated favicon.svg (no background)`);
