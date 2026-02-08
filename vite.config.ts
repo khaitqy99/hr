@@ -31,12 +31,6 @@ export default defineConfig(({ mode }) => {
                 if (id.includes('recharts')) {
                   return 'recharts-vendor';
                 }
-                
-                // Appwrite - chunk riêng (nếu có dùng)
-                if (id.includes('appwrite')) {
-                  return 'appwrite-vendor';
-                }
-                
                 // Để tất cả các libraries khác (bao gồm React, React DOM, Supabase)
                 // được Vite tự động optimize vào vendor chunk
                 // Điều này đảm bảo React và React DOM luôn cùng chunk

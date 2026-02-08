@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Holiday } from '../../types';
-import { getHolidays, createHoliday, updateHoliday, deleteHoliday } from '../../services/db';
+import { getHolidays, createHoliday, updateHoliday, deleteHoliday, seedVietnamHolidays } from '../../services/db';
 
 interface HolidaysManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
@@ -9,6 +9,7 @@ interface HolidaysManagementProps {
 const HolidaysManagement: React.FC<HolidaysManagementProps> = ({ onRegisterReload }) => {
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const [editingHoliday, setEditingHoliday] = useState<Holiday | null>(null);
   const [isDateRange, setIsDateRange] = useState(false);
   const [formData, setFormData] = useState({
@@ -162,6 +163,20 @@ const HolidaysManagement: React.FC<HolidaysManagementProps> = ({ onRegisterReloa
     }
   };
 
+  const handleImportVietnamHolidays = async () => {
+    if (!confirm('Thêm tất cả ngày lễ Việt Nam có hưởng lương theo Bộ luật Lao động? Các ngày đã có sẽ được bỏ qua.')) return;
+    setIsImporting(true);
+    try {
+      const { added, skipped } = await seedVietnamHolidays();
+      loadData();
+      alert(`Đã thêm ${added} ngày lễ mới. Bỏ qua ${skipped} ngày đã tồn tại.`);
+    } catch (error: any) {
+      alert(error?.message || 'Có lỗi khi import ngày lễ');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const getTypeLabel = (type: string) => {
     switch (type) {
       case 'NATIONAL':
@@ -184,13 +199,22 @@ const HolidaysManagement: React.FC<HolidaysManagementProps> = ({ onRegisterReloa
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <button
-          onClick={() => { resetForm(); setShowForm(true); }}
-          className="px-6 py-3 rounded-xl text-sm font-bold bg-blue-600 text-white shadow-lg hover:bg-blue-700 transition-colors"
-        >
-          + Thêm ngày lễ
-        </button>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex gap-2">
+          <button
+            onClick={() => { resetForm(); setShowForm(true); }}
+            className="px-6 py-3 rounded-xl text-sm font-bold bg-blue-600 text-white shadow-lg hover:bg-blue-700 transition-colors"
+          >
+            + Thêm ngày lễ
+          </button>
+          <button
+            onClick={handleImportVietnamHolidays}
+            disabled={isImporting}
+            className="px-6 py-3 rounded-xl text-sm font-bold bg-amber-500 text-white shadow-lg hover:bg-amber-600 disabled:opacity-60 transition-colors"
+          >
+            {isImporting ? 'Đang import...' : '🇻🇳 Thêm ngày lễ VN'}
+          </button>
+        </div>
       </div>
 
       {showForm && (

@@ -14,6 +14,9 @@ const UpdateNotification: React.FC = () => {
 
     let refreshing = false;
     let intervalId: ReturnType<typeof setInterval> | null = null;
+    let registrationRef: ServiceWorkerRegistration | null = null;
+    let controllerChangeHandler: (() => void) | null = null;
+    let updateFoundHandler: (() => void) | null = null;
 
     const applyUpdate = () => {
       if (refreshing) return;
@@ -39,17 +42,19 @@ const UpdateNotification: React.FC = () => {
       try {
         const registration = await navigator.serviceWorker.getRegistration();
         if (!registration) return;
+        registrationRef = registration;
 
         await registration.update();
 
         document.addEventListener('visibilitychange', onVisible);
         intervalId = setInterval(() => registration.update(), 5 * 60 * 1000);
 
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
+        controllerChangeHandler = () => {
           if (!refreshing) onUpdateReady();
-        });
+        };
+        navigator.serviceWorker.addEventListener('controllerchange', controllerChangeHandler);
 
-        registration.addEventListener('updatefound', () => {
+        updateFoundHandler = () => {
           const newWorker = registration.installing;
           if (!newWorker) return;
           newWorker.addEventListener('statechange', () => {
@@ -57,7 +62,8 @@ const UpdateNotification: React.FC = () => {
               onUpdateReady();
             }
           });
-        });
+        };
+        registration.addEventListener('updatefound', updateFoundHandler);
       } catch (error) {
         console.error('Error checking for updates:', error);
       }
@@ -68,6 +74,12 @@ const UpdateNotification: React.FC = () => {
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
       if (intervalId) clearInterval(intervalId);
+      if (controllerChangeHandler) {
+        navigator.serviceWorker.removeEventListener('controllerchange', controllerChangeHandler);
+      }
+      if (registrationRef && updateFoundHandler) {
+        registrationRef.removeEventListener('updatefound', updateFoundHandler);
+      }
       if (autoReloadTimerRef.current) {
         clearTimeout(autoReloadTimerRef.current);
         autoReloadTimerRef.current = null;

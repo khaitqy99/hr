@@ -1,17 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { User } from '../types';
-import UsersManagement from './admin/UsersManagement';
-import AttendanceManagement from './admin/AttendanceManagement';
-import ShiftManagement from './admin/ShiftManagement';
-import PayrollManagement from './admin/PayrollManagement';
-import ReportsDashboard from './admin/ReportsDashboard';
-import SettingsPanel from './admin/SettingsPanel';
-import DepartmentsManagement from './admin/DepartmentsManagement';
-import HolidaysManagement from './admin/HolidaysManagement';
-import SystemConfigManagement from './admin/SystemConfigManagement';
-import DataExportManagement from './admin/DataExportManagement';
-import NotificationsManagement from './admin/NotificationsManagement';
+import { supabase } from '../services/supabase';
+import { isSupabaseAvailable } from '../services/db';
 import { useDataEvents } from '../utils/useDataEvents';
+
+const UsersManagement = lazy(() => import('./admin/UsersManagement'));
+const AttendanceManagement = lazy(() => import('./admin/AttendanceManagement'));
+const ShiftManagement = lazy(() => import('./admin/ShiftManagement'));
+const PayrollManagement = lazy(() => import('./admin/PayrollManagement'));
+const ReportsDashboard = lazy(() => import('./admin/ReportsDashboard'));
+const SettingsPanel = lazy(() => import('./admin/SettingsPanel'));
+const DepartmentsManagement = lazy(() => import('./admin/DepartmentsManagement'));
+const HolidaysManagement = lazy(() => import('./admin/HolidaysManagement'));
+const SystemConfigManagement = lazy(() => import('./admin/SystemConfigManagement'));
+const DataExportManagement = lazy(() => import('./admin/DataExportManagement'));
+const NotificationsManagement = lazy(() => import('./admin/NotificationsManagement'));
 
 interface AdminPanelProps {
   user: User;
@@ -109,8 +112,29 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
     reloadHandlerRef.current = null;
   }, [activeTab]);
 
-  // Listen to data events và tự động reload khi có thay đổi
-  // Map các event types đến các tabs tương ứng
+  // Supabase Realtime: cập nhật AdminPanel khi bất kỳ bảng nào thay đổi (multi-admin sync)
+  useEffect(() => {
+    if (!isSupabaseAvailable()) return;
+    const reload = () => {
+      if (reloadHandlerRef.current) {
+        reloadHandlerRef.current().catch(() => {});
+      }
+    };
+    const channel = supabase
+      .channel('admin-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, reload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_records' }, reload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shift_registrations' }, reload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payroll_records' }, reload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'departments' }, reload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'holidays' }, reload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'system_configs' }, reload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, reload)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  // Backup: data events khi app trong session này thay đổi
   useDataEvents(
     [
       'users:created', 'users:updated', 'users:deleted',
@@ -332,10 +356,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
           <div className="w-full p-6">
-            {/* Key prop forces React to remount component when activeTab changes, ensuring data reload */}
-            <div key={activeTab}>
-              {renderContent()}
-            </div>
+            <Suspense fallback={<div className="flex justify-center py-12"><div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" /></div>}>
+              <div key={activeTab}>
+                {renderContent()}
+              </div>
+            </Suspense>
           </div>
         </div>
       </div>

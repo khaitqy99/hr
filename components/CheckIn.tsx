@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { User, AttendanceType, AttendanceStatus, AttendanceRecord, ShiftRegistration, ShiftTime, RequestStatus } from '../types';
 import { saveAttendance, getAttendance, getShiftRegistrations, getOfficeLocation } from '../services/db';
-import { uploadAttendancePhoto } from '../services/storage';
 import { vibrate, HapticPatterns } from '../utils/pwa';
 
 const CUSTOM_SHIFT_HOURS = 9; // Ca CUSTOM: nhân viên làm đủ 9 tiếng
@@ -49,26 +48,7 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
   const [todayCheckIn, setTodayCheckIn] = useState<AttendanceRecord | null>(null);
   const [todayCheckOut, setTodayCheckOut] = useState<AttendanceRecord | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
-
-  // Photo State - dùng input file để mở camera gốc thiết bị (không preview trong layout)
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [photo, setPhoto] = useState<Blob | null>(null);
-  const photoUrlRef = useRef<string | null>(null);
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && file.type.startsWith('image/')) {
-      if (photoUrlRef.current) URL.revokeObjectURL(photoUrlRef.current);
-      photoUrlRef.current = URL.createObjectURL(file);
-      setPhoto(file);
-      vibrate(HapticPatterns.success);
-    }
-    e.target.value = ''; // Reset để có thể chọn lại cùng file
-  };
-
-  const openCamera = () => {
-    fileInputRef.current?.click();
-  };
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const loadAttendance = useCallback(async () => {
     const records = await getAttendance(user.id);
@@ -82,7 +62,8 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
   }, [user.id]);
 
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    // Cập nhật mỗi 30s thay vì 1s để giảm re-render, app mượt hơn khi dùng lâu
+    const timer = setInterval(() => setCurrentTime(new Date()), 30000);
     loadAttendance();
 
     // Load office location từ config
@@ -95,10 +76,6 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
 
     return () => {
       clearInterval(timer);
-      if (photoUrlRef.current) {
-        URL.revokeObjectURL(photoUrlRef.current);
-        photoUrlRef.current = null;
-      }
     };
   }, [user.id, loadAttendance]);
 
@@ -115,14 +92,6 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
       getLocation();
     }
   }, [officeLocation]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const retakePhoto = () => {
-    if (photoUrlRef.current) {
-      URL.revokeObjectURL(photoUrlRef.current);
-      photoUrlRef.current = null;
-    }
-    setPhoto(null);
-  };
 
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
     const R = 6371e3;
@@ -151,7 +120,6 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
 
   const handleAttendance = async (type: AttendanceType) => {
     if (!location) { setError("Cần vị trí GPS"); return; }
-    if (!photo) { setError("Vui lòng chụp ảnh"); return; }
 
     setLoading(true);
     setError(null);
@@ -163,7 +131,6 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
       const expected = getExpectedShiftMinutes(todayShift);
 
       const timestamp = Date.now();
-      const photoUrl = await uploadAttendancePhoto(photo, user.id, timestamp, type);
 
       let status = AttendanceStatus.ON_TIME;
       const currentMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
@@ -185,8 +152,7 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
         type,
         location,
         status,
-        synced: navigator.onLine,
-        photoUrl // URL từ Storage hoặc base64 fallback
+        synced: navigator.onLine
       };
 
       await saveAttendance(record);
@@ -194,14 +160,24 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
       if (record.type === AttendanceType.CHECK_IN) setTodayCheckIn(record);
       if (record.type === AttendanceType.CHECK_OUT) setTodayCheckOut(record);
       
+      // Hiển thị thông báo thành công
+      const timeStr = currentTime.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+      const statusText = status === AttendanceStatus.LATE ? ' (Muộn)' : 
+                        status === AttendanceStatus.EARLY_LEAVE ? ' (Về sớm)' :
+                        status === AttendanceStatus.OVERTIME ? ' (Tăng ca)' : '';
+      setSuccessMessage(
+        type === AttendanceType.CHECK_IN 
+          ? `✅ Chấm công vào thành công lúc ${timeStr}${statusText}`
+          : `✅ Chấm công ra thành công lúc ${timeStr}${statusText}`
+      );
+      
+      // Tự động ẩn thông báo sau 4 giây
+      setTimeout(() => {
+        setSuccessMessage(null);
+      }, 4000);
+      
       // Haptic feedback on success
       vibrate(HapticPatterns.success);
-      
-      if (photoUrlRef.current) {
-        URL.revokeObjectURL(photoUrlRef.current);
-        photoUrlRef.current = null;
-      }
-      setPhoto(null);
     } catch (error) {
       console.error('Error saving attendance:', error);
       setError('Lỗi khi lưu dữ liệu chấm công. Vui lòng thử lại.');
@@ -218,6 +194,40 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
 
   return (
     <div className="flex flex-col h-full pt-4 pb-2 fade-up space-y-4">
+      {/* Success Popup Modal */}
+      {successMessage && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in"
+          onClick={() => setSuccessMessage(null)}
+        >
+          <div 
+            className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 animate-scale-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex flex-col items-center text-center">
+              {/* Success Icon */}
+              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center mb-4 shadow-lg">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-10 h-10 text-white">
+                  <path fillRule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm13.36-1.814a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z" clipRule="evenodd" />
+                </svg>
+              </div>
+              
+              {/* Message */}
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Thành công!</h3>
+              <p className="text-gray-600 mb-6">{successMessage}</p>
+              
+              {/* Close Button */}
+              <button
+                onClick={() => setSuccessMessage(null)}
+                className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-bold rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all active:scale-95 shadow-lg"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Clock - Compact */}
       <div className="flex justify-between items-end px-2">
         <div>
@@ -277,82 +287,59 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
         </div>
       </div>
 
-      {/* Photo Card - nút mở camera gốc thiết bị thay vì preview trong layout */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        onChange={handleFileSelect}
-        className="hidden"
-        aria-hidden
-      />
-      <div className="flex-1 relative bg-slate-900 rounded-[2rem] overflow-hidden shadow-xl shadow-blue-200/50 border-4 border-white mx-0 sm:mx-2 min-h-[60vh] sm:min-h-0 flex flex-col">
-        {photo && photoUrlRef.current ? (
-          <>
-            <img src={photoUrlRef.current} alt="Captured" className="flex-1 w-full object-contain" />
-            <div className="absolute inset-0 pointer-events-none flex flex-col justify-end p-4">
-              {error && (
-                <div className="mb-2 bg-red-500/90 text-white text-[10px] font-bold px-3 py-1.5 rounded-full  inline-flex self-start">
-                  ! {error}
-                </div>
-              )}
-            </div>
-            <div className="absolute bottom-4 left-0 right-0 flex flex-col items-center gap-3 pointer-events-none">
-              <div className="pointer-events-auto flex flex-col items-center gap-3">
-                <span className="text-white text-xs font-bold tracking-wider bg-green-500/80 px-3 py-1 rounded-full backdrop-blur-sm flex items-center gap-1">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
-                  </svg>
-                  ẢNH ĐÃ CHỤP
-                </span>
-                <div className="flex items-center space-x-4">
-                  <button
-                    type="button"
-                    onClick={retakePhoto}
-                    className="flex flex-col items-center gap-1 px-4 py-2 rounded-xl bg-white/20 backdrop-blur-md text-white hover:bg-white/30 transition-all"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg>
-                    <span className="text-[10px] font-bold">Chụp lại</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleAttendance(isCheckInNext ? AttendanceType.CHECK_IN : AttendanceType.CHECK_OUT)}
-                    disabled={!canAction && navigator.onLine}
-                    className={`h-12 px-8 rounded-full font-bold shadow-lg flex items-center space-x-2 transition-all active:scale-95 ${(!canAction && navigator.onLine) ? 'bg-slate-500 text-slate-200 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
-                  >
-                    <span>{isCheckInNext ? 'Xác nhận vào' : 'Xác nhận ra'}</span>
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center p-6">
-            {error && (
-              <div className="mb-4 bg-red-500/90 text-white text-xs font-bold px-3 py-2 rounded-xl ">
-                ! {error}
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={openCamera}
-              className="w-24 h-24 rounded-full border-4 border-white bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center active:scale-95 transition-all shadow-xl"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-12 h-12">
-                <path d="M12 9a3.75 3.75 0 100 7.5A3.75 3.75 0 0012 9z" />
-                <path fillRule="evenodd" d="M9.344 3.071a49.52 49.52 0 015.312 0c.967.052 1.83.585 2.332 1.39l.821 1.317c.24.383.645.643 1.11.71.386.054.77.113 1.152.177 1.432.239 2.429 1.493 2.429 2.909V18a3 3 0 01-3 3H4.5a3 3 0 01-3-3V9.574c0-1.416.997-2.67 2.429-2.909.382-.064.766-.123 1.151-.178a1.56 1.56 0 001.11-.71l.822-1.315a2.942 2.942 0 012.332-1.39zM6.75 12.75a5.25 5.25 0 1110.5 0 5.25 5.25 0 01-10.5 0z" clipRule="evenodd" />
-              </svg>
-            </button>
-            <p className="mt-4 text-white text-sm font-bold text-center">
-              Nhấn để mở camera
-            </p>
-            <p className="mt-1 text-slate-400 text-xs text-center">
-              {isCheckInNext ? 'Chụp ảnh để chấm công vào' : 'Chụp ảnh để chấm công ra'}
-            </p>
+      {/* Check-in/Check-out Button Card */}
+      <div className="flex-1 relative bg-gradient-to-br from-blue-600 to-blue-700 rounded-[2rem] overflow-hidden shadow-xl shadow-blue-200/50 border-4 border-white mx-0 sm:mx-2 min-h-[60vh] sm:min-h-0 flex flex-col items-center justify-center p-6">
+        {error && (
+          <div className="mb-4 bg-red-500/90 text-white text-xs font-bold px-3 py-2 rounded-xl">
+            ! {error}
           </div>
         )}
+        <div className="flex flex-col items-center gap-6">
+          <div className="w-32 h-32 rounded-full border-4 border-white bg-white/20 backdrop-blur-md flex items-center justify-center shadow-2xl">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-16 h-16 text-white">
+              {isCheckInNext ? (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9v-3m-3 3V9m3 3v3" />
+              )}
+            </svg>
+          </div>
+          <div className="text-center">
+            <p className="text-white text-lg font-bold mb-2">
+              {isCheckInNext ? 'Chấm công vào' : 'Chấm công ra'}
+            </p>
+            <p className="text-white/80 text-sm">
+              {isWithinRange ? 'Bạn đang trong văn phòng' : 'Bạn đang ngoài văn phòng'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => handleAttendance(isCheckInNext ? AttendanceType.CHECK_IN : AttendanceType.CHECK_OUT)}
+            disabled={loading || (!canAction && navigator.onLine)}
+            className={`h-14 px-10 rounded-full font-bold shadow-lg flex items-center space-x-3 transition-all active:scale-95 ${
+              loading || (!canAction && navigator.onLine)
+                ? 'bg-slate-400 text-slate-200 cursor-not-allowed'
+                : 'bg-white text-blue-600 hover:bg-blue-50'
+            }`}
+          >
+            {loading ? (
+              <>
+                <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>Đang xử lý...</span>
+              </>
+            ) : (
+              <>
+                <span>{isCheckInNext ? 'Xác nhận vào' : 'Xác nhận ra'}</span>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                </svg>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Location Details Card */}

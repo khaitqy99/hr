@@ -65,6 +65,7 @@ if (typeof workbox !== 'undefined' && workbox) {
   workbox.precaching.cleanupOutdatedCaches();
 
   // Cache strategy cho navigation requests - tối ưu với timeout và offline fallback
+  // Thêm ExpirationPlugin để tránh cache pages tích lũy vô hạn gây lag
   workbox.routing.registerRoute(
     ({ request }) => request.mode === 'navigate',
     new workbox.strategies.NetworkFirst({
@@ -84,6 +85,10 @@ if (typeof workbox !== 'undefined' && workbox) {
             return cachedResponse || new Response('Offline', { status: 503 });
           },
         },
+        new workbox.expiration.ExpirationPlugin({
+          maxEntries: 30,
+          maxAgeSeconds: 60 * 60 * 24 * 7, // 7 ngày
+        }),
       ],
     })
   );
@@ -239,4 +244,3 @@ self.addEventListener('notificationclick', (event) => {
 self.addEventListener('notificationclose', (event) => {
   console.log('ℹ️ [SW] Notification closed:', event.notification.tag);
 });
-

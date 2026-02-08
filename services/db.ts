@@ -91,7 +91,43 @@ export const initializeDB = async () => {
       }
     }
   }
+
+  // Dọn dẹp localStorage mỗi lần init để tránh lag khi dùng lâu
+  cleanupLocalStorageOldData();
 };
+
+/** Dọn dẹp dữ liệu cũ trong localStorage để tránh lag khi dùng lâu */
+function cleanupLocalStorageOldData(): void {
+  try {
+    const now = Date.now();
+    const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
+
+    // Attendance: giữ tối đa 90 ngày khi có nhiều bản ghi
+    const attendanceRaw = localStorage.getItem(ATTENDANCE_KEY);
+    if (attendanceRaw) {
+      const arr: AttendanceRecord[] = JSON.parse(attendanceRaw);
+      if (arr.length > 100) {
+        const cutoff = now - NINETY_DAYS_MS;
+        const filtered = arr.filter((r: AttendanceRecord) => r.timestamp >= cutoff);
+        if (filtered.length < arr.length) {
+          localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(filtered));
+        }
+      }
+    }
+
+    // OTP codes: xóa đã hết hạn
+    const otpRaw = localStorage.getItem(OTP_CODES_KEY);
+    if (otpRaw) {
+      const otps: { expiresAt: number }[] = JSON.parse(otpRaw);
+      const valid = otps.filter((o: { expiresAt: number }) => o.expiresAt > now);
+      if (valid.length < otps.length) {
+        localStorage.setItem(OTP_CODES_KEY, JSON.stringify(valid));
+      }
+    }
+  } catch (e) {
+    console.warn('cleanupLocalStorageOldData:', e);
+  }
+}
 
 // ============ USERS ============
 
@@ -415,17 +451,29 @@ export const getAttendance = async (userId: string): Promise<AttendanceRecord[]>
 
       if (error || !data) return [];
 
-      return data.map(record => ({
-        id: record.id,
-        userId: record.user_id,
-        timestamp: record.timestamp,
-        type: record.type as AttendanceType,
-        location: record.location as { lat: number; lng: number; address?: string },
-        status: record.status as any,
-        synced: record.synced,
-        notes: record.notes || undefined,
-        photoUrl: record.photo_url || undefined,
-      }));
+      return data.map(record => {
+        const photoUrl = record.photo_url || undefined;
+        // Log nếu photoUrl bị truncate (ngắn hơn 100 ký tự - URL Supabase thường dài hơn)
+        if (photoUrl && photoUrl.length < 100 && photoUrl.includes('supabase.co/storage')) {
+          console.warn('⚠️ Photo URL seems truncated in getAttendance:', {
+            recordId: record.id,
+            photoUrl,
+            length: photoUrl.length,
+            expectedMinLength: 150, // Supabase URLs thường dài hơn 150 ký tự
+          });
+        }
+        return {
+          id: record.id,
+          userId: record.user_id,
+          timestamp: record.timestamp,
+          type: record.type as AttendanceType,
+          location: record.location as { lat: number; lng: number; address?: string },
+          status: record.status as any,
+          synced: record.synced,
+          notes: record.notes || undefined,
+          photoUrl,
+        };
+      });
     } catch (error) {
       console.error('Error getting attendance from Supabase:', error);
       return [];
@@ -454,17 +502,29 @@ export const getAllAttendance = async (limit?: number): Promise<AttendanceRecord
 
       if (error || !data) return [];
 
-      return data.map(record => ({
-        id: record.id,
-        userId: record.user_id,
-        timestamp: record.timestamp,
-        type: record.type as AttendanceType,
-        location: record.location as { lat: number; lng: number; address?: string },
-        status: record.status as any,
-        synced: record.synced,
-        notes: record.notes || undefined,
-        photoUrl: record.photo_url || undefined,
-      }));
+      return data.map(record => {
+        const photoUrl = record.photo_url || undefined;
+        // Log nếu photoUrl bị truncate (ngắn hơn 100 ký tự - URL Supabase thường dài hơn)
+        if (photoUrl && photoUrl.length < 100 && photoUrl.includes('supabase.co/storage')) {
+          console.warn('⚠️ Photo URL seems truncated in getAllAttendance:', {
+            recordId: record.id,
+            photoUrl,
+            length: photoUrl.length,
+            expectedMinLength: 150, // Supabase URLs thường dài hơn 150 ký tự
+          });
+        }
+        return {
+          id: record.id,
+          userId: record.user_id,
+          timestamp: record.timestamp,
+          type: record.type as AttendanceType,
+          location: record.location as { lat: number; lng: number; address?: string },
+          status: record.status as any,
+          synced: record.synced,
+          notes: record.notes || undefined,
+          photoUrl,
+        };
+      });
     } catch (error) {
       console.error('Error getting all attendance from Supabase:', error);
       return [];
@@ -545,6 +605,7 @@ export const calculateLeaveDays = async (userId: string, month: string): Promise
 };
 
 // Helper: Tính số ngày làm việc từ shift registrations trong tháng
+// Ngày đi làm (shift !== OFF) và ngày nghỉ lễ (OFF + LE) đều được tính công hưởng lương
 export const calculateShiftWorkDays = async (userId: string, month: string): Promise<number> => {
   const shiftRegistrations = await getShiftRegistrations(userId);
   
@@ -553,16 +614,18 @@ export const calculateShiftWorkDays = async (userId: string, month: string): Pro
   const targetMonth = parseInt(monthStr);
   const targetYear = parseInt(yearStr);
   
-  // Filter approved shifts in the target month that are not OFF
   const shiftDays = new Set<string>();
   
   shiftRegistrations
     .filter(shift => {
       const shiftDate = new Date(shift.date);
-      return shift.status === RequestStatus.APPROVED &&
-             shiftDate.getMonth() + 1 === targetMonth &&
-             shiftDate.getFullYear() === targetYear &&
-             shift.shift !== 'OFF';
+      if (shift.status !== RequestStatus.APPROVED ||
+          shiftDate.getMonth() + 1 !== targetMonth ||
+          shiftDate.getFullYear() !== targetYear) {
+        return false;
+      }
+      // Đếm: ngày đi làm (shift !== OFF) HOẶC ngày nghỉ lễ (OFF + LE) hưởng lương
+      return shift.shift !== 'OFF' || shift.offType === OffType.LE;
     })
     .forEach(shift => {
       const date = new Date(shift.date);
@@ -676,6 +739,18 @@ export const saveAttendance = async (record: AttendanceRecord): Promise<void> =>
   if (isSupabaseAvailable()) {
     try {
       // Bảng attendance_records dùng id UUID (default uuid_generate_v4()), không truyền id từ client
+      const photoUrlToSave = record.photoUrl || null;
+      
+      // Log nếu photoUrl quá ngắn (có thể bị truncate)
+      if (photoUrlToSave && photoUrlToSave.length < 100 && photoUrlToSave.includes('supabase.co/storage')) {
+        console.warn('⚠️ Saving potentially truncated photo URL:', {
+          photoUrl: photoUrlToSave,
+          length: photoUrlToSave.length,
+          userId: record.userId,
+          timestamp: record.timestamp,
+        });
+      }
+      
       const { error } = await supabase
         .from('attendance_records')
         .insert({
@@ -686,7 +761,7 @@ export const saveAttendance = async (record: AttendanceRecord): Promise<void> =>
           status: record.status,
           synced: record.synced,
           notes: record.notes || null,
-          photo_url: record.photoUrl || null,
+          photo_url: photoUrlToSave,
         });
 
       if (error) throw new Error(`Lỗi lưu attendance: ${error.message}`);
@@ -754,56 +829,8 @@ export const getLeaveRequests = async (userId?: string, role?: UserRole): Promis
   return all.filter((r: LeaveRequest) => r.userId === userId).sort((a: LeaveRequest, b: LeaveRequest) => b.createdAt - a.createdAt);
 };
 
-export const createLeaveRequest = async (request: Omit<LeaveRequest, 'id' | 'status' | 'createdAt'>): Promise<LeaveRequest> => {
-  const newRequest: LeaveRequest = {
-    id: `lr-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-    ...request,
-    status: RequestStatus.PENDING,
-    createdAt: Date.now(),
-  };
-
-  if (isSupabaseAvailable()) {
-    try {
-      const { data, error } = await supabase
-        .from('leave_requests')
-        .insert({
-          id: newRequest.id,
-          user_id: newRequest.userId,
-          start_date: newRequest.startDate,
-          end_date: newRequest.endDate,
-          type: newRequest.type,
-          reason: newRequest.reason,
-          status: newRequest.status,
-          created_at: newRequest.createdAt,
-        })
-        .select()
-        .single();
-
-      if (error) throw new Error(`Lỗi tạo đơn nghỉ phép: ${error.message}`);
-      if (!data) throw new Error('Không thể tạo đơn nghỉ phép');
-
-      return {
-        id: data.id,
-        userId: data.user_id,
-        startDate: data.start_date,
-        endDate: data.end_date,
-        type: data.type as LeaveType,
-        reason: data.reason,
-        status: data.status as RequestStatus,
-        createdAt: data.created_at,
-      };
-    } catch (error) {
-      console.error('Error creating leave request in Supabase:', error);
-      throw error;
-    }
-  }
-
-  // Fallback to localStorage
-  const all = JSON.parse(localStorage.getItem(REQUESTS_KEY) || '[]');
-  all.push(newRequest);
-  localStorage.setItem(REQUESTS_KEY, JSON.stringify(all));
-  return newRequest;
-};
+// Function createLeaveRequest đã được xóa vì không được sử dụng
+// Theo thiết kế: Chỉ admin quản lý đơn nghỉ, nhân viên không thể tạo đơn nghỉ
 
 export const updateLeaveRequestStatus = async (id: string, status: RequestStatus): Promise<void> => {
   if (isSupabaseAvailable()) {
@@ -1717,6 +1744,47 @@ export const deleteHoliday = async (id: string): Promise<void> => {
   localStorage.setItem('hr_connect_holidays', JSON.stringify(filtered));
 };
 
+/** Import ngày lễ Việt Nam mặc định (có hưởng lương theo Bộ luật Lao động). Trả về số ngày lễ đã thêm mới. */
+export const seedVietnamHolidays = async (): Promise<{ added: number; skipped: number }> => {
+  const { getVietnamHolidaysSeed } = await import('../data/vietnam-holidays');
+  const seeds = getVietnamHolidaysSeed();
+  const existing = await getHolidays();
+  const existingDateSet = new Set(existing.map(h => h.date));
+  const existingRecurringKeys = new Set(
+    existing.filter(h => h.isRecurring).map(h => {
+      const d = new Date(h.date);
+      return `${h.name}|${d.getMonth()}|${d.getDate()}`;
+    })
+  );
+  let added = 0;
+  let skipped = 0;
+
+  for (const seed of seeds) {
+    const d = new Date(seed.date);
+    const recurringKey = `${seed.name}|${d.getMonth()}|${d.getDate()}`;
+    const isDuplicate = seed.isRecurring
+      ? existingRecurringKeys.has(recurringKey)
+      : existingDateSet.has(seed.date);
+    if (isDuplicate) {
+      skipped++;
+      continue;
+    }
+    try {
+      await createHoliday(seed);
+      existingDateSet.add(seed.date);
+      if (seed.isRecurring) existingRecurringKeys.add(recurringKey);
+      added++;
+    } catch {
+      skipped++;
+    }
+  }
+
+  if (added > 0) {
+    invalidateHolidaysCache();
+  }
+  return { added, skipped };
+};
+
 // ============ SYSTEM CONFIGS ============
 
 export const getSystemConfigs = async (): Promise<SystemConfig[]> => {
@@ -1879,14 +1947,24 @@ export const invalidateShiftsCache = () => {
   shiftsCache = null;
 };
 
-// Payroll cache (nếu có)
+// Payroll cache (nếu có) - giới hạn 12 tháng để tránh memory leak khi dùng lâu
+const PAYROLL_CACHE_MAX_MONTHS = 12;
 let payrollCache: Map<string, PayrollRecord[]> = new Map();
+
+function trimPayrollCacheIfNeeded(): void {
+  if (payrollCache.size <= PAYROLL_CACHE_MAX_MONTHS) return;
+  const keys = Array.from(payrollCache.keys()).sort();
+  const toDelete = keys.slice(0, keys.length - PAYROLL_CACHE_MAX_MONTHS);
+  toDelete.forEach(k => payrollCache.delete(k));
+}
+
 export const invalidatePayrollCache = (month?: string) => {
   if (month) {
     payrollCache.delete(month);
   } else {
     payrollCache.clear();
   }
+  trimPayrollCacheIfNeeded();
 };
 
 // Departments cache (nếu có)

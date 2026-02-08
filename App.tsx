@@ -16,7 +16,8 @@ const Payroll = lazy(() => import('./components/Payroll'));
 const EmployeeProfile = lazy(() => import('./components/EmployeeProfile'));
 const SalaryManagement = lazy(() => import('./components/SalaryManagement'));
 const NotificationsPanel = lazy(() => import('./components/NotificationsPanel'));
-import { getCurrentUser, syncAllOfflineData, getNotifications } from './services/db';
+import { getCurrentUser, syncAllOfflineData, getNotifications, isSupabaseAvailable } from './services/db';
+import { supabase } from './services/supabase';
 import { sendOTP, verifyOTP } from './services/auth';
 import { useDataEvents } from './utils/useDataEvents';
 
@@ -652,8 +653,7 @@ const App: React.FC = () => {
     };
   }, [user]);
 
-  // Update app badge based on notifications
-  // Sử dụng event system thay vì polling để giảm số lượng requests
+  // Update app badge - Realtime + event (không polling)
   useEffect(() => {
     if (!user) {
       setAppBadge(0);
@@ -670,17 +670,19 @@ const App: React.FC = () => {
       }
     };
 
-    // Update badge ngay khi mount
     updateBadge();
-    
-    // Update badge khi có thay đổi notifications (thay vì polling mỗi phút)
-    // Polling backup mỗi 2 phút để đảm bảo badge luôn được cập nhật
-    const interval = setInterval(updateBadge, 120000); // 2 phút (giảm từ 1 phút)
 
-    return () => clearInterval(interval);
+    if (isSupabaseAvailable()) {
+      const channel = supabase
+        .channel(`badge:${user.id}`)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, updateBadge)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, updateBadge)
+        .subscribe();
+      return () => { supabase.removeChannel(channel); };
+    }
   }, [user]);
 
-  // Listen to notification events để update badge ngay lập tức khi có thay đổi
+  // Backup: badge khi app emit event (mark read, v.v.)
   useDataEvents(
     ['notifications:created', 'notifications:updated'],
     async () => {

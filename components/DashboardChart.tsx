@@ -15,8 +15,8 @@ interface DashboardChartProps {
  * cải thiện LCP và Time to Interactive trên mobile.
  */
 const DashboardChart: React.FC<DashboardChartProps> = ({ data }) => (
-  <div className="h-40">
-    <ResponsiveContainer width="100%" height="100%">
+  <div className="h-40 min-h-[160px] w-full min-w-[200px]">
+    <ResponsiveContainer width="100%" height="100%" minHeight={160} minWidth={200}>
       <BarChart data={data}>
         <XAxis dataKey="name" fontSize={10} axisLine={false} tickLine={false} tick={{ fill: '#94a3b8' }} dy={10} />
         <Tooltip

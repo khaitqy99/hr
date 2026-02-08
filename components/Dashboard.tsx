@@ -1,6 +1,8 @@
 import React, { useEffect, useState, lazy, Suspense } from 'react';
 import { User, AttendanceRecord, AttendanceType, ShiftRegistration, ShiftTime, OFF_TYPE_LABELS } from '../types';
 import { getAttendance, getShiftRegistrations, getNotifications } from '../services/db';
+import { supabase } from '../services/supabase';
+import { isSupabaseAvailable } from '../services/db';
 import PullToRefresh from './PullToRefresh';
 import SkeletonLoader from './SkeletonLoader';
 import { vibrate, HapticPatterns } from '../utils/pwa';
@@ -61,32 +63,28 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
     }
   };
 
+  // Load data khi mount và khi tab trở lại visible (không polling)
   useEffect(() => {
     loadData();
-    // Reload every 60 seconds to get latest data (tăng từ 30s để giảm số lượng requests)
-    let interval: NodeJS.Timeout | null = null;
     const handleVisibilityChange = () => {
-      if (document.hidden) {
-        if (interval) {
-          clearInterval(interval);
-          interval = null;
-        }
-      } else {
-        loadData();
-        interval = setInterval(loadData, 60000); // 60 giây
-      }
+      if (document.visibilityState === 'visible') loadData();
     };
-    
-    if (!document.hidden) {
-      interval = setInterval(loadData, 60000); // 60 giây
-    }
-    
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    return () => {
-      if (interval) clearInterval(interval);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [user.id]);
+
+  // Supabase Realtime: cập nhật ngay khi attendance, shifts, notifications thay đổi
+  useEffect(() => {
+    if (!isSupabaseAvailable() || !user?.id) return;
+
+    const channel = supabase
+      .channel(`dashboard:${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_records', filter: `user_id=eq.${user.id}` }, () => loadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shift_registrations', filter: `user_id=eq.${user.id}` }, () => loadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, () => loadData())
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [user.id]);
 
   const chartData = Array.from({ length: 5 }).map((_, i) => {

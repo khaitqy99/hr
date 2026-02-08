@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AttendanceRecord, AttendanceType, AttendanceStatus, User, UserRole } from '../../types';
 import { getAllAttendance, deleteAttendance, getAllUsers } from '../../services/db';
-import { deleteAttendancePhoto } from '../../services/storage';
+import { deleteAttendancePhoto, checkPhotoExists, testPhotoUrl, extractFilenameFromUrl } from '../../services/storage';
 import { exportToCSV } from '../../utils/export';
 
 /**
@@ -40,6 +40,8 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
   const [failedPhotoIds, setFailedPhotoIds] = useState<Set<string>>(new Set());
   /** Track images that are in viewport for lazy loading */
   const [visibleImageIds, setVisibleImageIds] = useState<Set<string>>(new Set());
+  /** Track retry attempts for failed images */
+  const [retryAttempts, setRetryAttempts] = useState<Map<string, number>>(new Map());
 
   useEffect(() => {
     loadData();
@@ -78,12 +80,27 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
 
   const loadData = async () => {
     setIsLoading(true);
+    // Reset failed photo IDs khi load lại data để thử load lại các ảnh đã fail trước đó
     setFailedPhotoIds(new Set());
+    setVisibleImageIds(new Set()); // Reset visible images để trigger IntersectionObserver lại
+    setRetryAttempts(new Map()); // Reset retry attempts
     try {
       // Tối ưu: Chỉ load 500 records đầu tiên để tránh lag
       // Nếu cần tất cả, có thể load thêm khi scroll hoặc filter
       const records = await getAllAttendance(500);
       const users = await getAllUsers();
+      
+      // Debug: Log một vài URLs để kiểm tra
+      const recordsWithPhotos = records.filter(r => r.photoUrl);
+      if (recordsWithPhotos.length > 0) {
+        console.log('📸 Sample photo URLs from DB:', recordsWithPhotos.slice(0, 3).map(r => ({
+          recordId: r.id,
+          photoUrl: r.photoUrl,
+          urlLength: r.photoUrl?.length,
+          isComplete: r.photoUrl?.includes('CHECK_IN') || r.photoUrl?.includes('CHECK_OUT'),
+        })));
+      }
+      
       setAttendanceRecords(records);
       setEmployees(users);
     } catch (error) {
@@ -233,7 +250,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
         </div>
       ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-sky-50 overflow-hidden">
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
             <table className="w-full">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
@@ -293,22 +310,42 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
                         {record.photoUrl ? (
                           (() => {
                             const photoUrl = record.photoUrl;
+                            
+                            // Debug: Log URL để kiểm tra có bị truncate không
+                            if (photoUrl.includes('supabase.co/storage') && photoUrl.length < 100) {
+                              console.warn('⚠️ URL seems truncated in render:', {
+                                recordId: record.id,
+                                photoUrl,
+                                length: photoUrl.length,
+                              });
+                            }
+                            
                             const isBase64 = isBase64DataUrl(photoUrl);
                             const isValid = isValidUrl(photoUrl);
                             const hasFailed = failedPhotoIds.has(record.id);
 
-                            // Nếu URL không hợp lệ hoặc đã fail
-                            if (!isValid || hasFailed) {
+                            // Nếu URL không hợp lệ, hiển thị lỗi ngay
+                            if (!isValid) {
                               return (
                                 <div
                                   className="w-16 h-16 rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 flex items-center justify-center text-[10px] text-slate-400 text-center leading-tight px-1"
-                                  title={
-                                    !isValid
-                                      ? 'URL ảnh không hợp lệ'
-                                      : 'Ảnh không tải được (có thể do bản ghi cũ hoặc bucket chưa public)'
-                                  }
+                                  title="URL ảnh không hợp lệ"
                                 >
-                                  {!isValid ? 'URL lỗi' : 'Không tải được'}
+                                  URL lỗi
+                                </div>
+                              );
+                            }
+                            
+                            // Nếu đã fail và đã retry đủ lần, hiển thị "Không tải được"
+                            // Nhưng chỉ khi đã trong viewport (đã thử load)
+                            const retryCount = retryAttempts.get(record.id) || 0;
+                            if (hasFailed && retryCount >= 2) {
+                              return (
+                                <div
+                                  className="w-16 h-16 rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 flex items-center justify-center text-[10px] text-slate-400 text-center leading-tight px-1"
+                                  title="Ảnh không tải được sau nhiều lần thử (có thể do bản ghi cũ hoặc bucket chưa public)"
+                                >
+                                  Không tải được
                                 </div>
                               );
                             }
@@ -331,6 +368,30 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
 
                             // HTTP URL: Lazy load chỉ khi image trong viewport
                             const shouldLoad = visibleImageIds.has(record.id);
+                            
+                            // Debug: Log URL khi render
+                            if (shouldLoad && photoUrl.includes('supabase.co/storage')) {
+                              console.log('🖼️ Loading image:', {
+                                recordId: record.id,
+                                photoUrl,
+                                urlLength: photoUrl.length,
+                                isComplete: photoUrl.includes('CHECK_IN') || photoUrl.includes('CHECK_OUT'),
+                              });
+                            }
+                            
+                            // Nếu đã fail trước đó và chưa trong viewport, không thử lại ngay
+                            // Chỉ hiển thị "Không tải được" nếu đã thử load và fail
+                            if (hasFailed && !shouldLoad) {
+                              return (
+                                <div
+                                  className="w-16 h-16 rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 flex items-center justify-center text-[10px] text-slate-400 text-center leading-tight px-1"
+                                  title="Ảnh không tải được (có thể do bản ghi cũ hoặc bucket chưa public)"
+                                >
+                                  Không tải được
+                                </div>
+                              );
+                            }
+                            
                             return (
                               <button
                                 onClick={() => setSelectedPhoto(photoUrl)}
@@ -345,12 +406,82 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
                                     loading="lazy"
                                     decoding="async"
                                     sizes="(max-width: 768px) 100vw, 400px"
-                                    onError={(e) => {
-                                      console.warn(`Failed to load photo for record ${record.id}:`, photoUrl);
-                                      setFailedPhotoIds((prev) => new Set(prev).add(record.id));
+                                    crossOrigin="anonymous"
+                                    onError={async (e) => {
+                                      const target = e.target as HTMLImageElement;
+                                      const currentAttempts = retryAttempts.get(record.id) || 0;
+                                      const maxRetries = 2; // Retry tối đa 2 lần
+                                      
+                                      // Extract error details từ event
+                                      const errorDetails: any = {
+                                        photoUrl,
+                                        recordId: record.id,
+                                        userId: record.userId,
+                                        timestamp: new Date(record.timestamp).toISOString(),
+                                        type: record.type,
+                                        urlParts: photoUrl.split('/'),
+                                        isSupabaseUrl: photoUrl.includes('supabase.co/storage'),
+                                        naturalWidth: target.naturalWidth,
+                                        naturalHeight: target.naturalHeight,
+                                        complete: target.complete,
+                                        attempt: currentAttempts + 1,
+                                      };
+                                      
+                                      // Test URL và check file existence
+                                      const filename = extractFilenameFromUrl(photoUrl);
+                                      errorDetails.extractedFilename = filename;
+                                      
+                                      // Test URL accessibility
+                                      const urlTest = await testPhotoUrl(photoUrl);
+                                      errorDetails.urlTest = urlTest;
+                                      
+                                      // Check if file exists on Storage
+                                      const fileExists = await checkPhotoExists(photoUrl);
+                                      errorDetails.fileExists = fileExists;
+                                      
+                                      console.warn(`❌ Failed to load photo for record ${record.id} (attempt ${currentAttempts + 1}/${maxRetries + 1}):`, errorDetails);
+                                      
+                                      // Nếu file không tồn tại hoặc URL không accessible, không retry
+                                      if (!fileExists || !urlTest.success) {
+                                        console.error(`❌ Photo URL invalid or file missing. Marking as failed immediately.`, {
+                                          photoUrl,
+                                          fileExists,
+                                          urlTest,
+                                        });
+                                        setFailedPhotoIds((prev) => new Set(prev).add(record.id));
+                                        return;
+                                      }
+                                      
+                                      // Retry mechanism: thử lại sau 1 giây nếu chưa đạt max retries
+                                      if (currentAttempts < maxRetries) {
+                                        setRetryAttempts((prev) => {
+                                          const next = new Map(prev);
+                                          next.set(record.id, currentAttempts + 1);
+                                          return next;
+                                        });
+                                        
+                                        // Retry sau 1 giây bằng cách force re-render img
+                                        setTimeout(() => {
+                                          setVisibleImageIds((prev) => {
+                                            const next = new Set(prev);
+                                            next.delete(record.id); // Remove để trigger lại IntersectionObserver
+                                            setTimeout(() => next.add(record.id), 100);
+                                            return next;
+                                          });
+                                        }, 1000);
+                                      } else {
+                                        // Đã retry đủ, đánh dấu là failed
+                                        console.error(`❌ Photo failed after ${maxRetries + 1} attempts. URL:`, photoUrl);
+                                        setFailedPhotoIds((prev) => new Set(prev).add(record.id));
+                                      }
                                     }}
                                     onLoad={() => {
-                                      // Photo loaded successfully
+                                      // Photo loaded successfully - remove from failed list if was there
+                                      setFailedPhotoIds((prev) => {
+                                        const next = new Set(prev);
+                                        next.delete(record.id);
+                                        return next;
+                                      });
                                     }}
                                   />
                                 ) : (

@@ -61,57 +61,27 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user, setView }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Load khi mount và khi tab trở lại visible (không polling)
   useEffect(() => {
     loadNotifications();
-    // Reload notifications every 60 seconds (tăng từ 30s để giảm số lượng requests)
-    // Chỉ reload khi tab đang active để tránh lãng phí tài nguyên
-    let interval: NodeJS.Timeout | null = null;
     const handleVisibilityChange = () => {
-      if (document.hidden) {
-        if (interval) {
-          clearInterval(interval);
-          interval = null;
-        }
-      } else {
-        loadNotifications();
-        interval = setInterval(loadNotifications, 60000); // 60 giây
-      }
+      if (document.visibilityState === 'visible') loadNotifications();
     };
-    
-    if (!document.hidden) {
-      interval = setInterval(loadNotifications, 60000); // 60 giây
-    }
-    
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    return () => {
-      if (interval) clearInterval(interval);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [user.id]);
 
-  // Supabase Realtime subscription để nhận notifications real-time (giống zenpush)
+  // Supabase Realtime: INSERT (push) + UPDATE (đã đọc) - không cần polling
   useEffect(() => {
     if (!isSupabaseAvailable() || !user) return;
 
-    console.log('🔔 [HR] Setting up Supabase Realtime subscription for notifications...');
-
-    // Subscribe to notifications table changes
     const channel = supabase
       .channel(`notifications:${user.id}`)
       .on(
         'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'notifications',
-          filter: `user_id=eq.${user.id}`,
-        },
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
         async (payload) => {
-          console.log('📨 [HR] Realtime notification received:', payload);
           const newNotification = payload.new as any;
-          
-          // Hiển thị push notification NGAY LẬP TỨC (giống zenpush)
           const permission = getNotificationPermission();
           if (permission === 'granted') {
             try {
@@ -121,28 +91,23 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user, setView }
                 icon: '/icon-192.png',
                 url: '/employee/notifications',
                 tag: `notification-${newNotification.id}`,
-                data: {
-                  notificationId: newNotification.id,
-                  type: newNotification.type,
-                },
+                data: { notificationId: newNotification.id, type: newNotification.type },
               });
             } catch (error) {
-              console.error('❌ [HR] Error showing push notification:', error);
+              console.error('Error showing push notification:', error);
             }
           }
-          
-          // Sau đó reload notifications để cập nhật UI
           loadNotifications();
         }
       )
-      .subscribe((status) => {
-        console.log('🔔 [HR] Realtime subscription status:', status);
-      });
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
+        () => loadNotifications()
+      )
+      .subscribe();
 
-    return () => {
-      console.log('🔔 [HR] Cleaning up Realtime subscription');
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [user?.id]);
 
   const loadNotifications = async () => {

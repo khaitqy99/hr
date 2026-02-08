@@ -57,79 +57,8 @@ export const requestNotificationPermission = async (): Promise<NotificationPermi
   return permission;
 };
 
-/**
- * Kiểm tra xem push notifications đã được kích hoạt chưa
- * (Kiểm tra quyền và Service Worker)
- */
-export const getPushSubscription = async (): Promise<boolean> => {
-  if (!isPushSupported()) {
-    return false;
-  }
-
-  try {
-    const permission = getNotificationPermission();
-    if (permission !== 'granted') {
-      return false;
-    }
-
-    if (!('serviceWorker' in navigator)) {
-      return false;
-    }
-
-    const registration = await navigator.serviceWorker.ready;
-    return !!registration;
-  } catch (error) {
-    console.error('Lỗi khi kiểm tra push subscription:', error);
-    return false;
-  }
-};
-
-/**
- * Tạo push subscription mới
- * Lưu ý: Không cần VAPID key cho local notifications qua Service Worker
- * Chỉ cần quyền notification và Service Worker đã sẵn sàng
- */
-export const subscribeToPush = async (): Promise<boolean> => {
-  if (!isPushSupported()) {
-    throw new Error('Push notifications không được hỗ trợ');
-  }
-
-  // Kiểm tra quyền
-  const permission = await requestNotificationPermission();
-  if (permission !== 'granted') {
-    throw new Error('Quyền thông báo chưa được cấp');
-  }
-
-  try {
-    // Kiểm tra Service Worker đã sẵn sàng chưa
-    if (!('serviceWorker' in navigator)) {
-      throw new Error('Service Worker không được hỗ trợ');
-    }
-
-    const registration = await navigator.serviceWorker.ready;
-    if (!registration) {
-      throw new Error('Service Worker chưa sẵn sàng');
-    }
-
-    console.log('✅ Push notifications đã được kích hoạt (local notifications)');
-    return true;
-  } catch (error: any) {
-    console.error('Lỗi khi kích hoạt push notifications:', error);
-    throw error;
-  }
-};
-
-/**
- * Hủy push notifications (chỉ cần revoke permission)
- */
-export const unsubscribeFromPush = async (): Promise<boolean> => {
-  // Không thể programmatically revoke permission
-  // User phải tự tắt trong cài đặt trình duyệt
-  console.log('💡 Để tắt push notifications, vui lòng tắt quyền thông báo trong cài đặt trình duyệt');
-  return true;
-};
-
-// Không cần subscriptionToJSON nữa vì chỉ dùng local notifications
+// Các functions getPushSubscription, subscribeToPush, unsubscribeFromPush đã được xóa vì không được sử dụng
+// App chỉ sử dụng sendLocalNotification và getNotificationPermission cho local notifications
 
 /**
  * Kiểm tra thiết bị mobile
@@ -158,7 +87,7 @@ export const sendLocalNotification = async (
   }
 
   const title = payload.title || 'Thông báo mới';
-  const body = payload.body || payload.message || 'Bạn có thông báo mới';
+  const body = payload.body || 'Bạn có thông báo mới';
   const isMobile = isMobileDevice();
   const isStandalone = isPWAInstalled();
 
