@@ -8,7 +8,7 @@ import CustomSelect from '../CustomSelect';
 const DAY_LABELS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 const DEFAULT_IN = '09:00';
 const DEFAULT_OUT = '18:00';
-const CUSTOM_SHIFT_HOURS = 9;
+
 
 const TIME_OPTIONS: string[] = (() => {
   const opts: string[] = [];
@@ -19,14 +19,7 @@ const TIME_OPTIONS: string[] = (() => {
   return opts;
 })();
 
-function startTimePlus9Hours(startTime: string): string {
-  const [h, m] = startTime.split(':').map(Number);
-  let totalMinutes = h * 60 + m + CUSTOM_SHIFT_HOURS * 60;
-  if (totalMinutes >= 24 * 60) totalMinutes = 23 * 60 + 59;
-  const eh = Math.floor(totalMinutes / 60);
-  const em = totalMinutes % 60;
-  return `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
-}
+
 
 /** Lấy thứ Hai đầu tuần (0h) của một ngày */
 function getWeekStart(d: Date): Date {
@@ -88,8 +81,9 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
   const [editForm, setEditForm] = useState<{
     shift: ShiftTime;
     startTime: string;
+    endTime: string;
     offType: OffType;
-  }>({ shift: ShiftTime.CUSTOM, startTime: '09:00', offType: OffType.OFF_PN });
+  }>({ shift: ShiftTime.CUSTOM, startTime: '09:00', endTime: '18:00', offType: OffType.OFF_PN });
   const [cellActionLoading, setCellActionLoading] = useState(false);
 
   useEffect(() => {
@@ -364,6 +358,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
     setEditForm({
       shift: reg.shift,
       startTime: reg.shift === ShiftTime.CUSTOM && reg.startTime ? reg.startTime : '09:00',
+      endTime: reg.shift === ShiftTime.CUSTOM && reg.endTime ? reg.endTime : '18:00',
       offType: reg.offType || OffType.OFF_PN,
     });
   };
@@ -373,6 +368,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
     setEditForm({
       shift: ShiftTime.CUSTOM,
       startTime: '09:00',
+      endTime: '18:00',
       offType: OffType.OFF_PN,
     });
   };
@@ -383,7 +379,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
 
   const isEditFormValid = (): boolean => {
     if (editForm.shift === ShiftTime.OFF) return true;
-    return !!editForm.startTime;
+    return !!editForm.startTime && !!editForm.endTime;
   };
 
   const handleSaveEdit = async () => {
@@ -395,7 +391,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
         await updateShiftRegistration(cellDetail.reg.id, {
           shift: editForm.shift,
           startTime: editForm.shift === ShiftTime.CUSTOM ? editForm.startTime : null,
-          endTime: editForm.shift === ShiftTime.CUSTOM ? startTimePlus9Hours(editForm.startTime) : null,
+          endTime: editForm.shift === ShiftTime.CUSTOM ? editForm.endTime : null,
           offType: editForm.shift === ShiftTime.OFF ? editForm.offType : null,
         }, { keepStatus: true });
         showMsg('success', 'Đã cập nhật lịch.');
@@ -412,7 +408,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
           date: dateTs,
           shift: editForm.shift,
           startTime: editForm.shift === ShiftTime.CUSTOM ? editForm.startTime : undefined,
-          endTime: editForm.shift === ShiftTime.CUSTOM ? startTimePlus9Hours(editForm.startTime) : undefined,
+          endTime: editForm.shift === ShiftTime.CUSTOM ? editForm.endTime : undefined,
           offType: editForm.shift === ShiftTime.OFF ? editForm.offType : undefined,
           status: RequestStatus.APPROVED,
           createdAt: Date.now(),
@@ -441,13 +437,13 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
         'Nhân viên': emp?.name || s.userId,
         'Phòng ban': emp?.department || '',
         'Ngày': new Date(s.date).toLocaleDateString('vi-VN'),
-        'Loại ca': s.shift === ShiftTime.OFF ? 
-          (s.offType && OFF_TYPE_LABELS[s.offType] ? OFF_TYPE_LABELS[s.offType] : 'Ngày off') : 
+        'Loại ca': s.shift === ShiftTime.OFF ?
+          (s.offType && OFF_TYPE_LABELS[s.offType] ? OFF_TYPE_LABELS[s.offType] : 'Ngày off') :
           'Ca làm việc',
         'Giờ vào': s.startTime || '',
         'Giờ ra': s.endTime || '',
         'Trạng thái': s.status === RequestStatus.PENDING ? 'Chờ duyệt' :
-                      s.status === RequestStatus.APPROVED ? 'Đã duyệt' : 'Từ chối',
+          s.status === RequestStatus.APPROVED ? 'Đã duyệt' : 'Từ chối',
         'Lý do từ chối': s.rejectionReason || '',
         'Ngày tạo': new Date(s.createdAt).toLocaleDateString('vi-VN'),
       };
@@ -460,9 +456,8 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
     <div className="space-y-6">
       {message && (
         <div
-          className={`rounded-xl px-4 py-2 text-sm font-medium ${
-            message.type === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-          }`}
+          className={`rounded-xl px-4 py-2 text-sm font-medium ${message.type === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+            }`}
         >
           {message.text}
         </div>
@@ -599,7 +594,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                 </React.Fragment>
               ))}
             </colgroup>
-            <thead className="bg-slate-50">
+            <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
               <tr>
                 <th className="px-3 py-2 text-left text-xs font-bold text-slate-600 uppercase border-r border-b border-slate-300 first:border-l">
                   Nhân viên
@@ -631,10 +626,10 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                 <th className="px-2 py-1 text-[10px] font-medium text-slate-500 border-r border-b border-slate-300" />
                 {weekDates.map((_, i) => (
                   <React.Fragment key={i}>
-                    <th className="px-0 py-1 text-center text-[10px] font-medium text-slate-500 border-r border-b border-slate-300">
+                    <th className="px-0 py-1 text-center text-[10px] font-bold text-emerald-700 bg-emerald-100/50 border-r border-b border-slate-300">
                       Vào
                     </th>
-                    <th className="px-0 py-1 text-center text-[10px] font-medium text-slate-500 border-r border-b border-slate-300">
+                    <th className="px-0 py-1 text-center text-[10px] font-bold text-orange-700 bg-orange-100/50 border-r border-b border-slate-300">
                       Ra
                     </th>
                   </React.Fragment>
@@ -690,7 +685,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                                 tabIndex={0}
                                 onClick={openDetail}
                                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e as unknown as React.MouseEvent); } }}
-                                className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs text-slate-300 cursor-pointer hover:bg-slate-100"
+                                className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs text-slate-300 cursor-pointer hover:bg-emerald-50 bg-emerald-50/10 transition-colors"
                               >
                                 —
                               </td>
@@ -699,7 +694,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                                 tabIndex={0}
                                 onClick={openDetail}
                                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e as unknown as React.MouseEvent); } }}
-                                className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs text-slate-300 cursor-pointer hover:bg-slate-100"
+                                className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs text-slate-300 cursor-pointer hover:bg-orange-50 bg-orange-50/10 transition-colors"
                               >
                                 —
                               </td>
@@ -767,7 +762,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                               tabIndex={0}
                               onClick={openDetail}
                               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e as unknown as React.MouseEvent); } }}
-                              className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs relative align-top cursor-pointer hover:bg-slate-50"
+                              className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs relative align-top cursor-pointer hover:bg-emerald-100 bg-emerald-50/40 transition-colors"
                             >
                               <div className="font-medium text-slate-800">{inTime}</div>
                               <div
@@ -804,7 +799,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                               tabIndex={0}
                               onClick={openDetail}
                               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e as unknown as React.MouseEvent); } }}
-                              className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs align-top font-medium text-slate-800 cursor-pointer hover:bg-slate-50"
+                              className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs align-top font-medium text-slate-800 cursor-pointer hover:bg-orange-100 bg-orange-50/40 transition-colors"
                             >
                               {outTime}
                             </td>
@@ -837,8 +832,8 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                   </p>
                   <p className="text-xs text-yellow-700 mt-1">
                     {holiday.type === 'NATIONAL' ? 'Ngày lễ quốc gia' :
-                     holiday.type === 'COMPANY' ? 'Ngày lễ công ty' :
-                     'Ngày lễ địa phương'}
+                      holiday.type === 'COMPANY' ? 'Ngày lễ công ty' :
+                        'Ngày lễ địa phương'}
                     {holiday.isRecurring && ' • Lặp lại hàng năm'}
                   </p>
                   {holiday.description && (
@@ -874,18 +869,16 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                   <button
                     type="button"
                     onClick={() => setEditForm(prev => ({ ...prev, shift: ShiftTime.CUSTOM }))}
-                    className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                      editForm.shift === ShiftTime.CUSTOM ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
-                    }`}
+                    className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-bold transition-all ${editForm.shift === ShiftTime.CUSTOM ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+                      }`}
                   >
                     Ca làm
                   </button>
                   <button
                     type="button"
                     onClick={() => setEditForm(prev => ({ ...prev, shift: ShiftTime.OFF }))}
-                    className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                      editForm.shift === ShiftTime.OFF ? 'bg-slate-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
-                    }`}
+                    className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-bold transition-all ${editForm.shift === ShiftTime.OFF ? 'bg-slate-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+                      }`}
                   >
                     Ngày off
                   </button>
@@ -912,9 +905,16 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                         className="flex-1"
                       />
                     </div>
-                    <p className="text-xs text-slate-500">
-                      Giờ ra: {editForm.startTime ? startTimePlus9Hours(editForm.startTime) : '—'} (9 tiếng)
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs font-bold text-slate-600 w-20">Giờ ra:</label>
+                      <CustomSelect
+                        options={TIME_OPTIONS.map((t) => ({ value: t, label: t }))}
+                        value={editForm.endTime}
+                        onChange={(v) => setEditForm(prev => ({ ...prev, endTime: v }))}
+                        placeholder="Chọn giờ ra"
+                        className="flex-1"
+                      />
+                    </div>
                   </div>
                 )}
                 <div className="flex gap-2 pt-2">

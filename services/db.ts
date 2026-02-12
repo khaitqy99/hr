@@ -249,7 +249,7 @@ export const createUser = async (data: Omit<User, 'id'> & { id?: string }): Prom
         });
 
         // Check for various conflict error codes and messages
-        const isConflictError = 
+        const isConflictError =
           error.code === '23505' || // PostgreSQL unique constraint violation
           error.code === 'PGRST409' || // PostgREST 409 Conflict
           error.status === 409 || // HTTP 409 Conflict
@@ -261,7 +261,7 @@ export const createUser = async (data: Omit<User, 'id'> & { id?: string }): Prom
           error.details?.toLowerCase().includes('unique') ||
           error.hint?.toLowerCase().includes('duplicate') ||
           error.hint?.toLowerCase().includes('unique');
-        
+
         if (isConflictError) {
           // User đã tồn tại, lấy user đó
           console.warn('Conflict detected, attempting to fetch existing user:', data.email);
@@ -417,7 +417,7 @@ export const updateUser = async (id: string, data: Partial<User>): Promise<User>
   const users: User[] = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
   const idx = users.findIndex((u: User) => u.id === id);
   if (idx === -1) throw new Error('Không tìm thấy nhân viên');
-  
+
   if (data.email && data.email !== users[idx].email) {
     const existing = users.find((u: User) => u.email === data.email.trim().toLowerCase());
     if (existing) throw new Error('Email đã tồn tại');
@@ -492,7 +492,7 @@ export const getAllAttendance = async (limit?: number): Promise<AttendanceRecord
         .from('attendance_records')
         .select('*')
         .order('timestamp', { ascending: false });
-      
+
       // Thêm limit nếu được chỉ định để tối ưu performance
       if (limit && limit > 0) {
         query = query.limit(limit);
@@ -571,36 +571,36 @@ export const deleteAttendance = async (id: string): Promise<void> => {
 // Helper: Tính số ngày nghỉ từ leave requests trong tháng
 export const calculateLeaveDays = async (userId: string, month: string): Promise<number> => {
   const leaveRequests = await getLeaveRequests(userId);
-  
+
   // Parse month format "MM-YYYY"
   const [monthStr, yearStr] = month.split('-');
   const targetMonth = parseInt(monthStr);
   const targetYear = parseInt(yearStr);
-  
+
   // Filter approved leave requests that overlap with the target month
   const monthStart = new Date(targetYear, targetMonth - 1, 1).getTime();
   const monthEnd = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999).getTime();
-  
+
   let totalLeaveDays = 0;
-  
+
   leaveRequests
     .filter(req => req.status === RequestStatus.APPROVED)
     .forEach(req => {
       const startDate = req.startDate;
       const endDate = req.endDate;
-      
+
       // Check if leave request overlaps with target month
       if (endDate >= monthStart && startDate <= monthEnd) {
         // Calculate overlap days
         const overlapStart = Math.max(startDate, monthStart);
         const overlapEnd = Math.min(endDate, monthEnd);
-        
+
         // Count days (inclusive)
         const days = Math.floor((overlapEnd - overlapStart) / (1000 * 60 * 60 * 24)) + 1;
         totalLeaveDays += days;
       }
     });
-  
+
   return totalLeaveDays;
 };
 
@@ -608,20 +608,20 @@ export const calculateLeaveDays = async (userId: string, month: string): Promise
 // Ngày đi làm (shift !== OFF) và ngày nghỉ lễ (OFF + LE) đều được tính công hưởng lương
 export const calculateShiftWorkDays = async (userId: string, month: string): Promise<number> => {
   const shiftRegistrations = await getShiftRegistrations(userId);
-  
+
   // Parse month format "MM-YYYY"
   const [monthStr, yearStr] = month.split('-');
   const targetMonth = parseInt(monthStr);
   const targetYear = parseInt(yearStr);
-  
+
   const shiftDays = new Set<string>();
-  
+
   shiftRegistrations
     .filter(shift => {
       const shiftDate = new Date(shift.date);
       if (shift.status !== RequestStatus.APPROVED ||
-          shiftDate.getMonth() + 1 !== targetMonth ||
-          shiftDate.getFullYear() !== targetYear) {
+        shiftDate.getMonth() + 1 !== targetMonth ||
+        shiftDate.getFullYear() !== targetYear) {
         return false;
       }
       // Đếm: ngày đi làm (shift !== OFF) HOẶC ngày nghỉ lễ (OFF + LE) hưởng lương
@@ -632,65 +632,67 @@ export const calculateShiftWorkDays = async (userId: string, month: string): Pro
       const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
       shiftDays.add(dateKey);
     });
-  
+
   return shiftDays.size;
 };
 
 export const calculateAttendanceStats = async (userId: string, month: string): Promise<{ actualWorkDays: number; otHours: number }> => {
   const records = await getAttendance(userId);
-  
+
   // Parse month format "MM-YYYY"
   const [monthStr, yearStr] = month.split('-');
   const targetMonth = parseInt(monthStr);
   const targetYear = parseInt(yearStr);
-  
+
   // Filter records for the target month
   const monthRecords = records.filter(record => {
     const recordDate = new Date(record.timestamp);
     return recordDate.getMonth() + 1 === targetMonth && recordDate.getFullYear() === targetYear;
   });
-  
+
   // Group records by date (YYYY-MM-DD)
   const recordsByDate: { [date: string]: { checkIn?: AttendanceRecord; checkOut?: AttendanceRecord } } = {};
-  
+
   monthRecords.forEach(record => {
     const date = new Date(record.timestamp);
     const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-    
+
     if (!recordsByDate[dateKey]) {
       recordsByDate[dateKey] = {};
     }
-    
+
     if (record.type === AttendanceType.CHECK_IN) {
       recordsByDate[dateKey].checkIn = record;
     } else if (record.type === AttendanceType.CHECK_OUT) {
       recordsByDate[dateKey].checkOut = record;
     }
   });
-  
+
   // Calculate work days and OT hours
   let actualWorkDays = 0;
   let totalOtHours = 0;
   // Lấy số giờ làm việc tiêu chuẩn từ config (mặc định 8 giờ)
   const standardWorkHours = await getConfigNumber('work_hours_per_day', 8);
-  
+
   Object.values(recordsByDate).forEach(dayRecords => {
     if (dayRecords.checkIn && dayRecords.checkOut) {
       // Valid work day (has both check-in and check-out)
       actualWorkDays++;
-      
+
       // Calculate work hours
       const checkInTime = dayRecords.checkIn.timestamp;
       const checkOutTime = dayRecords.checkOut.timestamp;
       const workHours = (checkOutTime - checkInTime) / (1000 * 60 * 60); // Convert to hours
-      
-      // Calculate OT hours (hours beyond standard 8 hours)
-      if (workHours > standardWorkHours) {
-        totalOtHours += workHours - standardWorkHours;
+
+      // Calculate OT hours (hours beyond standard work hours + 1 hour break)
+      // Yêu cầu: Tính OT khi làm việc > 9 tiếng (8h làm + 1h nghỉ trưa)
+      const workHoursWithBreak = standardWorkHours + 1;
+      if (workHours > workHoursWithBreak) {
+        totalOtHours += workHours - workHoursWithBreak;
       }
     }
   });
-  
+
   return {
     actualWorkDays,
     otHours: Math.round(totalOtHours * 10) / 10 // Round to 1 decimal place
@@ -740,7 +742,7 @@ export const saveAttendance = async (record: AttendanceRecord): Promise<void> =>
     try {
       // Bảng attendance_records dùng id UUID (default uuid_generate_v4()), không truyền id từ client
       const photoUrlToSave = record.photoUrl || null;
-      
+
       // Log nếu photoUrl quá ngắn (có thể bị truncate)
       if (photoUrlToSave && photoUrlToSave.length < 100 && photoUrlToSave.includes('supabase.co/storage')) {
         console.warn('⚠️ Saving potentially truncated photo URL:', {
@@ -750,7 +752,7 @@ export const saveAttendance = async (record: AttendanceRecord): Promise<void> =>
           timestamp: record.timestamp,
         });
       }
-      
+
       const { error } = await supabase
         .from('attendance_records')
         .insert({
@@ -824,7 +826,7 @@ export const getLeaveRequests = async (userId?: string, role?: UserRole): Promis
   // Fallback to localStorage
   const all = JSON.parse(localStorage.getItem(REQUESTS_KEY) || '[]');
   if (role === UserRole.ADMIN) {
-     return all.sort((a: LeaveRequest, b: LeaveRequest) => b.createdAt - a.createdAt);
+    return all.sort((a: LeaveRequest, b: LeaveRequest) => b.createdAt - a.createdAt);
   }
   return all.filter((r: LeaveRequest) => r.userId === userId).sort((a: LeaveRequest, b: LeaveRequest) => b.createdAt - a.createdAt);
 };
@@ -896,7 +898,7 @@ export const getShiftRegistrations = async (userId?: string, role?: UserRole): P
   // Fallback to localStorage
   const all = JSON.parse(localStorage.getItem(SHIFTS_KEY) || '[]');
   if (role === UserRole.ADMIN) {
-     return all.sort((a: ShiftRegistration, b: ShiftRegistration) => b.date - a.date);
+    return all.sort((a: ShiftRegistration, b: ShiftRegistration) => b.date - a.date);
   }
   return all.filter((r: ShiftRegistration) => r.userId === userId).sort((a: ShiftRegistration, b: ShiftRegistration) => b.date - a.date);
 };
@@ -1086,7 +1088,7 @@ export const getPayroll = async (userId: string, month?: string): Promise<Payrol
     if (aYear !== bYear) return bYear - aYear;
     return bMonth - aMonth;
   });
-  
+
   if (month) return savedForUser.filter(r => r.month === month);
   return savedForUser;
 };
@@ -1206,13 +1208,13 @@ export const createOrUpdatePayroll = async (record: PayrollRecord): Promise<Payr
   const all: PayrollRecord[] = JSON.parse(localStorage.getItem(PAYROLL_KEY) || '[]');
   const existingIndex = all.findIndex((r: PayrollRecord) => r.id === record.id);
   const isUpdate = existingIndex >= 0;
-  
+
   if (isUpdate) {
     all[existingIndex] = record;
   } else {
     all.push(record);
   }
-  
+
   localStorage.setItem(PAYROLL_KEY, JSON.stringify(all));
 
   // Emit event và invalidate cache
@@ -1223,15 +1225,16 @@ export const createOrUpdatePayroll = async (record: PayrollRecord): Promise<Payr
 };
 
 export const calculatePayroll = async (
-  employee: User, 
-  month: string, 
-  actualWorkDays?: number, 
-  otHours?: number, 
-  allowance: number = 0, 
+  employee: User,
+  month: string,
+  actualWorkDays?: number,
+  otHours?: number,
+  allowance: number = 0,
   bonus: number = 0,
   useAttendance: boolean = false,
   useLeave: boolean = true,
-  useShift: boolean = true
+  useShift: boolean = true,
+  customDeductions?: number // Tham số tùy chọn cho phép nhập tay số tiền khấu trừ
 ): Promise<PayrollRecord> => {
   const baseSalary = employee.grossSalary || employee.traineeSalary || 0;
   // Lấy các config từ system configs
@@ -1241,16 +1244,16 @@ export const calculatePayroll = async (
     getConfigNumber('overtime_rate', 1.5),
     getConfigNumber('work_hours_per_day', 8)
   ]);
-  
+
   let finalWorkDays = actualWorkDays;
   let finalOtHours = otHours ?? 0;
-  
+
   // Ưu tiên ngày công từ đăng ký ca (shift) — không phụ thuộc check-in/check-out
   if (useShift && actualWorkDays === undefined) {
     const shiftWorkDays = await calculateShiftWorkDays(employee.id, month);
     finalWorkDays = shiftWorkDays;
   }
-  
+
   // Nếu bật dùng chấm công: có thể lấy ngày công và giờ OT từ attendance (override hoặc bổ sung)
   if (useAttendance && (actualWorkDays === undefined || otHours === undefined)) {
     const attendanceStats = await calculateAttendanceStats(employee.id, month);
@@ -1261,26 +1264,34 @@ export const calculatePayroll = async (
       finalOtHours = attendanceStats.otHours;
     }
   }
-  
+
   // Trừ ngày nghỉ từ leave requests nếu useLeave = true
   if (useLeave && finalWorkDays !== undefined) {
     const leaveDays = await calculateLeaveDays(employee.id, month);
     finalWorkDays = Math.max(0, finalWorkDays - leaveDays);
   }
-  
+
   // Fallback to default if still undefined
   finalWorkDays = finalWorkDays ?? standardWorkDays;
   finalOtHours = finalOtHours ?? 0;
-  
+
   // Lương theo ngày công: LCB/standardWorkDays * số ngày công thực tế
   const workDaySalary = (baseSalary / standardWorkDays) * finalWorkDays;
   // Lương OT: (LCB/standardWorkDays/workHoursPerDay) * overtimeRate * số giờ làm thêm
   const otPay = (baseSalary / standardWorkDays / workHoursPerDay) * overtimeRate * finalOtHours;
   // Công thức đúng: basicSalary (theo ngày công) + overtimePay + allowance + bonus - deductions
   const totalIncome = workDaySalary + otPay + allowance + bonus;
-  const deductions = totalIncome * (socialInsuranceRate / 100); // BHXH, Thuế theo config
+
+  // Tính khấu trừ: Nếu có customDeductions (nhập tay) thì dùng, ngược lại tính theo tỷ lệ
+  let deductions = 0;
+  if (customDeductions !== undefined && customDeductions !== null) {
+    deductions = customDeductions;
+  } else {
+    deductions = totalIncome * (socialInsuranceRate / 100); // BHXH, Thuế theo config mặc định
+  }
+
   const netSalary = totalIncome - deductions;
-  
+
   // Đảm bảo tính toán chính xác (fix lỗi underpay)
   const calculatedNetSalary = Math.round(totalIncome - deductions);
 
@@ -1843,7 +1854,7 @@ export const updateSystemConfig = async (id: string, value: string, updatedBy?: 
       invalidateConfigCache();
       await emitConfigEvent();
 
-        return {
+      return {
         id: updatedConfig.id,
         key: updatedConfig.key,
         value: updatedConfig.value,
@@ -2089,7 +2100,7 @@ export const verifyOTPCode = async (email: string, code: string): Promise<boolea
       // Chuyển expires_at từ ISO string sang timestamp để so sánh chính xác
       const expiresAt = new Date(data.expires_at).getTime();
       const now = Date.now();
-      
+
       if (expiresAt <= now) {
         // OTP đã hết hạn
         return false;
@@ -2159,10 +2170,10 @@ export const syncOfflineAttendance = async (): Promise<{ synced: number; errors:
   try {
     // Lấy tất cả records từ localStorage
     const localRecords: AttendanceRecord[] = JSON.parse(localStorage.getItem(ATTENDANCE_KEY) || '[]');
-    
+
     // Lọc các records chưa được sync
     const unsyncedRecords = localRecords.filter(record => !record.synced);
-    
+
     if (unsyncedRecords.length === 0) {
       return { synced: 0, errors: 0 };
     }
@@ -2183,7 +2194,7 @@ export const syncOfflineAttendance = async (): Promise<{ synced: number; errors:
 
         if (existing) {
           // Record đã tồn tại, đánh dấu là synced trong localStorage
-          const updatedRecords = localRecords.map(r => 
+          const updatedRecords = localRecords.map(r =>
             r.id === record.id ? { ...r, synced: true } : r
           );
           localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(updatedRecords));
@@ -2210,7 +2221,7 @@ export const syncOfflineAttendance = async (): Promise<{ synced: number; errors:
           errorCount++;
         } else {
           // Đánh dấu record đã được sync trong localStorage
-          const updatedRecords = localRecords.map(r => 
+          const updatedRecords = localRecords.map(r =>
             r.id === record.id ? { ...r, synced: true } : r
           );
           localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(updatedRecords));
@@ -2238,9 +2249,9 @@ export const syncAllOfflineData = async (): Promise<{
   totalErrors: number;
 }> => {
   const attendance = await syncOfflineAttendance();
-  
+
   // Có thể thêm sync cho các loại dữ liệu khác ở đây nếu cần
-  
+
   return {
     attendance,
     totalSynced: attendance.synced,

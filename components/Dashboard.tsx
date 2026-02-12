@@ -1,4 +1,4 @@
-import React, { useEffect, useState, lazy, Suspense } from 'react';
+import React, { useEffect, useState, lazy, Suspense, useMemo, useCallback } from 'react';
 import { User, AttendanceRecord, AttendanceType, ShiftRegistration, ShiftTime, OFF_TYPE_LABELS } from '../types';
 import { getAttendance, getShiftRegistrations, getNotifications } from '../services/db';
 import { supabase } from '../services/supabase';
@@ -22,7 +22,9 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
-  const loadData = async () => {
+  // Memoize loadData để tránh re-create function mỗi lần render
+  // Quan trọng cho mobile performance và tránh infinite loops
+  const loadData = useCallback(async () => {
     try {
       setIsLoading(true);
       
@@ -61,7 +63,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [user.id]);
 
   // Load data khi mount và khi tab trở lại visible (không polling)
   useEffect(() => {
@@ -71,7 +73,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [user.id]);
+  }, [loadData]);
 
   // Supabase Realtime: cập nhật ngay khi attendance, shifts, notifications thay đổi
   useEffect(() => {
@@ -85,29 +87,32 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [user.id]);
+  }, [user.id, loadData]);
 
-  const chartData = Array.from({ length: 5 }).map((_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (4 - i));
-    const dayStr = d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
-    const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
-    const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999).getTime();
-    
-    const dayRecords = attendance.filter(r => r.timestamp >= dayStart && r.timestamp <= dayEnd);
-    const checkIn = dayRecords.find(r => r.type === AttendanceType.CHECK_IN);
-    const checkOut = dayRecords.find(r => r.type === AttendanceType.CHECK_OUT);
-    
-    let hours = 0;
-    if (checkIn && checkOut) {
-      hours = (checkOut.timestamp - checkIn.timestamp) / (1000 * 60 * 60);
-    }
+  // Memoize chartData để tránh tính toán lại mỗi lần render - quan trọng cho mobile performance
+  const chartData = useMemo(() => {
+    return Array.from({ length: 5 }).map((_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (4 - i));
+      const dayStr = d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+      const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
+      const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999).getTime();
+      
+      const dayRecords = attendance.filter(r => r.timestamp >= dayStart && r.timestamp <= dayEnd);
+      const checkIn = dayRecords.find(r => r.type === AttendanceType.CHECK_IN);
+      const checkOut = dayRecords.find(r => r.type === AttendanceType.CHECK_OUT);
+      
+      let hours = 0;
+      if (checkIn && checkOut) {
+        hours = (checkOut.timestamp - checkIn.timestamp) / (1000 * 60 * 60);
+      }
 
-    return { name: dayStr, hours: parseFloat(hours.toFixed(1)) };
-  });
+      return { name: dayStr, hours: parseFloat(hours.toFixed(1)) };
+    });
+  }, [attendance]);
 
-  // Tính tổng giờ làm tuần này
-  const getWeekHours = () => {
+  // Memoize tính tổng giờ làm tuần này - tránh tính toán lại mỗi lần render
+  const weekHours = useMemo(() => {
     const now = new Date();
     const startOfWeek = new Date(now);
     startOfWeek.setDate(now.getDate() - now.getDay() + 1); // Thứ 2
@@ -149,14 +154,38 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
     });
 
     return parseFloat(totalHours.toFixed(1));
-  };
+  }, [attendance]);
 
-  // Tính tỷ lệ đúng giờ
-  const getOnTimeRate = () => {
+  // Memoize tính tỷ lệ đúng giờ - tránh filter lại mỗi lần render
+  const onTimeRate = useMemo(() => {
     if (attendance.length === 0) return 0;
     const onTimeCount = attendance.filter(r => r.status === 'ON_TIME').length;
     return Math.round((onTimeCount / attendance.length) * 100);
-  };
+  }, [attendance]);
+
+  // Memoize check-in/check-out hôm nay - tránh tính toán lại mỗi lần render
+  const todayCheckInOut = useMemo(() => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+    
+    const todayCheckIn = attendance.find(r =>
+      r.timestamp >= todayStart &&
+      r.timestamp <= todayEnd &&
+      r.type === AttendanceType.CHECK_IN
+    );
+    
+    const todayCheckOut = attendance.find(r =>
+      r.timestamp >= todayStart &&
+      r.timestamp <= todayEnd &&
+      r.type === AttendanceType.CHECK_OUT
+    );
+
+    return {
+      checkIn: todayCheckIn ? new Date(todayCheckIn.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '--:--',
+      checkOut: todayCheckOut ? new Date(todayCheckOut.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '--:--'
+    };
+  }, [attendance]);
 
   // Show skeleton loader while loading
   if (isLoading && attendance.length === 0) {
@@ -241,37 +270,13 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
                 <div className="flex-1 bg-black/10 rounded-2xl p-3 min-w-0">
                     <p className="text-xs text-blue-100 mb-1">Giờ vào</p>
                     <p className="text-base sm:text-lg font-bold truncate">
-                      {(() => {
-                        const now = new Date();
-                        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
-                        const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
-                        const todayCheckIn = attendance.find(r =>
-                          r.timestamp >= todayStart &&
-                          r.timestamp <= todayEnd &&
-                          r.type === AttendanceType.CHECK_IN
-                        );
-                        return todayCheckIn
-                          ? new Date(todayCheckIn.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
-                          : '--:--';
-                      })()}
+                      {todayCheckInOut.checkIn}
                     </p>
                 </div>
                 <div className="flex-1 bg-black/10 rounded-2xl p-3 min-w-0">
                     <p className="text-xs text-blue-100 mb-1">Giờ ra</p>
                     <p className="text-base sm:text-lg font-bold truncate">
-                      {(() => {
-                        const now = new Date();
-                        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
-                        const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
-                        const todayCheckOut = attendance.find(r =>
-                          r.timestamp >= todayStart &&
-                          r.timestamp <= todayEnd &&
-                          r.type === AttendanceType.CHECK_OUT
-                        );
-                        return todayCheckOut
-                          ? new Date(todayCheckOut.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
-                          : '--:--';
-                      })()}
+                      {todayCheckInOut.checkOut}
                     </p>
                 </div>
                 <div className="flex-1 bg-black/10 rounded-2xl p-3 min-w-0">
@@ -370,14 +375,14 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
              <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mb-2">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
              </div>
-             <p className="text-2xl font-bold text-slate-800">{getWeekHours()}</p>
+             <p className="text-2xl font-bold text-slate-800">{weekHours}</p>
              <p className="text-xs text-slate-400 font-medium">Giờ tuần này</p>
          </div>
          <div className="bg-white p-4 rounded-3xl shadow-sm border border-sky-50">
              <div className="w-10 h-10 rounded-full bg-cyan-50 text-cyan-600 flex items-center justify-center mb-2">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.746 3.746 0 011.043 3.296A3.745 3.745 0 0121 12z" /></svg>
              </div>
-             <p className="text-2xl font-bold text-slate-800">{getOnTimeRate()}%</p>
+             <p className="text-2xl font-bold text-slate-800">{onTimeRate}%</p>
              <p className="text-xs text-slate-400 font-medium">Đúng giờ</p>
          </div>
       </div>

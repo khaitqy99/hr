@@ -16,7 +16,9 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
     actualWorkDays: 22,
     otHours: 0,
     allowance: 0,
+    allowance: 0,
     bonus: 0,
+    deductions: undefined as number | undefined,
   });
   const [shiftWorkDays, setShiftWorkDays] = useState<number | null>(null);
   const [incompleteDays, setIncompleteDays] = useState<{ date: string; hasCheckIn: boolean; hasCheckOut: boolean }[]>([]);
@@ -28,7 +30,7 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
       const allUsers = await getAllUsers();
       const allEmployees = allUsers.filter((e: User) => e.role !== UserRole.ADMIN);
       setEmployees(allEmployees);
-      
+
       // Set default month to current month
       const now = new Date();
       const currentMonth = `${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
@@ -63,7 +65,7 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
   const handleCalculateSalary = async () => {
     if (!selectedEmployee || !selectedMonth) return;
     setIsCalculating(true);
-    
+
     try {
       const payroll = await calculatePayroll(
         selectedEmployee,
@@ -74,15 +76,16 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
         salaryForm.bonus,
         false, // useAttendance - không dùng chấm công
         true,  // useLeave
-        useShiftData // useShift - ngày công từ đăng ký ca
+        useShiftData, // useShift - ngày công từ đăng ký ca
+        salaryForm.deductions // customDeductions - khấu trừ nhập tay
       );
-      
+
       await createOrUpdatePayroll(payroll);
-      
+
       // Reload payroll records
       const records = await getPayroll(selectedEmployee.id, selectedMonth);
       setPayrollRecords(records);
-      
+
       alert('Tính lương thành công!');
     } catch (error: any) {
       alert('Lỗi: ' + (error?.message || 'Không thể tính lương'));
@@ -393,14 +396,27 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
                             className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm"
                           />
                         </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-500 mb-1">Khấu trừ (VNĐ) — Tùy chọn</label>
+                          <input
+                            type="number"
+                            min={0}
+                            placeholder="Để trống sẽ tự tính theo % BHXH"
+                            value={salaryForm.deductions === undefined ? '' : salaryForm.deductions}
+                            onChange={(e) => {
+                              const value = e.target.value === '' ? undefined : Number(e.target.value);
+                              setSalaryForm(f => ({ ...f, deductions: value }));
+                            }}
+                            className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm"
+                          />
+                        </div>
                         <button
                           onClick={handleCalculateSalary}
                           disabled={isCalculating || !selectedEmployee || (!selectedEmployee.grossSalary && !selectedEmployee.traineeSalary)}
-                          className={`w-full py-3 rounded-xl text-sm font-bold shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${
-                            useShiftData
-                              ? 'bg-green-600 text-white hover:bg-green-700'
-                              : 'bg-blue-600 text-white hover:bg-blue-700'
-                          }`}
+                          className={`w-full py-3 rounded-xl text-sm font-bold shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${useShiftData
+                            ? 'bg-green-600 text-white hover:bg-green-700'
+                            : 'bg-blue-600 text-white hover:bg-blue-700'
+                            }`}
                         >
                           {isCalculating ? 'Đang tính...' : useShiftData ? 'Tính lương từ đăng ký ca' : 'Tính lương'}
                         </button>
