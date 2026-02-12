@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { SystemConfig } from '../../types';
-import { getSystemConfigs, updateSystemConfig, isSupabaseAvailable } from '../../services/db';
+import { getSystemConfigs, updateSystemConfig, createSystemConfig, isSupabaseAvailable } from '../../services/db';
 import { supabase } from '../../services/supabase';
 
 const DEFAULT_SYSTEM_CONFIGS = [
@@ -23,44 +23,17 @@ const DEFAULT_SYSTEM_CONFIGS = [
     description: 'Bán kính chấm công (mét)',
     category: 'GENERAL'
   },
-  {
-    key: 'company_name',
-    value: 'Y99 HR',
-    description: 'Tên công ty',
-    category: 'GENERAL'
-  },
+
 
   // Attendance (Chấm công)
-  {
-    key: 'work_start_time',
-    value: '08:00',
-    description: 'Giờ bắt đầu làm việc',
-    category: 'ATTENDANCE'
-  },
-  {
-    key: 'work_end_time',
-    value: '17:00',
-    description: 'Giờ kết thúc làm việc',
-    category: 'ATTENDANCE'
-  },
+
   {
     key: 'work_hours_per_day',
     value: '8',
     description: 'Số giờ làm việc tiêu chuẩn/ngày',
     category: 'ATTENDANCE'
   },
-  {
-    key: 'lunch_break_start',
-    value: '12:00',
-    description: 'Giờ bắt đầu nghỉ trưa',
-    category: 'ATTENDANCE'
-  },
-  {
-    key: 'lunch_break_end',
-    value: '13:00',
-    description: 'Giờ kết thúc nghỉ trưa',
-    category: 'ATTENDANCE'
-  },
+
 
   // Payroll (Lương)
   {
@@ -70,9 +43,9 @@ const DEFAULT_SYSTEM_CONFIGS = [
     category: 'PAYROLL'
   },
   {
-    key: 'social_insurance_rate',
-    value: '10.5',
-    description: 'Tỷ lệ đóng BHXH (%)',
+    key: 'social_insurance_amount',
+    value: '0',
+    description: 'Số tiền đóng BHXH cố định',
     category: 'PAYROLL'
   },
   {
@@ -80,33 +53,7 @@ const DEFAULT_SYSTEM_CONFIGS = [
     value: '1.5',
     description: 'Hệ số tăng ca',
     category: 'PAYROLL'
-  },
-  {
-    key: 'probation_salary_rate',
-    value: '85',
-    description: 'Tỷ lệ lương thử việc (%)',
-    category: 'PAYROLL'
-  },
-
-  // Notification (Thông báo)
-  {
-    key: 'enable_email_notification',
-    value: 'true',
-    description: 'Gửi thông báo qua Email',
-    category: 'NOTIFICATION'
-  },
-  {
-    key: 'enable_push_notification',
-    value: 'true',
-    description: 'Gửi thông báo Push',
-    category: 'NOTIFICATION'
-  },
-  {
-    key: 'late_notification_threshold',
-    value: '15',
-    description: 'Thông báo đi trễ sau (phút)',
-    category: 'NOTIFICATION'
-  },
+  }
 ];
 
 interface SystemConfigManagementProps {
@@ -130,8 +77,30 @@ const SystemConfigManagement: React.FC<SystemConfigManagementProps> = ({ onRegis
   }, [onRegisterReload]);
 
   const loadData = async () => {
-    const configs = await getSystemConfigs();
-    setConfigs(configs);
+    const allConfigs = await getSystemConfigs();
+    const dbConfigMap = new Map(allConfigs.map(c => [c.key, c]));
+
+    // Merge default configs with DB configs
+    const mergedConfigs: SystemConfig[] = DEFAULT_SYSTEM_CONFIGS.map(def => {
+      const existing = dbConfigMap.get(def.key);
+      if (existing) {
+        return {
+          ...existing,
+          description: def.description, // Prioritize description from code
+          category: def.category as any
+        };
+      }
+      // Config not found in DB -> return temp config
+      return {
+        id: `temp_${def.key}`,
+        key: def.key,
+        value: def.value,
+        description: def.description,
+        category: def.category as any,
+        updatedAt: Date.now()
+      };
+    });
+    setConfigs(mergedConfigs);
   };
 
   const handleEdit = (config: SystemConfig) => {
@@ -143,7 +112,17 @@ const SystemConfigManagement: React.FC<SystemConfigManagementProps> = ({ onRegis
     if (!editingConfig) return;
 
     try {
-      await updateSystemConfig(editingConfig.id, editValue);
+      if (editingConfig.id.startsWith('temp_')) {
+        await createSystemConfig(
+          editingConfig.key,
+          editValue,
+          editingConfig.description,
+          editingConfig.category
+        );
+      } else {
+        await updateSystemConfig(editingConfig.id, editValue);
+      }
+
       loadData();
       setEditingConfig(null);
       setEditValue('');

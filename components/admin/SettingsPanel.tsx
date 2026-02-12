@@ -54,7 +54,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onRegisterReload }) => {
         {/* System Settings */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-sky-50">
           <h3 className="text-lg font-bold text-slate-700 mb-4">Cấu hình hệ thống</h3>
-          
+
           <div className="space-y-4">
             <div className="p-4 bg-sky-50 rounded-xl">
               <label className="block text-xs font-bold text-slate-500 mb-2">Địa chỉ văn phòng</label>
@@ -74,9 +74,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onRegisterReload }) => {
             </div>
 
             <div className="p-4 bg-sky-50 rounded-xl">
-              <label className="block text-xs font-bold text-slate-500 mb-2">Giờ làm việc tiêu chuẩn</label>
+              <label className="block text-xs font-bold text-slate-500 mb-2">Số giờ làm việc/ngày</label>
               <div className="text-sm text-slate-700 font-medium">
-                {configs.work_start_time || '08:00'} - {configs.work_end_time || '17:00'} ({configs.work_hours_per_day || '8'} giờ/ngày)
+                {configs.work_hours_per_day || '8'} giờ/ngày
               </div>
             </div>
 
@@ -88,9 +88,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onRegisterReload }) => {
             </div>
 
             <div className="p-4 bg-sky-50 rounded-xl">
-              <label className="block text-xs font-bold text-slate-500 mb-2">Tỷ lệ khấu trừ BHXH</label>
+              <label className="block text-xs font-bold text-slate-500 mb-2">Số tiền đóng BHXH cố định</label>
               <div className="text-sm text-slate-700 font-medium">
-                {configs.social_insurance_rate || '10.5'}%
+                {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(parseFloat(configs.social_insurance_amount || '0'))}
               </div>
             </div>
 

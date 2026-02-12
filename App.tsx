@@ -18,7 +18,7 @@ const SalaryManagement = lazy(() => import('./components/SalaryManagement'));
 const NotificationsPanel = lazy(() => import('./components/NotificationsPanel'));
 import { getCurrentUser, syncAllOfflineData, getNotifications, isSupabaseAvailable } from './services/db';
 import { supabase } from './services/supabase';
-import { sendOTP, verifyOTP } from './services/auth';
+import { sendOTP, verifyOTP, signOut } from './services/auth';
 import { useDataEvents } from './utils/useDataEvents';
 
 // Admin sub-routes: path segment cho từng trang admin (đồng bộ với AdminPanel)
@@ -228,7 +228,7 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
       const interval = setInterval(() => {
         const remaining = Math.max(0, Math.floor((otpExpiresAt - Date.now()) / 1000));
         setTimeRemaining(remaining);
-        
+
         if (remaining === 0) {
           clearInterval(interval);
         }
@@ -245,7 +245,7 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
         const now = Date.now();
         const remaining = Math.max(0, Math.ceil((rateLimitUntil - now) / 1000));
         setRateLimitCountdown(remaining);
-        
+
         if (remaining === 0) {
           // Khi countdown hết, reset rate limit để cho phép thử lại
           setRateLimitUntil(null);
@@ -286,142 +286,141 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-blue-900 via-blue-800 to-sky-900 relative overflow-hidden">
       {/* Background Ambience */}
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden">
-          <div className="absolute top-10 left-1/4 w-96 h-96 bg-blue-500/20 rounded-full blur-[100px] animate-float-slow"></div>
-          <div className="absolute bottom-10 right-1/4 w-80 h-80 bg-cyan-500/10 rounded-full blur-[80px]"></div>
+        <div className="absolute top-10 left-1/4 w-96 h-96 bg-blue-500/20 rounded-full blur-[100px] animate-float-slow"></div>
+        <div className="absolute bottom-10 right-1/4 w-80 h-80 bg-cyan-500/10 rounded-full blur-[80px]"></div>
       </div>
 
       <div className="relative z-10 w-full max-w-sm px-6">
         <div className="bg-white/10 backdrop-blur-xl border border-white/10 rounded-[2.5rem] p-8 shadow-2xl">
-            <div className="text-center mb-8">
-                <div className="flex items-center justify-center mx-auto mb-5 overflow-visible">
-                    <img src="/logo.png" alt="Y99 HR Logo" className="h-12 w-auto max-w-12 object-contain" />
-                </div>
-                <h1 className="text-3xl font-extrabold text-white tracking-tight">Y99 HR</h1>
-                <p className="text-blue-200 text-sm mt-2 font-medium">Hệ thống quản lý nhân sự 4.0</p>
+          <div className="text-center mb-8">
+            <div className="flex items-center justify-center mx-auto mb-5 overflow-visible">
+              <img src="/logo.png" alt="Y99 HR Logo" className="h-12 w-auto max-w-12 object-contain" />
             </div>
+            <h1 className="text-3xl font-extrabold text-white tracking-tight">Y99 HR</h1>
+            <p className="text-blue-200 text-sm mt-2 font-medium">Hệ thống quản lý nhân sự 4.0</p>
+          </div>
 
-            {step === 'email' ? (
-              <form onSubmit={handleEmailSubmit} className="space-y-4">
-                  <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-blue-200 uppercase tracking-widest ml-3">Email</label>
-                      <input
-                          type="email"
-                          inputMode="email"
-                          autoComplete="email"
-                          autoCapitalize="none"
-                          autoCorrect="off"
-                          required
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          className="block w-full rounded-2xl border-0 bg-black/20 px-5 py-4 text-white placeholder:text-white/30 focus:ring-2 focus:ring-cyan-400 transition-all outline-none min-h-[44px]"
-                          placeholder="ten@congty.com"
-                      />
-                  </div>
-                  {error && (
-                    <div className={`text-sm text-center px-4 py-2 rounded-lg ${
-                      error.includes('rate limit') || error.includes('quá nhiều') 
-                        ? 'text-yellow-300 bg-yellow-500/20 border border-yellow-500/30' 
-                        : 'text-red-300 bg-red-500/20'
-                    }`}>
-                      {error}
-                      {(error.includes('rate limit') || error.includes('quá nhiều')) && (
-                        <div className="mt-2 text-xs text-yellow-200">
-                          💡 <strong>Lưu ý:</strong> Nếu bạn đã nhận được mã OTP từ email trước đó, bạn vẫn có thể sử dụng mã đó để đăng nhập. Chỉ cần nhập email và mã OTP đã nhận được.
-                        </div>
-                      )}
+          {step === 'email' ? (
+            <form onSubmit={handleEmailSubmit} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-blue-200 uppercase tracking-widest ml-3">Email</label>
+                <input
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="block w-full rounded-2xl border-0 bg-black/20 px-5 py-4 text-white placeholder:text-white/30 focus:ring-2 focus:ring-cyan-400 transition-all outline-none min-h-[44px]"
+                  placeholder="ten@congty.com"
+                />
+              </div>
+              {error && (
+                <div className={`text-sm text-center px-4 py-2 rounded-lg ${error.includes('rate limit') || error.includes('quá nhiều')
+                  ? 'text-yellow-300 bg-yellow-500/20 border border-yellow-500/30'
+                  : 'text-red-300 bg-red-500/20'
+                  }`}>
+                  {error}
+                  {(error.includes('rate limit') || error.includes('quá nhiều')) && (
+                    <div className="mt-2 text-xs text-yellow-200">
+                      💡 <strong>Lưu ý:</strong> Nếu bạn đã nhận được mã OTP từ email trước đó, bạn vẫn có thể sử dụng mã đó để đăng nhập. Chỉ cần nhập email và mã OTP đã nhận được.
                     </div>
                   )}
-                  <button
-                      type="submit"
-                      disabled={loading}
-                      className="w-full py-4 rounded-2xl text-sm font-bold text-blue-900 bg-white hover:bg-blue-50 shadow-lg shadow-black/20 transition-all active:scale-[0.98] mt-4 disabled:opacity-50"
-                  >
-                      {loading ? 'Đang gửi OTP...' : 'Gửi mã OTP'}
-                  </button>
-                  {rateLimitUntil && Date.now() < rateLimitUntil && (
-                    <div className="text-xs text-yellow-300 text-center mt-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
-                      <p className="font-semibold mb-1">⚠️ Rate Limit đang hoạt động</p>
-                      <p>Vui lòng đợi {Math.floor(rateLimitCountdown / 60)} phút {rateLimitCountdown % 60} giây.</p>
-                      <p className="mt-2 text-yellow-200">
-                        💡 <strong>Mẹo:</strong> Nếu bạn đã nhận được mã OTP từ email trước đó, bạn có thể sử dụng mã đó ngay bây giờ mà không cần gửi lại.
-                      </p>
-                    </div>
-                  )}
-              </form>
-            ) : (
-              <form onSubmit={handleOTPSubmit} className="space-y-4">
-                  <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-blue-200 uppercase tracking-widest ml-3">Mã OTP</label>
-                      <input
-                          type="text"
-                          inputMode="numeric"
-                          autoComplete="one-time-code"
-                          autoFocus
-                          required
-                          value={otp}
-                          onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                          className="block w-full rounded-2xl border-0 bg-black/20 px-5 py-4 text-white placeholder:text-white/30 focus:ring-2 focus:ring-cyan-400 transition-all outline-none text-center text-2xl tracking-widest font-bold min-h-[44px]"
-                          placeholder="000000"
-                          maxLength={6}
-                      />
-                      <p className="text-xs text-blue-300 text-center mt-2">
-                        Mã OTP đã được gửi đến <span className="font-semibold">{email}</span>
-                      </p>
-                      {timeRemaining > 0 && (
-                        <p className="text-xs text-yellow-300 text-center mt-1">
-                          ⏱️ Mã OTP còn hiệu lực trong <span className="font-bold">{formatTimeRemaining(timeRemaining)}</span>
-                        </p>
-                      )}
-                      {timeRemaining === 0 && otpExpiresAt && (
-                        <p className="text-xs text-red-300 text-center mt-1">
-                          ⚠️ Mã OTP đã hết hạn. Vui lòng yêu cầu mã mới.
-                        </p>
-                      )}
-                  </div>
-                  {error && (
-                    <div className="text-red-300 text-sm text-center bg-red-500/20 px-4 py-2 rounded-lg">
-                      {error}
-                    </div>
-                  )}
-                  {otpSent && !error && (
-                    <div className="text-green-300 text-sm text-center bg-green-500/20 px-4 py-2 rounded-lg">
-                      ✅ Mã OTP mới đã được gửi! Vui lòng kiểm tra email.
-                    </div>
-                  )}
-                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 text-xs text-blue-200">
-                    <p className="font-semibold mb-1">📧 Lưu ý:</p>
-                    <ul className="list-disc list-inside space-y-1 text-blue-300/80">
-                      <li>Mã OTP phải khớp với mã đã được gửi đến email của bạn</li>
-                      <li>Mã OTP có hiệu lực trong 5 phút</li>
-                      <li>Mỗi mã OTP chỉ sử dụng được một lần</li>
-                    </ul>
-                  </div>
-                  <button
-                      type="submit"
-                      disabled={loading || otp.length !== 6}
-                      className="w-full py-4 rounded-2xl text-sm font-bold text-blue-900 bg-white hover:bg-blue-50 shadow-lg shadow-black/20 transition-all active:scale-[0.98] mt-4 disabled:opacity-50"
-                  >
-                      {loading ? 'Đang xác thực...' : 'Xác thực OTP'}
-                  </button>
-                  <div className="flex gap-2 mt-4">
-                    <button
-                        type="button"
-                        onClick={handleBackToEmail}
-                        className="flex-1 py-3 rounded-xl text-sm font-medium text-blue-200 bg-white/5 hover:bg-white/10 border border-white/10 transition-all"
-                    >
-                        Quay lại
-                    </button>
-                    <button
-                        type="button"
-                        onClick={handleResendOTP}
-                        disabled={loading}
-                        className="flex-1 py-3 rounded-xl text-sm font-medium text-blue-200 bg-white/5 hover:bg-white/10 border border-white/10 transition-all disabled:opacity-50"
-                    >
-                        {loading ? 'Đang gửi...' : 'Gửi lại OTP'}
-                    </button>
-                  </div>
-              </form>
-            )}
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-4 rounded-2xl text-sm font-bold text-blue-900 bg-white hover:bg-blue-50 shadow-lg shadow-black/20 transition-all active:scale-[0.98] mt-4 disabled:opacity-50"
+              >
+                {loading ? 'Đang gửi OTP...' : 'Gửi mã OTP'}
+              </button>
+              {rateLimitUntil && Date.now() < rateLimitUntil && (
+                <div className="text-xs text-yellow-300 text-center mt-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
+                  <p className="font-semibold mb-1">⚠️ Rate Limit đang hoạt động</p>
+                  <p>Vui lòng đợi {Math.floor(rateLimitCountdown / 60)} phút {rateLimitCountdown % 60} giây.</p>
+                  <p className="mt-2 text-yellow-200">
+                    💡 <strong>Mẹo:</strong> Nếu bạn đã nhận được mã OTP từ email trước đó, bạn có thể sử dụng mã đó ngay bây giờ mà không cần gửi lại.
+                  </p>
+                </div>
+              )}
+            </form>
+          ) : (
+            <form onSubmit={handleOTPSubmit} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-blue-200 uppercase tracking-widest ml-3">Mã OTP</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  autoFocus
+                  required
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  className="block w-full rounded-2xl border-0 bg-black/20 px-5 py-4 text-white placeholder:text-white/30 focus:ring-2 focus:ring-cyan-400 transition-all outline-none text-center text-2xl tracking-widest font-bold min-h-[44px]"
+                  placeholder="000000"
+                  maxLength={6}
+                />
+                <p className="text-xs text-blue-300 text-center mt-2">
+                  Mã OTP đã được gửi đến <span className="font-semibold">{email}</span>
+                </p>
+                {timeRemaining > 0 && (
+                  <p className="text-xs text-yellow-300 text-center mt-1">
+                    ⏱️ Mã OTP còn hiệu lực trong <span className="font-bold">{formatTimeRemaining(timeRemaining)}</span>
+                  </p>
+                )}
+                {timeRemaining === 0 && otpExpiresAt && (
+                  <p className="text-xs text-red-300 text-center mt-1">
+                    ⚠️ Mã OTP đã hết hạn. Vui lòng yêu cầu mã mới.
+                  </p>
+                )}
+              </div>
+              {error && (
+                <div className="text-red-300 text-sm text-center bg-red-500/20 px-4 py-2 rounded-lg">
+                  {error}
+                </div>
+              )}
+              {otpSent && !error && (
+                <div className="text-green-300 text-sm text-center bg-green-500/20 px-4 py-2 rounded-lg">
+                  ✅ Mã OTP mới đã được gửi! Vui lòng kiểm tra email.
+                </div>
+              )}
+              <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 text-xs text-blue-200">
+                <p className="font-semibold mb-1">📧 Lưu ý:</p>
+                <ul className="list-disc list-inside space-y-1 text-blue-300/80">
+                  <li>Mã OTP phải khớp với mã đã được gửi đến email của bạn</li>
+                  <li>Mã OTP có hiệu lực trong 5 phút</li>
+                  <li>Mỗi mã OTP chỉ sử dụng được một lần</li>
+                </ul>
+              </div>
+              <button
+                type="submit"
+                disabled={loading || otp.length !== 6}
+                className="w-full py-4 rounded-2xl text-sm font-bold text-blue-900 bg-white hover:bg-blue-50 shadow-lg shadow-black/20 transition-all active:scale-[0.98] mt-4 disabled:opacity-50"
+              >
+                {loading ? 'Đang xác thực...' : 'Xác thực OTP'}
+              </button>
+              <div className="flex gap-2 mt-4">
+                <button
+                  type="button"
+                  onClick={handleBackToEmail}
+                  className="flex-1 py-3 rounded-xl text-sm font-medium text-blue-200 bg-white/5 hover:bg-white/10 border border-white/10 transition-all"
+                >
+                  Quay lại
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResendOTP}
+                  disabled={loading}
+                  className="flex-1 py-3 rounded-xl text-sm font-medium text-blue-200 bg-white/5 hover:bg-white/10 border border-white/10 transition-all disabled:opacity-50"
+                >
+                  {loading ? 'Đang gửi...' : 'Gửi lại OTP'}
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       </div>
     </div>
@@ -432,7 +431,7 @@ const App: React.FC = () => {
   // Kiểm tra environment variables
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  
+
   // Hiển thị lỗi nếu thiếu environment variables
   if (!supabaseUrl || !supabaseKey) {
     return <EnvError />;
@@ -601,7 +600,6 @@ const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    const { signOut } = await import('./services/auth');
     await signOut();
     setUser(null);
     localStorage.removeItem('current_user');
@@ -755,53 +753,53 @@ const App: React.FC = () => {
         case 'shifts': return <ShiftRegister user={user} />;
         case 'payroll': return <Payroll user={user} setView={setView} />;
         case 'notifications': return <NotificationsPanel user={user} setView={setView} />;
-        case 'admin': 
+        case 'admin':
           if (user.role !== UserRole.ADMIN) {
             updateViewAndURL('dashboard', true);
             return <Dashboard user={user} />;
           }
           return (
-          <AdminPanel
-            user={user}
-            setView={setView}
-            setSelectedEmployeeId={setSelectedEmployeeId}
-            onLogout={handleLogout}
-            initialTab={adminTab}
-            onTabChange={(seg) => {
-              setAdminTab(seg);
-              updateViewAndURL('admin', false, undefined, seg);
-            }}
-          />
-        );
-        case 'salary-management': 
+            <AdminPanel
+              user={user}
+              setView={setView}
+              setSelectedEmployeeId={setSelectedEmployeeId}
+              onLogout={handleLogout}
+              initialTab={adminTab}
+              onTabChange={(seg) => {
+                setAdminTab(seg);
+                updateViewAndURL('admin', false, undefined, seg);
+              }}
+            />
+          );
+        case 'salary-management':
           if (user.role !== UserRole.ADMIN) {
             updateViewAndURL('dashboard', true);
             return <Dashboard user={user} />;
           }
           return <SalaryManagement user={user} setView={setView} />;
-        case 'employee-profile': 
+        case 'employee-profile':
           if (!selectedEmployeeId) {
             return <div className="p-10 text-center text-slate-400">Không tìm thấy nhân viên</div>;
           }
           // Determine back navigation based on user role
           const isViewingOwnProfile = user.role === UserRole.EMPLOYEE && selectedEmployeeId === user.id;
           return (
-          <EmployeeProfile
-            employeeId={selectedEmployeeId}
-            currentUser={user}
-            onBack={() => {
-              if (isViewingOwnProfile) {
-                // Employee viewing own profile -> back to dashboard
-                updateViewAndURL('dashboard', false);
-              } else {
-                // Admin viewing employee profile -> back to admin panel
-                updateViewAndURL('admin', false, undefined, adminTab);
-              }
-              setSelectedEmployeeId(null);
-            }}
-            setView={setView}
-          />
-        );
+            <EmployeeProfile
+              employeeId={selectedEmployeeId}
+              currentUser={user}
+              onBack={() => {
+                if (isViewingOwnProfile) {
+                  // Employee viewing own profile -> back to dashboard
+                  updateViewAndURL('dashboard', false);
+                } else {
+                  // Admin viewing employee profile -> back to admin panel
+                  updateViewAndURL('admin', false, undefined, adminTab);
+                }
+                setSelectedEmployeeId(null);
+              }}
+              setView={setView}
+            />
+          );
         default: return <Dashboard user={user} />;
       }
     })();

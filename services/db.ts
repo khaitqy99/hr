@@ -1238,9 +1238,9 @@ export const calculatePayroll = async (
 ): Promise<PayrollRecord> => {
   const baseSalary = employee.grossSalary || employee.traineeSalary || 0;
   // Lấy các config từ system configs
-  const [standardWorkDays, socialInsuranceRate, overtimeRate, workHoursPerDay] = await Promise.all([
+  const [standardWorkDays, socialInsuranceAmount, overtimeRate, workHoursPerDay] = await Promise.all([
     getConfigNumber('standard_work_days', 27),
-    getConfigNumber('social_insurance_rate', 10.5),
+    getConfigNumber('social_insurance_amount', 0),
     getConfigNumber('overtime_rate', 1.5),
     getConfigNumber('work_hours_per_day', 8)
   ]);
@@ -1287,7 +1287,7 @@ export const calculatePayroll = async (
   if (customDeductions !== undefined && customDeductions !== null) {
     deductions = customDeductions;
   } else {
-    deductions = totalIncome * (socialInsuranceRate / 100); // BHXH, Thuế theo config mặc định
+    deductions = socialInsuranceAmount; // BHXH cố định theo config
   }
 
   const netSalary = totalIncome - deductions;
@@ -1880,6 +1880,8 @@ export const updateSystemConfig = async (id: string, value: string, updatedBy?: 
   return all[idx];
 };
 
+
+
 // ============ SYSTEM CONFIG HELPERS ============
 
 /** Cache để tránh load configs nhiều lần */
@@ -2261,3 +2263,67 @@ export const syncAllOfflineData = async (): Promise<{
 
 // Initialize database on module load
 initializeDB();
+
+export const createSystemConfig = async (
+  key: string,
+  value: string,
+  description?: string,
+  category: string = 'GENERAL'
+): Promise<SystemConfig> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { data, error } = await supabase
+        .from('system_configs')
+        .insert({
+          key,
+          value,
+          description,
+          category,
+          updated_at: Math.floor(Date.now() / 1000)
+        })
+        .select()
+        .single();
+
+      if (error) throw new Error(`Lỗi tạo config: ${error.message}`);
+      if (!data) throw new Error('Không thể tạo config');
+
+      invalidateConfigCache();
+      await emitConfigEvent();
+
+      return {
+        id: data.id,
+        key: data.key,
+        value: data.value,
+        description: data.description || undefined,
+        category: data.category as any,
+        updatedAt: data.updated_at < 1e12 ? data.updated_at * 1000 : data.updated_at,
+        updatedBy: data.updated_by || undefined,
+      };
+    } catch (error) {
+      console.error('Error creating system config in Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  const all: SystemConfig[] = JSON.parse(localStorage.getItem('hr_connect_system_configs') || '[]');
+  // Check duplicate
+  if (all.some(c => c.key === key)) {
+    throw new Error('Config key already exists');
+  }
+
+  const newConfig: SystemConfig = {
+    id: 'cfg_' + Date.now() + Math.random().toString(36).substr(2, 9),
+    key,
+    value,
+    description,
+    category: category as any,
+    updatedAt: Date.now()
+  };
+
+  all.push(newConfig);
+  localStorage.setItem('hr_connect_system_configs', JSON.stringify(all));
+  invalidateConfigCache();
+  await emitConfigEvent();
+  return newConfig;
+};

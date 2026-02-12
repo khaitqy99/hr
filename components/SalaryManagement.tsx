@@ -16,7 +16,6 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
     actualWorkDays: 22,
     otHours: 0,
     allowance: 0,
-    allowance: 0,
     bonus: 0,
     deductions: undefined as number | undefined,
   });
