@@ -626,10 +626,10 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                 <th className="px-2 py-1 text-[10px] font-medium text-slate-500 border-r border-b border-slate-300" />
                 {weekDates.map((_, i) => (
                   <React.Fragment key={i}>
-                    <th className="px-0 py-1 text-center text-[10px] font-bold text-emerald-700 bg-emerald-100/50 border-r border-b border-slate-300">
+                    <th className="px-0 py-1 text-center text-[10px] font-medium text-slate-500 border-r border-b border-slate-300">
                       Vào
                     </th>
-                    <th className="px-0 py-1 text-center text-[10px] font-bold text-orange-700 bg-orange-100/50 border-r border-b border-slate-300">
+                    <th className="px-0 py-1 text-center text-[10px] font-medium text-slate-500 border-r border-b border-slate-300">
                       Ra
                     </th>
                   </React.Fragment>
@@ -685,7 +685,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                                 tabIndex={0}
                                 onClick={openDetail}
                                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e as unknown as React.MouseEvent); } }}
-                                className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs text-slate-300 cursor-pointer hover:bg-emerald-50 bg-emerald-50/10 transition-colors"
+                                className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs text-slate-300 cursor-pointer hover:bg-slate-100"
                               >
                                 —
                               </td>
@@ -694,7 +694,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                                 tabIndex={0}
                                 onClick={openDetail}
                                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e as unknown as React.MouseEvent); } }}
-                                className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs text-slate-300 cursor-pointer hover:bg-orange-50 bg-orange-50/10 transition-colors"
+                                className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs text-slate-300 cursor-pointer hover:bg-slate-100"
                               >
                                 —
                               </td>
@@ -762,7 +762,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                               tabIndex={0}
                               onClick={openDetail}
                               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e as unknown as React.MouseEvent); } }}
-                              className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs relative align-top cursor-pointer hover:bg-emerald-100 bg-emerald-50/40 transition-colors"
+                              className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs relative align-top cursor-pointer hover:bg-slate-50"
                             >
                               <div className="font-medium text-slate-800">{inTime}</div>
                               <div
@@ -799,7 +799,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                               tabIndex={0}
                               onClick={openDetail}
                               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e as unknown as React.MouseEvent); } }}
-                              className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs align-top font-medium text-slate-800 cursor-pointer hover:bg-orange-100 bg-orange-50/40 transition-colors"
+                              className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs align-top font-medium text-slate-800 cursor-pointer hover:bg-slate-50"
                             >
                               {outTime}
                             </td>
