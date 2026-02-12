@@ -349,6 +349,32 @@ export interface Database {
           updated_by?: string | null
         }
       }
+      otp_codes: {
+        Row: {
+          id: string
+          email: string
+          code: string
+          expires_at: string
+          used: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          email: string
+          code: string
+          expires_at: string
+          used?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          email?: string
+          code?: string
+          expires_at?: string
+          used?: boolean
+          created_at?: string
+        }
+      }
     }
     Views: {
       [_ in never]: never

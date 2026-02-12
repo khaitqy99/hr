@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { Notification, User } from '../types';
 import { getNotifications, markNotificationAsRead } from '../services/db';
-import { sendLocalNotification, getNotificationPermission } from '../services/push';
+import { sendLocalNotification, getNotificationPermission, requestNotificationPermission } from '../services/push';
 import { supabase } from '../services/supabase';
 import { isSupabaseAvailable } from '../services/db';
 
@@ -75,16 +75,24 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user, setView }
   useEffect(() => {
     if (!isSupabaseAvailable() || !user) return;
 
+    console.log('🔌 [Notifications] Đăng ký Supabase Realtime cho user:', user.id);
+
     const channel = supabase
       .channel(`notifications:${user.id}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
         async (payload) => {
+          console.log('📨 [Realtime] Nhận notification mới từ database:', payload.new);
+
           const newNotification = payload.new as any;
           const permission = getNotificationPermission();
+
+          console.log('🔔 [Realtime] Notification permission:', permission);
+
           if (permission === 'granted') {
             try {
+              console.log('📤 [Realtime] Đang gửi push notification...');
               await sendLocalNotification({
                 title: newNotification.title,
                 body: newNotification.message,
@@ -93,21 +101,75 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user, setView }
                 tag: `notification-${newNotification.id}`,
                 data: { notificationId: newNotification.id, type: newNotification.type },
               });
+              console.log('✅ [Realtime] Đã gửi push notification thành công!');
             } catch (error) {
-              console.error('Error showing push notification:', error);
+              console.error('❌ [Realtime] Lỗi gửi push notification:', error);
             }
+          } else {
+            console.warn('⚠️ [Realtime] Không có quyền notification, không thể gửi push notification');
+            console.warn('💡 [Realtime] Vui lòng click nút "Test Notification" để cấp quyền');
           }
+
           loadNotifications();
         }
       )
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
-        () => loadNotifications()
+        () => {
+          console.log('🔄 [Realtime] Notification được cập nhật');
+          loadNotifications();
+        }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('📡 [Realtime] Channel subscription status:', status);
+      });
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      console.log('🔌 [Realtime] Đóng kết nối Supabase Realtime');
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
+
+  // BroadcastChannel: Lắng nghe notifications từ admin panel (broadcast qua các tabs/windows)
+  useEffect(() => {
+    if (!user) return;
+
+    try {
+      const channel = new BroadcastChannel('hr-notifications');
+
+      channel.onmessage = async (event) => {
+        if (event.data?.type === 'NEW_NOTIFICATION') {
+          console.log('📨 [BC] Nhận thông báo từ BroadcastChannel:', event.data);
+
+          // Check if any notification is for this user
+          const userNotifications = event.data.notifications?.filter(
+            (n: any) => n.userId === user.id
+          ) || [];
+
+          if (userNotifications.length > 0) {
+            // Show push notification if permission granted
+            const permission = getNotificationPermission();
+            if (permission === 'granted' && event.data.payload) {
+              try {
+                await sendLocalNotification(event.data.payload);
+              } catch (error) {
+                console.error('Error showing notification from broadcast:', error);
+              }
+            }
+
+            // Reload notifications to show in panel
+            loadNotifications();
+          }
+        }
+      };
+
+      return () => {
+        channel.close();
+      };
+    } catch (error) {
+      console.warn('⚠️ BroadcastChannel không khả dụng:', error);
+    }
   }, [user?.id]);
 
   const loadNotifications = async () => {
@@ -127,7 +189,7 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user, setView }
   const handleMarkAsRead = async (id: string) => {
     try {
       await markNotificationAsRead(id);
-      setNotifications(prev => 
+      setNotifications(prev =>
         prev.map(notif => notif.id === id ? { ...notif, read: true } : notif)
       );
     } catch (error: any) {
@@ -146,6 +208,50 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user, setView }
       console.error('Error marking all notifications as read:', error);
       // Hiển thị error cho user
       alert('Không thể đánh dấu tất cả đã đọc: ' + (error?.message || 'Vui lòng thử lại'));
+    }
+  };
+
+  const handleTestNotification = async () => {
+    try {
+      const currentPermission = getNotificationPermission();
+
+      // If permission is denied, show alert
+      if (currentPermission === 'denied') {
+        alert('❌ Quyền thông báo đã bị từ chối.\n\nVui lòng:\n1. Mở Settings trình duyệt\n2. Tìm Notifications/Thông báo\n3. Cho phép thông báo cho trang này');
+        return;
+      }
+
+      // If permission is not granted, request it
+      if (currentPermission !== 'granted') {
+        console.log('🔔 Đang yêu cầu quyền thông báo...');
+        try {
+          const permission = await requestNotificationPermission();
+          if (permission !== 'granted') {
+            alert('⚠️ Bạn cần cấp quyền thông báo để nhận push notifications.\n\nVui lòng cho phép khi trình duyệt hỏi.');
+            return;
+          }
+        } catch (err) {
+          alert('❌ Lỗi khi yêu cầu quyền thông báo:\n' + (err as Error).message);
+          return;
+        }
+      }
+
+      // Send test notification
+      console.log('📨 Đang gửi test notification...');
+      await sendLocalNotification({
+        title: '🎉 Test Notification',
+        body: 'Chúc mừng! Push notifications đang hoạt động tốt. Bạn sẽ nhận được thông báo từ admin.',
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        url: '/employee/notifications',
+        tag: 'test-notification',
+        data: { type: 'success', test: true },
+      });
+
+      alert('✅ Đã gửi test notification!\n\nNếu bạn thấy thông báo hiện lên, nghĩa là push notifications đang hoạt động bình thường.');
+    } catch (error: any) {
+      console.error('❌ Lỗi test notification:', error);
+      alert('❌ Lỗi khi gửi test notification:\n' + (error?.message || 'Vui lòng thử lại'));
     }
   };
 
@@ -232,6 +338,12 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user, setView }
           )}
         </div>
         <div className="flex items-center space-x-3 flex-wrap gap-2">
+          <button
+            onClick={handleTestNotification}
+            className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-cyan-600 rounded-xl hover:from-blue-700 hover:to-cyan-700 transition-all shadow-md hover:shadow-lg"
+          >
+            🔔 Test Notification
+          </button>
           {unreadCount > 0 && (
             <button
               onClick={handleMarkAllAsRead}
@@ -271,68 +383,66 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user, setView }
           {notifications.map((notif) => {
             const hasAction = setView && getNotificationAction(notif) !== null;
             return (
-            <div
-              key={notif.id}
-              onClick={() => hasAction && handleNotificationClick(notif)}
-              className={`bg-white rounded-2xl shadow-sm border-2 p-4 transition-all ${
-                hasAction ? 'cursor-pointer hover:shadow-md' : ''
-              } ${
-                notif.read 
-                  ? 'border-slate-100 opacity-75' 
-                  : 'border-blue-200 bg-blue-50/30'
-              }`}
-            >
-              <div className="flex items-start space-x-3">
-                {/* Icon */}
-                <div className={`flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center ${getTypeColor(notif.type)}`}>
-                  {getTypeIcon(notif.type)}
-                </div>
-
-                {/* Content */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between mb-1">
-                    <div className="flex-1">
-                      <h3 className="text-sm font-bold text-slate-800 mb-1">{notif.title}</h3>
-                      <p className="text-xs text-slate-500 mb-2">{notif.message}</p>
-                    </div>
-                    {!notif.read && (
-                      <button
-                        onClick={() => handleMarkAsRead(notif.id)}
-                        className="flex-shrink-0 ml-2 text-xs font-medium text-blue-600 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors"
-                      >
-                        Đánh dấu đã đọc
-                      </button>
-                    )}
+              <div
+                key={notif.id}
+                onClick={() => hasAction && handleNotificationClick(notif)}
+                className={`bg-white rounded-2xl shadow-sm border-2 p-4 transition-all ${hasAction ? 'cursor-pointer hover:shadow-md' : ''
+                  } ${notif.read
+                    ? 'border-slate-100 opacity-75'
+                    : 'border-blue-200 bg-blue-50/30'
+                  }`}
+              >
+                <div className="flex items-start space-x-3">
+                  {/* Icon */}
+                  <div className={`flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center ${getTypeColor(notif.type)}`}>
+                    {getTypeIcon(notif.type)}
                   </div>
-                  
-                  <div className="flex items-center justify-between mt-2">
-                    <div className="flex items-center space-x-2">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${getTypeColor(notif.type)}`}>
-                        {getTypeLabel(notif.type)}
-                      </span>
+
+                  {/* Content */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between mb-1">
+                      <div className="flex-1">
+                        <h3 className="text-sm font-bold text-slate-800 mb-1">{notif.title}</h3>
+                        <p className="text-xs text-slate-500 mb-2">{notif.message}</p>
+                      </div>
                       {!notif.read && (
-                        <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
+                        <button
+                          onClick={() => handleMarkAsRead(notif.id)}
+                          className="flex-shrink-0 ml-2 text-xs font-medium text-blue-600 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors"
+                        >
+                          Đánh dấu đã đọc
+                        </button>
                       )}
                     </div>
-                    <span className="text-xs text-slate-400">
-                      {new Date(notif.timestamp).toLocaleString('vi-VN', {
-                        day: '2-digit',
-                        month: '2-digit',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
-                    </span>
+
+                    <div className="flex items-center justify-between mt-2">
+                      <div className="flex items-center space-x-2">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${getTypeColor(notif.type)}`}>
+                          {getTypeLabel(notif.type)}
+                        </span>
+                        {!notif.read && (
+                          <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
+                        )}
+                      </div>
+                      <span className="text-xs text-slate-400">
+                        {new Date(notif.timestamp).toLocaleString('vi-VN', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </span>
+                    </div>
                   </div>
                 </div>
+                {hasAction && (
+                  <div className="mt-2 pt-2 border-t border-slate-100">
+                    <span className="text-xs text-blue-600 font-medium">Nhấn để xem chi tiết →</span>
+                  </div>
+                )}
               </div>
-              {hasAction && (
-                <div className="mt-2 pt-2 border-t border-slate-100">
-                  <span className="text-xs text-blue-600 font-medium">Nhấn để xem chi tiết →</span>
-                </div>
-              )}
-            </div>
-          );
+            );
           })}
         </div>
       ) : null}

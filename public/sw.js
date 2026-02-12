@@ -145,10 +145,45 @@ if (typeof workbox !== 'undefined' && workbox) {
   console.error('Workbox could not be loaded');
 }
 
-// Lắng nghe message từ main thread (SKIP_WAITING)
+// Lắng nghe message từ main thread (SKIP_WAITING và SEND_NOTIFICATIONS)
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
+  }
+
+  // Handle notification broadcast from admin panel
+  if (event.data && event.data.type === 'SEND_NOTIFICATIONS') {
+    console.log('📨 [SW] Nhận yêu cầu gửi notifications từ admin:', event.data.notifications);
+
+    const notifications = event.data.notifications || [];
+
+    // Show notification for each employee
+    notifications.forEach(async (notifData) => {
+      try {
+        const options = {
+          body: notifData.body || notifData.message || 'Bạn có thông báo mới',
+          icon: notifData.icon || '/icon-192.png',
+          badge: notifData.badge || '/icon-192.png',
+          vibrate: notifData.vibrate || [200, 100, 200],
+          tag: notifData.tag || `notification-${Date.now()}`,
+          requireInteraction: notifData.requireInteraction || false,
+          silent: notifData.silent || false,
+          data: {
+            url: notifData.url || '/employee/notifications',
+            ...notifData.data,
+          },
+        };
+
+        await self.registration.showNotification(
+          notifData.title || 'Y99 HR',
+          options
+        );
+
+        console.log('✅ [SW] Đã gửi notification:', notifData.title);
+      } catch (error) {
+        console.error('❌ [SW] Lỗi khi gửi notification:', error);
+      }
+    });
   }
 });
 
@@ -157,7 +192,7 @@ self.addEventListener('message', (event) => {
 // Xử lý khi nhận được push notification (từ server hoặc local)
 self.addEventListener('push', (event) => {
   console.log('📨 [SW] Push event received');
-  
+
   let notificationData = {
     title: 'Y99 HR',
     body: 'Bạn có thông báo mới',
@@ -209,16 +244,16 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   console.log('👆 [SW] Notification clicked');
   console.log('👆 [SW] Notification data:', event.notification.data);
-  
+
   event.notification.close();
-  
+
   const urlToOpen = event.notification.data?.url || '/employee/notifications';
   console.log('🔗 [SW] URL to open:', urlToOpen);
-  
+
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       console.log('🪟 [SW] Found clients:', clientList.length);
-      
+
       // Kiểm tra xem có cửa sổ nào đang mở URL này không
       for (let i = 0; i < clientList.length; i++) {
         const client = clientList[i];
@@ -228,7 +263,7 @@ self.addEventListener('notificationclick', (event) => {
           return client.focus();
         }
       }
-      
+
       // Nếu không có cửa sổ nào mở, mở cửa sổ mới
       if (clients.openWindow) {
         console.log('🆕 [SW] Opening new window');

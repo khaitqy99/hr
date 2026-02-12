@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import type { Notification, User, Department } from '../../types';
 import { UserRole } from '../../types';
 import { getAllUsers, getAllNotifications, createNotification, deleteNotification, getDepartments } from '../../services/db';
+import { sendLocalNotification } from '../../services/push';
 
 interface NotificationsManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
@@ -57,8 +58,8 @@ const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onReg
         if (formData.departmentId) {
           // Send to all employees in selected department
           const selectedDept = departments.find(d => d.id === formData.departmentId);
-          employeesToNotify = employees.filter(e => 
-            e.role !== UserRole.ADMIN && 
+          employeesToNotify = employees.filter(e =>
+            e.role !== UserRole.ADMIN &&
             e.department === selectedDept?.name
           );
         } else {
@@ -73,8 +74,12 @@ const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onReg
         }
       }
 
+      console.log(`📋 [Admin] Danh sách nhân viên sẽ nhận thông báo:`, employeesToNotify.map(e => ({ id: e.id, name: e.name, email: e.email })));
+
       // Create notifications for all target employees
       for (const emp of employeesToNotify) {
+        console.log(`💾 [Admin] Đang tạo notification cho: ${emp.name} (${emp.email})`);
+
         const notification = await createNotification({
           userId: emp.id,
           title: formData.title.trim(),
@@ -84,6 +89,61 @@ const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onReg
           type: formData.type,
         });
         createdNotifications.push(notification);
+
+        console.log(`✅ [Admin] Đã lưu notification vào database:`, notification);
+      }
+
+      console.log(`✅ [Admin] Đã tạo ${createdNotifications.length} notifications trong database`);
+
+      // Broadcast push notifications to all employees
+      // This will trigger notifications on their devices even if the app is not open
+      console.log(`📨 Gửi push notification đến ${createdNotifications.length} nhân viên...`);
+
+      // Use BroadcastChannel to notify all open tabs/windows
+      try {
+        const channel = new BroadcastChannel('hr-notifications');
+        channel.postMessage({
+          type: 'NEW_NOTIFICATION',
+          notifications: createdNotifications,
+          payload: {
+            title: formData.title.trim(),
+            body: formData.message.trim(),
+            icon: '/icon-192.png',
+            badge: '/icon-192.png',
+            url: '/employee/notifications',
+            tag: `notification-${Date.now()}`,
+            data: { type: formData.type },
+          },
+        });
+        channel.close();
+        console.log('✅ Đã broadcast thông báo qua BroadcastChannel');
+      } catch (bcError) {
+        console.warn('⚠️ BroadcastChannel không khả dụng:', bcError);
+      }
+
+      // Also send via Service Worker for offline/background notifications
+      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        try {
+          navigator.serviceWorker.controller.postMessage({
+            type: 'SEND_NOTIFICATIONS',
+            notifications: createdNotifications.map(notif => ({
+              title: formData.title.trim(),
+              body: formData.message.trim(),
+              icon: '/icon-192.png',
+              badge: '/icon-192.png',
+              url: '/employee/notifications',
+              tag: `notification-${notif.id}`,
+              data: {
+                notificationId: notif.id,
+                userId: notif.userId,
+                type: formData.type,
+              },
+            })),
+          });
+          console.log('✅ Đã gửi thông báo đến Service Worker');
+        } catch (swError) {
+          console.warn('⚠️ Không thể gửi đến Service Worker:', swError);
+        }
       }
 
       loadData();
@@ -286,9 +346,8 @@ const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onReg
                       <p className="text-sm text-slate-700">{new Date(notif.timestamp).toLocaleString('vi-VN')}</p>
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`text-xs font-bold px-2 py-1 rounded-lg ${
-                        notif.read ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'
-                      }`}>
+                      <span className={`text-xs font-bold px-2 py-1 rounded-lg ${notif.read ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'
+                        }`}>
                         {notif.read ? 'Đã đọc' : 'Chưa đọc'}
                       </span>
                     </td>
