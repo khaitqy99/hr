@@ -594,7 +594,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                 </React.Fragment>
               ))}
             </colgroup>
-            <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
+            <thead className="bg-slate-50">
               <tr>
                 <th className="px-3 py-2 text-left text-xs font-bold text-slate-600 uppercase border-r border-b border-slate-300 first:border-l">
                   Nhân viên
