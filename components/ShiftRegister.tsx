@@ -54,7 +54,17 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (expandedDate && weekDaysRef.current && !weekDaysRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      
+      // Bỏ qua nếu click vào dropdown của CustomSelect (được render vào document.body)
+      if (target instanceof Element) {
+        const isCustomSelectDropdown = target.closest('[role="listbox"]') || target.closest('[role="option"]');
+        if (isCustomSelectDropdown) {
+          return;
+        }
+      }
+      
+      if (expandedDate && weekDaysRef.current && !weekDaysRef.current.contains(target)) {
         setExpandedDate(null);
         setEditingShiftId(null);
       }
