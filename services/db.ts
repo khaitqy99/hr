@@ -1,4 +1,4 @@
-import { User, UserRole, AttendanceRecord, LeaveRequest, Notification, RequestStatus, LeaveType, ShiftRegistration, PayrollRecord, ContractType, EmployeeStatus, AttendanceType, Department, Holiday, SystemConfig, OffType } from '../types';
+import { User, UserRole, AttendanceRecord, LeaveRequest, Notification, RequestStatus, LeaveType, ShiftRegistration, PayrollRecord, ContractType, EmployeeStatus, AttendanceType, Department, Holiday, SystemConfig, OffType, ShiftTime } from '../types';
 import { supabase } from './supabase';
 import { emitUserEvent, emitAttendanceEvent, emitShiftEvent, emitPayrollEvent, emitDepartmentEvent, emitHolidayEvent, emitConfigEvent, emitNotificationEvent } from './events';
 
@@ -569,8 +569,12 @@ export const deleteAttendance = async (id: string): Promise<void> => {
 };
 
 // Helper: Tính số ngày nghỉ từ leave requests trong tháng
+// Cải thiện: Loại bỏ trùng lặp với shift OFF để tránh trừ 2 lần
 export const calculateLeaveDays = async (userId: string, month: string): Promise<number> => {
-  const leaveRequests = await getLeaveRequests(userId);
+  const [leaveRequests, shiftRegistrations] = await Promise.all([
+    getLeaveRequests(userId),
+    getShiftRegistrations(userId)
+  ]);
 
   // Parse month format "MM-YYYY"
   const [monthStr, yearStr] = month.split('-');
@@ -581,7 +585,24 @@ export const calculateLeaveDays = async (userId: string, month: string): Promise
   const monthStart = new Date(targetYear, targetMonth - 1, 1).getTime();
   const monthEnd = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999).getTime();
 
-  let totalLeaveDays = 0;
+  // Tạo Set các ngày đã có shift OFF (không tính lễ) để tránh trừ 2 lần
+  const shiftOffDays = new Set<string>();
+  shiftRegistrations
+    .filter(shift => {
+      const shiftDate = new Date(shift.date);
+      return shift.status === RequestStatus.APPROVED &&
+             shiftDate.getMonth() + 1 === targetMonth &&
+             shiftDate.getFullYear() === targetYear &&
+             shift.shift === 'OFF' &&
+             shift.offType !== OffType.LE; // Không tính ngày lễ vì lễ được hưởng lương
+    })
+    .forEach(shift => {
+      const date = new Date(shift.date);
+      const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      shiftOffDays.add(dateKey);
+    });
+
+  const leaveDaysSet = new Set<string>();
 
   leaveRequests
     .filter(req => req.status === RequestStatus.APPROVED)
@@ -595,19 +616,32 @@ export const calculateLeaveDays = async (userId: string, month: string): Promise
         const overlapStart = Math.max(startDate, monthStart);
         const overlapEnd = Math.min(endDate, monthEnd);
 
-        // Count days (inclusive)
+        // Count days (inclusive) và thêm vào Set
         const days = Math.floor((overlapEnd - overlapStart) / (1000 * 60 * 60 * 24)) + 1;
-        totalLeaveDays += days;
+        for (let i = 0; i < days; i++) {
+          const dayTimestamp = overlapStart + i * 24 * 60 * 60 * 1000;
+          const date = new Date(dayTimestamp);
+          const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+          
+          // Chỉ thêm nếu ngày này chưa có shift OFF (tránh trùng lặp)
+          if (!shiftOffDays.has(dateKey)) {
+            leaveDaysSet.add(dateKey);
+          }
+        }
       }
     });
 
-  return totalLeaveDays;
+  return leaveDaysSet.size;
 };
 
 // Helper: Tính số ngày làm việc từ shift registrations trong tháng
 // Ngày đi làm (shift !== OFF) và ngày nghỉ lễ (OFF + LE) đều được tính công hưởng lương
+// Cải thiện: Tự động tính công cho ngày lễ trong hệ thống (không cần đăng ký ca)
 export const calculateShiftWorkDays = async (userId: string, month: string): Promise<number> => {
-  const shiftRegistrations = await getShiftRegistrations(userId);
+  const [shiftRegistrations, holidays] = await Promise.all([
+    getShiftRegistrations(userId),
+    getHolidays()
+  ]);
 
   // Parse month format "MM-YYYY"
   const [monthStr, yearStr] = month.split('-');
@@ -616,6 +650,7 @@ export const calculateShiftWorkDays = async (userId: string, month: string): Pro
 
   const shiftDays = new Set<string>();
 
+  // Đếm các ngày có shift đăng ký
   shiftRegistrations
     .filter(shift => {
       const shiftDate = new Date(shift.date);
@@ -633,7 +668,96 @@ export const calculateShiftWorkDays = async (userId: string, month: string): Pro
       shiftDays.add(dateKey);
     });
 
+  // Cải thiện: Tự động thêm các ngày lễ hưởng lương trong tháng (không cần đăng ký ca)
+  holidays
+    .filter(holiday => holiday.isPaid) // Chỉ tính ngày lễ hưởng lương
+    .forEach(holiday => {
+      const holidayDate = new Date(holiday.date);
+      
+      // Kiểm tra ngày lễ có trong tháng không
+      if (holiday.isRecurring) {
+        // Ngày lễ hàng năm (chỉ check tháng/ngày)
+        if (holidayDate.getMonth() + 1 === targetMonth) {
+          const dateKey = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(holidayDate.getDate()).padStart(2, '0')}`;
+          
+          // Kiểm tra xem ngày này có shift OFF không lương không
+          // Nếu có shift OFF không lương thì không tính công
+          const hasUnpaidOff = shiftRegistrations.some(shift => {
+            const shiftDate = new Date(shift.date);
+            const shiftDateKey = `${shiftDate.getFullYear()}-${String(shiftDate.getMonth() + 1).padStart(2, '0')}-${String(shiftDate.getDate()).padStart(2, '0')}`;
+            return shift.status === RequestStatus.APPROVED &&
+                   shiftDateKey === dateKey &&
+                   shift.shift === 'OFF' &&
+                   shift.offType !== OffType.LE;
+          });
+          
+          if (!hasUnpaidOff) {
+            shiftDays.add(dateKey);
+          }
+        }
+      } else {
+        // Ngày lễ cố định
+        if (holidayDate.getMonth() + 1 === targetMonth && holidayDate.getFullYear() === targetYear) {
+          const dateKey = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(holidayDate.getDate()).padStart(2, '0')}`;
+          
+          // Kiểm tra xem ngày này có shift OFF không lương không
+          const hasUnpaidOff = shiftRegistrations.some(shift => {
+            const shiftDate = new Date(shift.date);
+            const shiftDateKey = `${shiftDate.getFullYear()}-${String(shiftDate.getMonth() + 1).padStart(2, '0')}-${String(shiftDate.getDate()).padStart(2, '0')}`;
+            return shift.status === RequestStatus.APPROVED &&
+                   shiftDateKey === dateKey &&
+                   shift.shift === 'OFF' &&
+                   shift.offType !== OffType.LE;
+          });
+          
+          if (!hasUnpaidOff) {
+            shiftDays.add(dateKey);
+          }
+        }
+      }
+    });
+
   return shiftDays.size;
+};
+
+// Helper: Tính số giờ OT từ shift registrations trong tháng
+// OT = tổng số giờ làm việc vượt quá 9 tiếng/ca (chỉ tính ca CUSTOM)
+export const calculateShiftOTHours = async (userId: string, month: string): Promise<number> => {
+  const shiftRegistrations = await getShiftRegistrations(userId);
+
+  // Parse month format "MM-YYYY"
+  const [monthStr, yearStr] = month.split('-');
+  const targetMonth = parseInt(monthStr);
+  const targetYear = parseInt(yearStr);
+
+  let totalOT = 0;
+
+  shiftRegistrations
+    .filter(shift => {
+      const shiftDate = new Date(shift.date);
+      if (shift.status !== RequestStatus.APPROVED ||
+        shiftDate.getMonth() + 1 !== targetMonth ||
+        shiftDate.getFullYear() !== targetYear) {
+        return false;
+      }
+      // Chỉ tính OT cho ca CUSTOM có startTime và endTime
+      return shift.shift === ShiftTime.CUSTOM && shift.startTime && shift.endTime;
+    })
+    .forEach(shift => {
+      if (!shift.startTime || !shift.endTime) return;
+
+      // Tính số giờ của ca
+      const [startHour, startMin] = shift.startTime.split(':').map(Number);
+      const [endHour, endMin] = shift.endTime.split(':').map(Number);
+      const shiftHours = (endHour * 60 + endMin - startHour * 60 - startMin) / 60;
+
+      // Nếu ca > 9 tiếng thì phần thừa là OT
+      if (shiftHours > 9) {
+        totalOT += shiftHours - 9;
+      }
+    });
+
+  return parseFloat(totalOT.toFixed(1));
 };
 
 export const calculateAttendanceStats = async (userId: string, month: string): Promise<{ actualWorkDays: number; otHours: number }> => {
@@ -684,11 +808,18 @@ export const calculateAttendanceStats = async (userId: string, month: string): P
       const checkOutTime = dayRecords.checkOut.timestamp;
       const workHours = (checkOutTime - checkInTime) / (1000 * 60 * 60); // Convert to hours
 
-      // Calculate OT hours (hours beyond standard work hours + 1 hour break)
-      // Yêu cầu: Tính OT khi làm việc > 9 tiếng (8h làm + 1h nghỉ trưa)
+      // Cải thiện: Tính OT khi làm việc > 9 tiếng (8h làm + 1h nghỉ trưa)
+      // Hoặc khi có status OVERTIME từ check-out
       const workHoursWithBreak = standardWorkHours + 1;
       if (workHours > workHoursWithBreak) {
         totalOtHours += workHours - workHoursWithBreak;
+      } else if (dayRecords.checkOut.status === 'OVERTIME') {
+        // Nếu được đánh dấu OVERTIME nhưng chưa đủ 9 tiếng, vẫn tính là OT tối thiểu 0.5h
+        // (Trường hợp checkout muộn hơn shift nhưng chưa đủ 9 tiếng)
+        const minOT = 0.5;
+        if (totalOtHours === 0 || workHours > workHoursWithBreak - minOT) {
+          totalOtHours += Math.max(minOT, workHours - workHoursWithBreak);
+        }
       }
     }
   });
@@ -1254,18 +1385,33 @@ export const calculatePayroll = async (
     finalWorkDays = shiftWorkDays;
   }
 
-  // Nếu bật dùng chấm công: có thể lấy ngày công và giờ OT từ attendance (override hoặc bổ sung)
-  if (useAttendance && (actualWorkDays === undefined || otHours === undefined)) {
+  // Ưu tiên giờ OT từ đăng ký ca (shift) — không phụ thuộc check-in/check-out
+  if (useShift && otHours === undefined) {
+    const shiftOTHours = await calculateShiftOTHours(employee.id, month);
+    finalOtHours = shiftOTHours;
+  }
+
+  // Cải thiện: Nếu không có shift hoặc shift = 0, fallback sang attendance
+  // Điều này xử lý trường hợp nhân viên không đăng ký ca nhưng vẫn đi làm
+  if (useAttendance && (finalWorkDays === 0 || finalWorkDays === undefined || otHours === undefined)) {
     const attendanceStats = await calculateAttendanceStats(employee.id, month);
-    if (actualWorkDays === undefined) {
+    
+    // Nếu không có shift hoặc shift = 0, dùng attendance
+    if (finalWorkDays === 0 || finalWorkDays === undefined) {
       finalWorkDays = attendanceStats.actualWorkDays;
     }
+    
+    // Cộng thêm OT từ attendance (nếu có)
     if (otHours === undefined) {
       finalOtHours = attendanceStats.otHours;
+    } else if (attendanceStats.otHours > 0) {
+      // Lấy giá trị lớn hơn giữa shift OT và attendance OT
+      finalOtHours = Math.max(finalOtHours, attendanceStats.otHours);
     }
   }
 
   // Trừ ngày nghỉ từ leave requests nếu useLeave = true
+  // Lưu ý: calculateLeaveDays đã loại bỏ trùng lặp với shift OFF
   if (useLeave && finalWorkDays !== undefined) {
     const leaveDays = await calculateLeaveDays(employee.id, month);
     finalWorkDays = Math.max(0, finalWorkDays - leaveDays);

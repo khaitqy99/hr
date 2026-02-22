@@ -1,5 +1,5 @@
 import React, { useEffect, useState, lazy, Suspense, useMemo, useCallback } from 'react';
-import { User, AttendanceRecord, AttendanceType, ShiftRegistration, ShiftTime, OFF_TYPE_LABELS } from '../types';
+import { User, AttendanceRecord, AttendanceType, ShiftRegistration, ShiftTime, OFF_TYPE_LABELS, RequestStatus } from '../types';
 import { getAttendance, getShiftRegistrations, getNotifications } from '../services/db';
 import { supabase } from '../services/supabase';
 import { isSupabaseAvailable } from '../services/db';
@@ -18,6 +18,7 @@ interface DashboardProps {
 
 const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
+  const [shifts, setShifts] = useState<ShiftRegistration[]>([]);
   const [todayShift, setTodayShift] = useState<ShiftRegistration | null>(null);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -38,17 +39,18 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
       
       // Nếu mạng chậm, thêm error handling tốt hơn
       // Vẫn load parallel nhưng có fallback nếu một request fail
-      const [attendanceData, shifts, notifications] = await Promise.all(
+      const [attendanceData, shiftsData, notifications] = await Promise.all(
         requests.map(req => req.catch(() => []))
       );
       
       setAttendance(attendanceData || []);
+      setShifts(shiftsData || []);
       
       // Tìm ca đăng ký hôm nay
       const today = new Date();
       const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0).getTime();
       const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999).getTime();
-      const shift = shifts?.find(s => s.date >= todayStart && s.date <= todayEnd && s.status === 'APPROVED');
+      const shift = shiftsData?.find(s => s.date >= todayStart && s.date <= todayEnd && s.status === 'APPROVED');
       setTodayShift(shift || null);
       
       // Đếm thông báo chưa đọc
@@ -68,11 +70,26 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
   // Load data khi mount và khi tab trở lại visible (không polling)
   useEffect(() => {
     loadData();
+    
+    // Kiểm tra khi sang ngày mới để reload dữ liệu
+    let lastDate = new Date().getDate();
+    const dateCheckTimer = setInterval(() => {
+      const now = new Date();
+      if (now.getDate() !== lastDate) {
+        lastDate = now.getDate();
+        loadData();
+      }
+    }, 60000); // Kiểm tra mỗi phút
+    
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') loadData();
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      clearInterval(dateCheckTimer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [loadData]);
 
   // Supabase Realtime: cập nhật ngay khi attendance, shifts, notifications thay đổi
@@ -156,6 +173,40 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
     return parseFloat(totalHours.toFixed(1));
   }, [attendance]);
 
+  // Tính tổng giờ OT trong tuần dựa vào ca đăng ký (không dựa vào check-in/out)
+  const weekOTHours = useMemo(() => {
+    const now = new Date();
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - now.getDay() + 1); // Thứ 2
+    startOfWeek.setHours(0, 0, 0, 0);
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    endOfWeek.setHours(23, 59, 59, 999);
+
+    let totalOT = 0;
+
+    shifts.forEach(shift => {
+      // Chỉ tính ca APPROVED và CUSTOM (có startTime/endTime)
+      if (shift.status !== RequestStatus.APPROVED || shift.shift !== ShiftTime.CUSTOM) return;
+      if (!shift.startTime || !shift.endTime) return;
+      
+      // Kiểm tra ca có trong tuần này không
+      if (shift.date < startOfWeek.getTime() || shift.date > endOfWeek.getTime()) return;
+
+      // Tính số giờ của ca
+      const [startHour, startMin] = shift.startTime.split(':').map(Number);
+      const [endHour, endMin] = shift.endTime.split(':').map(Number);
+      const shiftHours = (endHour * 60 + endMin - startHour * 60 - startMin) / 60;
+
+      // Nếu ca > 9 tiếng thì phần thừa là OT
+      if (shiftHours > 9) {
+        totalOT += shiftHours - 9;
+      }
+    });
+
+    return parseFloat(totalOT.toFixed(1));
+  }, [shifts]);
+
   // Memoize tính tỷ lệ đúng giờ - tránh filter lại mỗi lần render
   const onTimeRate = useMemo(() => {
     if (attendance.length === 0) return 0;
@@ -186,6 +237,19 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
       checkOut: todayCheckOut ? new Date(todayCheckOut.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '--:--'
     };
   }, [attendance]);
+
+  // Tính OT hôm nay dựa vào ca đăng ký
+  const todayOTHours = useMemo(() => {
+    if (!todayShift || todayShift.shift !== ShiftTime.CUSTOM) return 0;
+    if (!todayShift.startTime || !todayShift.endTime) return 0;
+
+    const [startHour, startMin] = todayShift.startTime.split(':').map(Number);
+    const [endHour, endMin] = todayShift.endTime.split(':').map(Number);
+    const shiftHours = (endHour * 60 + endMin - startHour * 60 - startMin) / 60;
+
+    // Nếu ca > 9 tiếng thì phần thừa là OT
+    return shiftHours > 9 ? parseFloat((shiftHours - 9).toFixed(1)) : 0;
+  }, [todayShift]);
 
   // Show skeleton loader while loading
   if (isLoading && attendance.length === 0) {
@@ -283,6 +347,12 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
                     <p className="text-xs text-blue-100 mb-1">Giờ làm</p>
                     <p className="text-base sm:text-lg font-bold">{chartData[4]?.hours ?? 0}h</p>
                 </div>
+                {todayOTHours > 0 && (
+                  <div className="flex-1 bg-orange-500/20 rounded-2xl p-3 min-w-0 border border-orange-300/30">
+                      <p className="text-xs text-orange-100 mb-1">OT</p>
+                      <p className="text-base sm:text-lg font-bold text-white">{todayOTHours}h</p>
+                  </div>
+                )}
             </div>
           </div>
         </div>
@@ -384,6 +454,13 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
              </div>
              <p className="text-2xl font-bold text-slate-800">{onTimeRate}%</p>
              <p className="text-xs text-slate-400 font-medium">Đúng giờ</p>
+         </div>
+         <div className="bg-white p-4 rounded-3xl shadow-sm border border-sky-50">
+             <div className="w-10 h-10 rounded-full bg-orange-50 text-orange-600 flex items-center justify-center mb-2">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>
+             </div>
+             <p className="text-2xl font-bold text-slate-800">{weekOTHours}</p>
+             <p className="text-xs text-slate-400 font-medium">Giờ OT tuần này</p>
          </div>
       </div>
 

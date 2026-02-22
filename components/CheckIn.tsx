@@ -52,18 +52,34 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
 
   const loadAttendance = useCallback(async () => {
     const records = await getAttendance(user.id);
-    if (records.length > 0) setLastRecord(records[0]);
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
     const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
     const todayRecords = records.filter(r => r.timestamp >= todayStart && r.timestamp <= todayEnd);
+    
+    // Chỉ set lastRecord nếu có bản ghi hôm nay, nếu không thì set null
+    // Điều này đảm bảo khi sang ngày mới, nút sẽ reset về "Chấm công vào"
+    const lastTodayRecord = todayRecords.length > 0 ? todayRecords[0] : null;
+    setLastRecord(lastTodayRecord);
+    
     setTodayCheckIn(todayRecords.find(r => r.type === AttendanceType.CHECK_IN) ?? null);
     setTodayCheckOut(todayRecords.find(r => r.type === AttendanceType.CHECK_OUT) ?? null);
   }, [user.id]);
 
   useEffect(() => {
     // Cập nhật mỗi 30s thay vì 1s để giảm re-render, app mượt hơn khi dùng lâu
-    const timer = setInterval(() => setCurrentTime(new Date()), 30000);
+    let lastDate = new Date().getDate();
+    const timer = setInterval(() => {
+      const now = new Date();
+      setCurrentTime(now);
+      
+      // Kiểm tra nếu sang ngày mới, reload dữ liệu chấm công
+      if (now.getDate() !== lastDate) {
+        lastDate = now.getDate();
+        loadAttendance();
+      }
+    }, 30000);
+    
     loadAttendance();
 
     // Load office location từ config
