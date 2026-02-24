@@ -225,7 +225,7 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
         <div className="bg-white rounded-3xl shadow-sm border border-sky-50 overflow-hidden">
           <div className="p-4 border-b border-slate-50 bg-slate-50/50">
             <h3 className="text-sm font-bold text-slate-700">Chi tiết tính lương</h3>
-            <p className="text-xs text-slate-500 mt-1">Lương tính theo đăng ký ca (không theo check-in/check-out)</p>
+            <p className="text-xs text-slate-500 mt-1">Thông tin chi tiết về lương tháng này</p>
           </div>
           <div className="divide-y divide-slate-50">
             <div className="p-4 flex justify-between items-center bg-blue-50/30">
@@ -236,13 +236,13 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                   </svg>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 font-medium">Ngày công từ đăng ký ca (dùng tính lương)</p>
+                  <p className="text-xs text-slate-500 font-medium">Ngày công thực tế</p>
                   {setView && (
                     <button
                       onClick={() => setView('shifts')}
                       className="text-[10px] text-blue-600 hover:underline"
                     >
-                      Xem đăng ký ca →
+                      Xem chi tiết →
                     </button>
                   )}
                 </div>

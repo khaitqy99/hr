@@ -1375,6 +1375,11 @@ export const calculatePayroll = async (
     getConfigNumber('overtime_rate', 1.5),
     getConfigNumber('work_hours_per_day', 8)
   ]);
+  
+  // Validation: Đảm bảo các giá trị config hợp lệ
+  const validStandardWorkDays = standardWorkDays > 0 ? standardWorkDays : 27;
+  const validWorkHoursPerDay = workHoursPerDay > 0 ? workHoursPerDay : 8;
+  const validOvertimeRate = overtimeRate > 0 ? overtimeRate : 1.5;
 
   let finalWorkDays = actualWorkDays;
   let finalOtHours = otHours ?? 0;
@@ -1418,13 +1423,34 @@ export const calculatePayroll = async (
   }
 
   // Fallback to default if still undefined
-  finalWorkDays = finalWorkDays ?? standardWorkDays;
+  finalWorkDays = finalWorkDays ?? validStandardWorkDays;
   finalOtHours = finalOtHours ?? 0;
 
   // Lương theo ngày công: LCB/standardWorkDays * số ngày công thực tế
-  const workDaySalary = (baseSalary / standardWorkDays) * finalWorkDays;
+  const workDaySalary = (baseSalary / validStandardWorkDays) * finalWorkDays;
+  
   // Lương OT: (LCB/standardWorkDays/workHoursPerDay) * overtimeRate * số giờ làm thêm
-  const otPay = (baseSalary / standardWorkDays / workHoursPerDay) * overtimeRate * finalOtHours;
+  // Công thức: (LCB / 27 / 8) × 1.5 × số giờ OT
+  const hourlyRate = baseSalary / validStandardWorkDays / validWorkHoursPerDay;
+  const otHourlyRate = hourlyRate * validOvertimeRate;
+  const otPay = otHourlyRate * finalOtHours;
+  
+  // Debug logging để kiểm tra công thức
+  if (finalOtHours > 0) {
+    console.log('=== OT Calculation Debug ===');
+    console.log('Employee:', employee.name);
+    console.log('Base Salary:', baseSalary);
+    console.log('Standard Work Days:', validStandardWorkDays);
+    console.log('Work Hours Per Day:', validWorkHoursPerDay);
+    console.log('Overtime Rate:', validOvertimeRate);
+    console.log('OT Hours:', finalOtHours);
+    console.log('Hourly Rate:', hourlyRate);
+    console.log('OT Hourly Rate:', otHourlyRate);
+    console.log('OT Pay:', otPay);
+    console.log('Expected (manual calc):', (baseSalary / validStandardWorkDays / validWorkHoursPerDay) * validOvertimeRate * finalOtHours);
+    console.log('===========================');
+  }
+  
   // Công thức đúng: basicSalary (theo ngày công) + overtimePay + allowance + bonus - deductions
   const totalIncome = workDaySalary + otPay + allowance + bonus;
 
@@ -1446,7 +1472,7 @@ export const calculatePayroll = async (
     userId: employee.id,
     month,
     baseSalary: Math.round(baseSalary),
-    standardWorkDays,
+    standardWorkDays: validStandardWorkDays,
     actualWorkDays: finalWorkDays,
     otHours: finalOtHours,
     otPay: Math.round(otPay),
