@@ -637,62 +637,78 @@ export const calculateLeaveDays = async (userId: string, month: string): Promise
 
 // Helper: Tính số ngày làm việc từ shift registrations trong tháng
 // Quy tắc tính công:
-// ✅ Các ca làm việc (MORNING, AFTERNOON, NIGHT, CUSTOM): Được tính công
-// ✅ OFF_PN (Phép năm): Được hưởng lương, tính công
-// ✅ OFF_LE (Nghỉ lễ): Được hưởng lương, tính công
-// ❌ OFF_DK (Định kỳ): Không lương, không tính công
-// ❌ OFF_KL (Không lương): Không lương, không tính công
-// Cải thiện: Tự động tính công cho ngày lễ trong hệ thống (không cần đăng ký ca)
-export const calculateShiftWorkDays = async (userId: string, month: string): Promise<number> => {
-  const [shiftRegistrations, holidays] = await Promise.all([
-    getShiftRegistrations(userId),
-    getHolidays()
-  ]);
+// Helper: Tính số giờ giữa 2 thời điểm
+const calculateHoursBetween = (startTime: string, endTime: string): number => {
+  const [startHour, startMin] = startTime.split(':').map(Number);
+  const [endHour, endMin] = endTime.split(':').map(Number);
+  
+  const totalMinutes = (endHour * 60 + endMin) - (startHour * 60 + startMin);
+  return totalMinutes / 60;
+};
 
+// Helper: Tính tổng số giờ làm việc từ shift registrations
+// Trả về tổng số giờ (không bao gồm OT)
+const calculateTotalWorkHours = async (
+  userId: string,
+  month: string,
+  shiftRegistrations: ShiftRegistration[],
+  holidays: Holiday[]
+): Promise<number> => {
+  const workHoursPerDay = await getConfigNumber('work_hours_per_day', 8);
+  
   // Parse month format "MM-YYYY"
   const [monthStr, yearStr] = month.split('-');
   const targetMonth = parseInt(monthStr);
   const targetYear = parseInt(yearStr);
 
-  const shiftDays = new Set<string>();
+  let totalHours = 0;
+  const processedDates = new Set<string>(); // Tránh tính trùng ngày
 
-  // Đếm các ngày có shift đăng ký
+  // Tính giờ từ shift registrations
   shiftRegistrations
     .filter(shift => {
       const shiftDate = new Date(shift.date);
-      if (shift.status !== RequestStatus.APPROVED ||
-        shiftDate.getMonth() + 1 !== targetMonth ||
-        shiftDate.getFullYear() !== targetYear) {
-        return false;
-      }
-      // Đếm: ngày đi làm (shift !== OFF) HOẶC ngày nghỉ có lương (OFF_PN, OFF_LE)
-      // Không tính: OFF_DK (định kỳ), OFF_KL (không lương)
-      if (shift.shift !== 'OFF') {
-        return true; // Tất cả các ca làm việc đều được tính
-      }
-      // Với ca OFF, chỉ tính những loại nghỉ có lương
-      return shift.offType === OffType.OFF_PN || shift.offType === OffType.LE;
+      return shift.status === RequestStatus.APPROVED &&
+             shiftDate.getMonth() + 1 === targetMonth &&
+             shiftDate.getFullYear() === targetYear;
     })
     .forEach(shift => {
       const date = new Date(shift.date);
       const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-      shiftDays.add(dateKey);
+      
+      // Tránh tính trùng ngày
+      if (processedDates.has(dateKey)) return;
+      processedDates.add(dateKey);
+
+      if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
+        // Ca CUSTOM: Tính giờ từ startTime → endTime
+        const hours = calculateHoursBetween(shift.startTime, shift.endTime);
+        // Chỉ tính tối đa workHoursPerDay giờ (phần thừa là OT)
+        totalHours += Math.min(hours, workHoursPerDay);
+      } else if (shift.shift === 'OFF') {
+        // OFF có lương: Tính đủ workHoursPerDay giờ
+        if (shift.offType === OffType.OFF_PN || shift.offType === OffType.LE) {
+          totalHours += workHoursPerDay;
+        }
+        // OFF không lương: Không tính (OFF_DK, OFF_KL)
+      } else if (shift.shift !== 'OFF') {
+        // Các ca làm việc khác: Tính đủ workHoursPerDay giờ
+        totalHours += workHoursPerDay;
+      }
     });
 
-  // Cải thiện: Tự động thêm các ngày lễ hưởng lương trong tháng (không cần đăng ký ca)
+  // Tự động thêm giờ cho ngày lễ hưởng lương (không cần đăng ký ca)
   holidays
-    .filter(holiday => holiday.isPaid) // Chỉ tính ngày lễ hưởng lương
+    .filter(holiday => holiday.isPaid)
     .forEach(holiday => {
       const holidayDate = new Date(holiday.date);
       
-      // Kiểm tra ngày lễ có trong tháng không
       if (holiday.isRecurring) {
-        // Ngày lễ hàng năm (chỉ check tháng/ngày)
+        // Ngày lễ hàng năm
         if (holidayDate.getMonth() + 1 === targetMonth) {
           const dateKey = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(holidayDate.getDate()).padStart(2, '0')}`;
           
           // Kiểm tra xem ngày này có shift OFF không lương không
-          // Nếu có shift OFF_DK hoặc OFF_KL thì không tính công
           const hasUnpaidOff = shiftRegistrations.some(shift => {
             const shiftDate = new Date(shift.date);
             const shiftDateKey = `${shiftDate.getFullYear()}-${String(shiftDate.getMonth() + 1).padStart(2, '0')}-${String(shiftDate.getDate()).padStart(2, '0')}`;
@@ -702,8 +718,10 @@ export const calculateShiftWorkDays = async (userId: string, month: string): Pro
                    (shift.offType === OffType.OFF_DK || shift.offType === OffType.OFF_KL);
           });
           
-          if (!hasUnpaidOff) {
-            shiftDays.add(dateKey);
+          // Chỉ thêm nếu chưa xử lý và không có OFF không lương
+          if (!processedDates.has(dateKey) && !hasUnpaidOff) {
+            totalHours += workHoursPerDay;
+            processedDates.add(dateKey);
           }
         }
       } else {
@@ -711,7 +729,6 @@ export const calculateShiftWorkDays = async (userId: string, month: string): Pro
         if (holidayDate.getMonth() + 1 === targetMonth && holidayDate.getFullYear() === targetYear) {
           const dateKey = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(holidayDate.getDate()).padStart(2, '0')}`;
           
-          // Kiểm tra xem ngày này có shift OFF không lương không
           const hasUnpaidOff = shiftRegistrations.some(shift => {
             const shiftDate = new Date(shift.date);
             const shiftDateKey = `${shiftDate.getFullYear()}-${String(shiftDate.getMonth() + 1).padStart(2, '0')}-${String(shiftDate.getDate()).padStart(2, '0')}`;
@@ -721,14 +738,42 @@ export const calculateShiftWorkDays = async (userId: string, month: string): Pro
                    (shift.offType === OffType.OFF_DK || shift.offType === OffType.OFF_KL);
           });
           
-          if (!hasUnpaidOff) {
-            shiftDays.add(dateKey);
+          if (!processedDates.has(dateKey) && !hasUnpaidOff) {
+            totalHours += workHoursPerDay;
+            processedDates.add(dateKey);
           }
         }
       }
     });
 
-  return shiftDays.size;
+  return totalHours;
+};
+
+// ✅ Các ca làm việc (MORNING, AFTERNOON, NIGHT, CUSTOM): Được tính công
+// ✅ OFF_PN (Phép năm): Được hưởng lương, tính công
+// ✅ OFF_LE (Nghỉ lễ): Được hưởng lương, tính công
+// ❌ OFF_DK (Định kỳ): Không lương, không tính công
+// ❌ OFF_KL (Không lương): Không lương, không tính công
+// Cải thiện: Tự động tính công cho ngày lễ trong hệ thống (không cần đăng ký ca)
+// 
+// CẢI TIẾN MỚI: Tính công theo GIỜ thay vì theo NGÀY
+// - Công thức: Tổng giờ / Số giờ chuẩn mỗi ngày
+// - Ví dụ: 4 giờ / 8 = 0.5 công, 6 giờ / 8 = 0.75 công
+export const calculateShiftWorkDays = async (userId: string, month: string): Promise<number> => {
+  const [shiftRegistrations, holidays, workHoursPerDay] = await Promise.all([
+    getShiftRegistrations(userId),
+    getHolidays(),
+    getConfigNumber('work_hours_per_day', 8)
+  ]);
+
+  // Tính tổng số giờ làm việc
+  const totalHours = await calculateTotalWorkHours(userId, month, shiftRegistrations, holidays);
+  
+  // Chuyển giờ thành công: 4 giờ = 0.5 công, 8 giờ = 1 công
+  const workDays = totalHours / workHoursPerDay;
+  
+  // Làm tròn 2 chữ số thập phân
+  return parseFloat(workDays.toFixed(2));
 };
 
 // Helper: Tính số giờ OT từ shift registrations trong tháng

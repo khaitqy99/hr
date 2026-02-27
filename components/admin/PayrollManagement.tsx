@@ -15,6 +15,10 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isRecalculating, setIsRecalculating] = useState(false);
+  const [workHoursPerDay, setWorkHoursPerDay] = useState(8);
+  const [selectedPayrollDetail, setSelectedPayrollDetail] = useState<{ payroll: PayrollRecord; employee: User } | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [shiftDetails, setShiftDetails] = useState<ShiftRegistration[]>([]);
 
   useEffect(() => {
     const initData = async () => {
@@ -27,6 +31,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
         await loadData(currentMonth);
         const users = await getAllUsers();
         setEmployees(users);
+        // Load work hours per day config
+        const hours = await getConfigNumber('work_hours_per_day', 8);
+        setWorkHoursPerDay(hours);
       } catch (err: any) {
         setError('Không thể tải dữ liệu: ' + (err?.message || 'Vui lòng thử lại'));
         console.error('Error initializing data:', err);
@@ -142,6 +149,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
         'Họ Tên',
         'Bộ Phận',
         'Lương Tổng',
+        'Giờ làm việc',
         'Ngày công - Số ngày',
         'Ngày công - Lương',
         'Tăng ca bắt buộc x1.5 - Số giờ',
@@ -201,7 +209,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
           employee.name,
           employee.department || '',
           baseSalary.toLocaleString('vi-VN'),
-          payroll.actualWorkDays,
+          (payroll.actualWorkDays * workHoursPerDay).toFixed(1) + 'h',
+          payroll.actualWorkDays.toFixed(2),
           Math.round(workDaySalary).toLocaleString('vi-VN'),
           mandatoryOTHours.toFixed(1),
           Math.round(mandatoryOTSalary).toLocaleString('vi-VN'),
@@ -412,8 +421,305 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
     }
   };
 
+  const handleViewPayrollDetail = async (payroll: PayrollRecord, employee: User) => {
+    setSelectedPayrollDetail({ payroll, employee });
+    setDetailLoading(true);
+    try {
+      // Load shift details for the month
+      const shifts = await getShiftRegistrations(employee.id);
+      const [monthStr, yearStr] = selectedMonth.split('-');
+      const targetMonth = parseInt(monthStr);
+      const targetYear = parseInt(yearStr);
+      
+      const monthShifts = shifts.filter(shift => {
+        const shiftDate = new Date(shift.date);
+        return shiftDate.getMonth() + 1 === targetMonth && 
+               shiftDate.getFullYear() === targetYear;
+      });
+      
+      setShiftDetails(monthShifts);
+    } catch (err) {
+      console.error('Error loading shift details:', err);
+      setShiftDetails([]);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {/* Payroll Detail Modal */}
+      {selectedPayrollDetail && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-bold text-white">{selectedPayrollDetail.employee.name}</h3>
+                <p className="text-sm text-blue-100">Chi tiết lương tháng {selectedMonth}</p>
+              </div>
+              <button
+                onClick={() => setSelectedPayrollDetail(null)}
+                className="text-white hover:bg-white/20 rounded-lg p-2 transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {detailLoading ? (
+                <div className="text-center py-12">
+                  <p className="text-slate-400">Đang tải chi tiết...</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* LEFT COLUMN - Summary & Breakdown */}
+                  <div className="space-y-6">
+                    {/* Summary Cards */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-blue-50 rounded-xl p-4">
+                        <p className="text-xs font-bold text-blue-600 mb-1">Lương cơ bản</p>
+                        <p className="text-lg font-bold text-blue-700">{formatCurrency(selectedPayrollDetail.payroll.baseSalary)}</p>
+                      </div>
+                      <div className="bg-green-50 rounded-xl p-4">
+                        <p className="text-xs font-bold text-green-600 mb-1">Giờ làm việc</p>
+                        <p className="text-lg font-bold text-green-700">{(selectedPayrollDetail.payroll.actualWorkDays * workHoursPerDay).toFixed(1)}h</p>
+                        <p className="text-xs text-green-600">{selectedPayrollDetail.payroll.actualWorkDays.toFixed(2)} công</p>
+                      </div>
+                      <div className="bg-purple-50 rounded-xl p-4">
+                        <p className="text-xs font-bold text-purple-600 mb-1">Giờ OT</p>
+                        <p className="text-lg font-bold text-purple-700">{selectedPayrollDetail.payroll.otHours}h</p>
+                        <p className="text-xs text-purple-600">+{formatCurrency(selectedPayrollDetail.payroll.otPay)}</p>
+                      </div>
+                      <div className="bg-orange-50 rounded-xl p-4">
+                        <p className="text-xs font-bold text-orange-600 mb-1">Thực nhận</p>
+                        <p className="text-lg font-bold text-orange-700">{formatCurrency(selectedPayrollDetail.payroll.netSalary)}</p>
+                      </div>
+                    </div>
+
+                    {/* Salary Breakdown */}
+                    <div className="bg-slate-50 rounded-xl p-6 space-y-3">
+                      <h4 className="text-sm font-bold text-slate-700 mb-4">Chi tiết tính lương</h4>
+                      
+                      <div className="flex justify-between items-center py-2 border-b border-slate-200">
+                        <span className="text-sm text-slate-600">Lương theo ngày công</span>
+                        <span className="text-sm font-bold text-slate-800">
+                          {formatCurrency((selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays) * selectedPayrollDetail.payroll.actualWorkDays)}
+                        </span>
+                      </div>
+                      
+                      <div className="flex justify-between items-center py-2 border-b border-slate-200">
+                        <span className="text-sm text-slate-600">
+                          Công thức: (LCB / {selectedPayrollDetail.payroll.standardWorkDays}) × {selectedPayrollDetail.payroll.actualWorkDays.toFixed(2)}
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          = ({formatCurrency(selectedPayrollDetail.payroll.baseSalary)} / {selectedPayrollDetail.payroll.standardWorkDays}) × {selectedPayrollDetail.payroll.actualWorkDays.toFixed(2)}
+                        </span>
+                      </div>
+
+                    {selectedPayrollDetail.payroll.otHours > 0 && (
+                      <>
+                        <div className="flex justify-between items-center py-2 border-b border-slate-200">
+                          <span className="text-sm text-slate-600">Lương OT ({selectedPayrollDetail.payroll.otHours}h × 1.5)</span>
+                          <span className="text-sm font-bold text-green-600">+{formatCurrency(selectedPayrollDetail.payroll.otPay)}</span>
+                        </div>
+                        <div className="flex justify-between items-center py-2 border-b border-slate-200">
+                          <span className="text-sm text-slate-600">
+                            Công thức: (LCB / {selectedPayrollDetail.payroll.standardWorkDays} / {workHoursPerDay}) × 1.5 × {selectedPayrollDetail.payroll.otHours}
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            = {formatCurrency(selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays / workHoursPerDay)} × 1.5 × {selectedPayrollDetail.payroll.otHours}
+                          </span>
+                        </div>
+                      </>
+                    )}
+
+                    {selectedPayrollDetail.payroll.allowance > 0 && (
+                      <div className="flex justify-between items-center py-2 border-b border-slate-200">
+                        <span className="text-sm text-slate-600">Phụ cấp</span>
+                        <span className="text-sm font-bold text-green-600">+{formatCurrency(selectedPayrollDetail.payroll.allowance)}</span>
+                      </div>
+                    )}
+
+                    {selectedPayrollDetail.payroll.bonus > 0 && (
+                      <div className="flex justify-between items-center py-2 border-b border-slate-200">
+                        <span className="text-sm text-slate-600">Thưởng</span>
+                        <span className="text-sm font-bold text-green-600">+{formatCurrency(selectedPayrollDetail.payroll.bonus)}</span>
+                      </div>
+                    )}
+
+                    {selectedPayrollDetail.payroll.deductions > 0 && (
+                      <div className="flex justify-between items-center py-2 border-b border-slate-200">
+                        <span className="text-sm text-slate-600">Khấu trừ (BHXH, v.v.)</span>
+                        <span className="text-sm font-bold text-red-600">-{formatCurrency(selectedPayrollDetail.payroll.deductions)}</span>
+                      </div>
+                    )}
+
+                    <div className="flex justify-between items-center py-3 bg-blue-50 rounded-lg px-4 mt-4">
+                      <span className="text-base font-bold text-blue-700">Tổng thực nhận</span>
+                      <span className="text-xl font-bold text-blue-700">{formatCurrency(selectedPayrollDetail.payroll.netSalary)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* RIGHT COLUMN - Shift Details */}
+                <div>
+                  {shiftDetails.length > 0 && (
+                    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden h-full">
+                      <div className="bg-slate-50 px-6 py-3 border-b border-slate-200">
+                        <h4 className="text-sm font-bold text-slate-700">Chi tiết ca làm việc ({shiftDetails.length} ca)</h4>
+                      </div>
+                      <div className="max-h-[600px] overflow-y-auto">
+                        <table className="w-full">
+                          <thead className="bg-slate-50 sticky top-0">
+                            <tr>
+                              <th className="px-4 py-2 text-left text-xs font-bold text-slate-600 w-1/2 border-r border-slate-200">Ngày / Ca / Loại</th>
+                              <th className="px-4 py-2 text-right text-xs font-bold text-slate-600 w-1/2">Giờ / Tiền</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {(() => {
+                              let totalMoney = 0;
+                              const dailyRate = selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays;
+                              const hourlyRate = dailyRate / workHoursPerDay;
+                              
+                              const rows = shiftDetails
+                                .sort((a, b) => a.date - b.date)
+                                .map((shift, idx) => {
+                                  const date = new Date(shift.date);
+                                  const dateStr = `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}`;
+                                  
+                                  let shiftLabel = shift.shift;
+                                  let hours = workHoursPerDay;
+                                  let typeLabel = 'Làm việc';
+                                  let typeColor = 'text-green-600 bg-green-50';
+                                  let money = 0;
+
+                                  if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
+                                    shiftLabel = `${shift.startTime} - ${shift.endTime}`;
+                                    const [startHour, startMin] = shift.startTime.split(':').map(Number);
+                                    const [endHour, endMin] = shift.endTime.split(':').map(Number);
+                                    hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
+                                    const regularHours = Math.min(hours, workHoursPerDay);
+                                    money = hourlyRate * regularHours;
+                                  } else if (shift.shift === 'OFF') {
+                                    if (shift.offType === OffType.OFF_PN) {
+                                      typeLabel = 'Phép năm';
+                                      typeColor = 'text-blue-600 bg-blue-50';
+                                      money = dailyRate;
+                                    } else if (shift.offType === OffType.LE) {
+                                      typeLabel = 'Nghỉ lễ';
+                                      typeColor = 'text-purple-600 bg-purple-50';
+                                      money = dailyRate;
+                                    } else if (shift.offType === OffType.OFF_DK) {
+                                      typeLabel = 'OFF định kỳ';
+                                      typeColor = 'text-slate-600 bg-slate-50';
+                                      hours = 0;
+                                      money = 0;
+                                    } else if (shift.offType === OffType.OFF_KL) {
+                                      typeLabel = 'OFF không lương';
+                                      typeColor = 'text-red-600 bg-red-50';
+                                      hours = 0;
+                                      money = 0;
+                                    } else {
+                                      typeLabel = 'OFF';
+                                      typeColor = 'text-slate-600 bg-slate-50';
+                                      hours = 0;
+                                      money = 0;
+                                    }
+                                    shiftLabel = shift.offType || 'OFF';
+                                  } else {
+                                    money = dailyRate;
+                                  }
+
+                                  totalMoney += money;
+
+                                  return (
+                                    <tr key={idx} className="hover:bg-slate-50">
+                                      <td className="px-4 py-3 border-r border-slate-100">
+                                        <div className="space-y-1">
+                                          <p className="text-sm font-bold text-slate-700">{dateStr}</p>
+                                          <p className="text-xs text-slate-600">{shiftLabel}</p>
+                                          <span className={`inline-block text-xs font-bold px-2 py-0.5 rounded ${typeColor}`}>
+                                            {typeLabel}
+                                          </span>
+                                        </div>
+                                      </td>
+                                      <td className="px-4 py-3 text-right">
+                                        <div className="space-y-1">
+                                          <p className="text-sm font-bold text-slate-800">
+                                            {hours > 0 ? `${Math.min(hours, workHoursPerDay).toFixed(1)}h` : '-'}
+                                          </p>
+                                          <p className="text-base font-bold text-blue-600">
+                                            {money > 0 ? formatCurrency(Math.round(money)) : '-'}
+                                          </p>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                });
+
+                              // Add total row
+                              rows.push(
+                                <tr key="total" className="bg-gradient-to-r from-blue-50 to-blue-100 font-bold border-t-2 border-blue-200">
+                                  <td className="px-4 py-3 border-r border-blue-200">
+                                    <div className="space-y-1">
+                                      <p className="text-sm text-blue-700">Tổng cộng</p>
+                                      <p className="text-xs text-blue-600">{selectedPayrollDetail.payroll.actualWorkDays.toFixed(2)} công</p>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3 text-right">
+                                    <div className="space-y-1">
+                                      <p className="text-sm text-blue-700">
+                                        {(selectedPayrollDetail.payroll.actualWorkDays * workHoursPerDay).toFixed(1)}h
+                                      </p>
+                                      <p className="text-lg text-blue-700">
+                                        {formatCurrency(Math.round(totalMoney))}
+                                      </p>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+
+                              return rows;
+                            })()}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="border-t border-slate-200 px-6 py-4 bg-slate-50 flex justify-end gap-3">
+              <button
+                onClick={() => setSelectedPayrollDetail(null)}
+                className="px-4 py-2 bg-slate-200 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-300 transition-colors"
+              >
+                Đóng
+              </button>
+              {setView && (
+                <button
+                  onClick={() => {
+                    setSelectedPayrollDetail(null);
+                    setView('employee-profile', { employeeId: selectedPayrollDetail.employee.id });
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-colors"
+                >
+                  Xem hồ sơ nhân viên
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <select
@@ -474,6 +780,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                 <tr>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Nhân viên</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Lương cơ bản</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Giờ làm việc</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Ngày công</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">OT</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Phụ cấp</th>
@@ -490,15 +797,15 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                     <tr key={item.id} className="hover:bg-sky-50/50 transition-colors">
                       <td className="px-6 py-4">
                         <div>
-                          {employee && setView ? (
+                          {employee ? (
                             <button
-                              onClick={() => setView('employee-profile', { employeeId: employee.id })}
+                              onClick={() => handleViewPayrollDetail(item, employee)}
                               className="text-sm font-bold text-blue-600 hover:text-blue-700 hover:underline transition-colors text-left"
                             >
                               {employee.name}
                             </button>
                           ) : (
-                            <p className="text-sm font-bold text-slate-800">{employee?.name || item.userId}</p>
+                            <p className="text-sm font-bold text-slate-800">{item.userId}</p>
                           )}
                           <p className="text-xs text-slate-500">{employee?.department || ''}</p>
                         </div>
@@ -507,7 +814,11 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                         <p className="text-sm text-slate-700">{formatCurrency(item.baseSalary)}</p>
                       </td>
                       <td className="px-6 py-4">
-                        <p className="text-sm text-slate-700">{item.actualWorkDays}/{item.standardWorkDays}</p>
+                        <p className="text-sm text-slate-700">{(item.actualWorkDays * workHoursPerDay).toFixed(1)}h</p>
+                        <p className="text-xs text-slate-500">({item.actualWorkDays.toFixed(2)} công)</p>
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="text-sm text-slate-700">{item.actualWorkDays.toFixed(2)}/{item.standardWorkDays}</p>
                       </td>
                       <td className="px-6 py-4">
                         <p className="text-sm text-slate-700">{item.otHours}h</p>

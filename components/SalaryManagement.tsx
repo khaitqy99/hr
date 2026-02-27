@@ -264,7 +264,7 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
                           </div>
                           <div className="flex justify-between text-sm">
                             <span className="text-slate-600">Ngày công thực tế:</span>
-                            <span className="font-medium text-slate-700">{getCurrentMonthPayroll()!.actualWorkDays}/{getCurrentMonthPayroll()!.standardWorkDays}</span>
+                            <span className="font-medium text-slate-700">{getCurrentMonthPayroll()!.actualWorkDays.toFixed(2)}/{getCurrentMonthPayroll()!.standardWorkDays}</span>
                           </div>
                           {getCurrentMonthPayroll()!.otHours > 0 && (
                             <div className="flex justify-between text-sm">
@@ -333,13 +333,14 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
                           <label className="block text-xs font-bold text-slate-500 mb-1">
                             Ngày công thực tế
                             {useShiftData && shiftWorkDays !== null && (
-                              <span className="text-green-600 ml-2">(Từ đăng ký ca: {shiftWorkDays})</span>
+                              <span className="text-green-600 ml-2">(Từ đăng ký ca: {shiftWorkDays.toFixed(2)})</span>
                             )}
                           </label>
                           <input
                             type="number"
                             min={0}
                             max={31}
+                            step={0.01}
                             value={salaryForm.actualWorkDays}
                             onChange={(e) => {
                               const value = Number(e.target.value);
@@ -450,7 +451,7 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
                           >
                             <div>
                               <p className="text-sm font-bold text-slate-700">Tháng {record.month}</p>
-                              <p className="text-xs text-slate-500">{record.actualWorkDays} ngày công</p>
+                              <p className="text-xs text-slate-500">{record.actualWorkDays.toFixed(2)} ngày công</p>
                             </div>
                             <div className="text-right">
                               <p className="text-sm font-bold text-blue-600">{formatCurrency(record.netSalary)}</p>
