@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { User, PayrollRecord } from '../types';
-import { getPayroll, calculateLeaveDays, getShiftRegistrations } from '../services/db';
+import { User, PayrollRecord, ShiftRegistration, OffType } from '../types';
+import { getPayroll, calculateLeaveDays, getShiftRegistrations, getConfigNumber } from '../services/db';
 
 interface PayrollProps {
   user: User;
@@ -22,6 +22,10 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
     leaveDays: number;
     shiftDays: number;
   } | null>(null);
+  const [showDetailDropdown, setShowDetailDropdown] = useState(false);
+  const [shiftDetails, setShiftDetails] = useState<ShiftRegistration[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [workHoursPerDay, setWorkHoursPerDay] = useState(8);
 
   // Generate month options (current month and 5 previous months)
   const generateMonthOptions = () => {
@@ -38,6 +42,10 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
   useEffect(() => {
     const loadPayroll = async () => {
       setIsLoading(true);
+      // Reset detail dropdown when month changes
+      setShowDetailDropdown(false);
+      setShiftDetails([]);
+      
       try {
         // Load all records to get available months
         const allRecords = await getPayroll(user.id);
@@ -48,6 +56,10 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
           return bMonth - aMonth;
         });
         setAvailableMonths(months.length > 0 ? months : generateMonthOptions());
+
+        // Load work hours config
+        const hours = await getConfigNumber('work_hours_per_day', 8);
+        setWorkHoursPerDay(hours);
 
         // Load data for selected month
         const records = await getPayroll(user.id, selectedMonth);
@@ -100,6 +112,37 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
   const formatMonthDisplay = (month: string) => {
     const [m, y] = month.split('-');
     return `Tháng ${m}/${y}`;
+  };
+
+  const handleToggleDetail = async () => {
+    if (!data) return;
+    
+    // Toggle dropdown
+    const newState = !showDetailDropdown;
+    setShowDetailDropdown(newState);
+    
+    // Load shift details if opening and not already loaded
+    if (newState && shiftDetails.length === 0) {
+      setDetailLoading(true);
+      try {
+        const shifts = await getShiftRegistrations(user.id);
+        const [monthStr, yearStr] = selectedMonth.split('-');
+        const targetMonth = parseInt(monthStr);
+        const targetYear = parseInt(yearStr);
+        
+        const monthShifts = shifts.filter(shift => {
+          const shiftDate = new Date(shift.date);
+          return shiftDate.getMonth() + 1 === targetMonth && 
+                 shiftDate.getFullYear() === targetYear;
+        });
+        
+        setShiftDetails(monthShifts);
+      } catch (err) {
+        console.error('Error loading shift details:', err);
+      } finally {
+        setDetailLoading(false);
+      }
+    }
   };
 
   // Loading: giữ layout, không thay toàn bộ nội dung bằng "Đang tải..."
@@ -300,8 +343,24 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
 
       {/* Detailed List */}
       <div className="bg-white rounded-3xl shadow-sm border border-sky-50 overflow-hidden">
-          <div className="p-4 border-b border-slate-50 bg-slate-50/50">
+          <div className="p-4 border-b border-slate-50 bg-slate-50/50 flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-700">Chi tiết lương</h3>
+              <button
+                onClick={handleToggleDetail}
+                className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 transition-all"
+              >
+                {showDetailDropdown ? 'Thu gọn' : 'Xem chi tiết đầy đủ'}
+                <svg 
+                  xmlns="http://www.w3.org/2000/svg" 
+                  fill="none" 
+                  viewBox="0 0 24 24" 
+                  strokeWidth={2} 
+                  stroke="currentColor" 
+                  className={`w-4 h-4 transition-transform ${showDetailDropdown ? 'rotate-180' : ''}`}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                </svg>
+              </button>
           </div>
           <div className="divide-y divide-slate-50">
               <div className="p-4 flex justify-between items-center">
@@ -342,6 +401,214 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
               </div>
           </div>
       </div>
+
+      {/* Expandable Detail Section */}
+      {showDetailDropdown && (
+        <div className="space-y-4 animate-fadeIn">
+          {/* Summary Cards */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-2xl p-4 border border-blue-200">
+              <p className="text-xs font-bold text-blue-600 mb-1">Lương cơ bản</p>
+              <p className="text-lg font-bold text-blue-700">{formatCurrency(data.baseSalary)}</p>
+            </div>
+            <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-2xl p-4 border border-green-200">
+              <p className="text-xs font-bold text-green-600 mb-1">Giờ làm việc</p>
+              <p className="text-lg font-bold text-green-700">{(data.actualWorkDays * workHoursPerDay).toFixed(1)}h</p>
+              <p className="text-xs text-green-600">{data.actualWorkDays.toFixed(2)} công</p>
+            </div>
+            <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-2xl p-4 border border-purple-200">
+              <p className="text-xs font-bold text-purple-600 mb-1">Giờ OT</p>
+              <p className="text-lg font-bold text-purple-700">{data.otHours}h</p>
+              <p className="text-xs text-purple-600">+{formatCurrency(data.otPay)}</p>
+            </div>
+            <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-2xl p-4 border border-orange-200">
+              <p className="text-xs font-bold text-orange-600 mb-1">Khấu trừ</p>
+              <p className="text-lg font-bold text-orange-700">-{formatCurrency(data.deductions)}</p>
+            </div>
+          </div>
+
+          {/* Salary Breakdown */}
+          <div className="bg-white rounded-3xl border border-sky-100 overflow-hidden shadow-sm">
+            <div className="bg-gradient-to-r from-slate-50 to-sky-50 px-4 py-3 border-b border-sky-100">
+              <h4 className="text-sm font-bold text-slate-700">Chi tiết tính lương</h4>
+            </div>
+            <div className="divide-y divide-slate-100">
+              <div className="p-4 flex justify-between items-center">
+                <div>
+                  <p className="text-sm text-slate-600 font-medium">Lương theo ngày công</p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    ({formatCurrency(data.baseSalary)} / {data.standardWorkDays}) × {data.actualWorkDays.toFixed(2)}
+                  </p>
+                </div>
+                <p className="text-base font-bold text-slate-800">
+                  {formatCurrency((data.baseSalary / data.standardWorkDays) * data.actualWorkDays)}
+                </p>
+              </div>
+
+              {data.otHours > 0 && (
+                <div className="p-4 flex justify-between items-center bg-green-50/30">
+                  <div>
+                    <p className="text-sm text-slate-600 font-medium">Lương OT ({data.otHours}h × 1.5)</p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      ({formatCurrency(data.baseSalary / data.standardWorkDays / workHoursPerDay)} / giờ) × 1.5 × {data.otHours}
+                    </p>
+                  </div>
+                  <p className="text-base font-bold text-green-600">+{formatCurrency(data.otPay)}</p>
+                </div>
+              )}
+
+              {data.allowance > 0 && (
+                <div className="p-4 flex justify-between items-center">
+                  <p className="text-sm text-slate-600 font-medium">Phụ cấp</p>
+                  <p className="text-base font-bold text-green-600">+{formatCurrency(data.allowance)}</p>
+                </div>
+              )}
+
+              {data.bonus > 0 && (
+                <div className="p-4 flex justify-between items-center">
+                  <p className="text-sm text-slate-600 font-medium">Thưởng</p>
+                  <p className="text-base font-bold text-green-600">+{formatCurrency(data.bonus)}</p>
+                </div>
+              )}
+
+              {data.deductions > 0 && (
+                <div className="p-4 flex justify-between items-center bg-red-50/30">
+                  <p className="text-sm text-slate-600 font-medium">Khấu trừ (BHXH, v.v.)</p>
+                  <p className="text-base font-bold text-red-600">-{formatCurrency(data.deductions)}</p>
+                </div>
+              )}
+
+              <div className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50">
+                <div className="flex justify-between items-center">
+                  <p className="text-base font-bold text-slate-800">Tổng thực nhận</p>
+                  <p className="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-cyan-600">
+                    {formatCurrency(data.netSalary)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Shift Details */}
+          {detailLoading ? (
+            <div className="bg-white rounded-3xl border border-sky-100 p-8 text-center">
+              <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              <p className="text-sm text-slate-500">Đang tải chi tiết ca làm việc...</p>
+            </div>
+          ) : shiftDetails.length > 0 ? (
+            <div className="bg-white rounded-3xl border border-sky-100 overflow-hidden shadow-sm">
+              <div className="bg-gradient-to-r from-slate-50 to-sky-50 px-4 py-3 border-b border-sky-100">
+                <h4 className="text-sm font-bold text-slate-700">Chi tiết ca làm việc ({shiftDetails.length} ca)</h4>
+              </div>
+              <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+                {(() => {
+                  let totalMoney = 0;
+                  const dailyRate = data.baseSalary / data.standardWorkDays;
+                  const hourlyRate = dailyRate / workHoursPerDay;
+                  
+                  const rows = shiftDetails
+                    .sort((a, b) => a.date - b.date)
+                    .map((shift, idx) => {
+                      const date = new Date(shift.date);
+                      const dateStr = `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}`;
+                      
+                      let shiftLabel = shift.shift;
+                      let hours = workHoursPerDay;
+                      let typeLabel = 'Làm việc';
+                      let typeColor = 'text-green-600 bg-green-50';
+                      let money = 0;
+
+                      if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
+                        shiftLabel = `${shift.startTime} - ${shift.endTime}`;
+                        const [startHour, startMin] = shift.startTime.split(':').map(Number);
+                        const [endHour, endMin] = shift.endTime.split(':').map(Number);
+                        hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
+                        const regularHours = Math.min(hours, workHoursPerDay);
+                        money = hourlyRate * regularHours;
+                      } else if (shift.shift === 'OFF') {
+                        if (shift.offType === OffType.OFF_PN) {
+                          typeLabel = 'Phép năm';
+                          typeColor = 'text-blue-600 bg-blue-50';
+                          money = dailyRate;
+                        } else if (shift.offType === OffType.LE) {
+                          typeLabel = 'Nghỉ lễ';
+                          typeColor = 'text-purple-600 bg-purple-50';
+                          money = dailyRate;
+                        } else if (shift.offType === OffType.OFF_DK) {
+                          typeLabel = 'OFF định kỳ';
+                          typeColor = 'text-slate-600 bg-slate-50';
+                          hours = 0;
+                          money = 0;
+                        } else if (shift.offType === OffType.OFF_KL) {
+                          typeLabel = 'OFF không lương';
+                          typeColor = 'text-red-600 bg-red-50';
+                          hours = 0;
+                          money = 0;
+                        } else {
+                          typeLabel = 'OFF';
+                          typeColor = 'text-slate-600 bg-slate-50';
+                          hours = 0;
+                          money = 0;
+                        }
+                        shiftLabel = shift.offType || 'OFF';
+                      } else {
+                        money = dailyRate;
+                      }
+
+                      totalMoney += money;
+
+                      return (
+                        <div key={idx} className="p-4 hover:bg-slate-50 transition-colors">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <p className="text-sm font-bold text-slate-700">{dateStr}</p>
+                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${typeColor}`}>
+                                  {typeLabel}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-500 truncate">{shiftLabel}</p>
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                              <p className="text-sm font-bold text-slate-800">
+                                {hours > 0 ? `${Math.min(hours, workHoursPerDay).toFixed(1)}h` : '-'}
+                              </p>
+                              <p className="text-base font-bold text-blue-600">
+                                {money > 0 ? formatCurrency(Math.round(money)) : '-'}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    });
+
+                  // Add total
+                  rows.push(
+                    <div key="total" className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 border-t-2 border-blue-200">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-bold text-blue-700">Tổng cộng</p>
+                          <p className="text-xs text-blue-600">{data.actualWorkDays.toFixed(2)} công</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-bold text-blue-700">
+                            {(data.actualWorkDays * workHoursPerDay).toFixed(1)}h
+                          </p>
+                          <p className="text-lg font-bold text-blue-700">
+                            {formatCurrency(Math.round(totalMoney))}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+
+                  return rows;
+                })()}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 };
