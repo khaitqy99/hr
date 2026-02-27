@@ -108,20 +108,20 @@ export enum ShiftTime {
 
 // Các loại nghỉ và trạng thái
 export enum OffType {
-  OFF_DK = 'OFF_DK',    // Định kỳ
-  OFF_PN = 'OFF_PN',    // Phép năm
+  OFF_DK = 'OFF_DK',    // Định kỳ - Không lương
+  OFF_PN = 'OFF_PN',    // Phép năm - Có lương
   OFF_KL = 'OFF_KL',    // Không lương
-  CT = 'CT',            // Công tác
-  LE = 'LE'             // Nghỉ lễ
+  CT = 'CT',            // Công tác - Có lương
+  LE = 'LE'             // Nghỉ lễ - Có lương
 }
 
 // Nhãn hiển thị cho các loại off
 export const OFF_TYPE_LABELS: Record<OffType, string> = {
-  [OffType.OFF_DK]: 'OFF DK - Định kỳ',
-  [OffType.OFF_PN]: 'OFF PN - Phép năm',
+  [OffType.OFF_DK]: 'OFF DK - Định kỳ (Không lương)',
+  [OffType.OFF_PN]: 'OFF PN - Phép năm (Có lương)',
   [OffType.OFF_KL]: 'OFF KL - Không lương',
-  [OffType.CT]: 'CT - Công tác',
-  [OffType.LE]: 'LỄ - Nghỉ lễ'
+  [OffType.CT]: 'CT - Công tác (Có lương)',
+  [OffType.LE]: 'LỄ - Nghỉ lễ (Có lương)'
 }
 
 export interface ShiftRegistration {

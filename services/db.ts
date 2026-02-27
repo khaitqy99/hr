@@ -585,7 +585,9 @@ export const calculateLeaveDays = async (userId: string, month: string): Promise
   const monthStart = new Date(targetYear, targetMonth - 1, 1).getTime();
   const monthEnd = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999).getTime();
 
-  // Tạo Set các ngày đã có shift OFF (không tính lễ) để tránh trừ 2 lần
+  // Tạo Set các ngày đã có shift OFF để tránh trừ 2 lần
+  // Lưu ý: Chỉ tính các ngày OFF không lương (OFF_DK, OFF_KL)
+  // Các ngày OFF có lương (OFF_PN, OFF_LE) đã được tính công ở calculateShiftWorkDays
   const shiftOffDays = new Set<string>();
   shiftRegistrations
     .filter(shift => {
@@ -593,8 +595,7 @@ export const calculateLeaveDays = async (userId: string, month: string): Promise
       return shift.status === RequestStatus.APPROVED &&
              shiftDate.getMonth() + 1 === targetMonth &&
              shiftDate.getFullYear() === targetYear &&
-             shift.shift === 'OFF' &&
-             shift.offType !== OffType.LE; // Không tính ngày lễ vì lễ được hưởng lương
+             shift.shift === 'OFF';
     })
     .forEach(shift => {
       const date = new Date(shift.date);
@@ -635,7 +636,12 @@ export const calculateLeaveDays = async (userId: string, month: string): Promise
 };
 
 // Helper: Tính số ngày làm việc từ shift registrations trong tháng
-// Ngày đi làm (shift !== OFF) và ngày nghỉ lễ (OFF + LE) đều được tính công hưởng lương
+// Quy tắc tính công:
+// ✅ Các ca làm việc (MORNING, AFTERNOON, NIGHT, CUSTOM): Được tính công
+// ✅ OFF_PN (Phép năm): Được hưởng lương, tính công
+// ✅ OFF_LE (Nghỉ lễ): Được hưởng lương, tính công
+// ❌ OFF_DK (Định kỳ): Không lương, không tính công
+// ❌ OFF_KL (Không lương): Không lương, không tính công
 // Cải thiện: Tự động tính công cho ngày lễ trong hệ thống (không cần đăng ký ca)
 export const calculateShiftWorkDays = async (userId: string, month: string): Promise<number> => {
   const [shiftRegistrations, holidays] = await Promise.all([
@@ -659,8 +665,13 @@ export const calculateShiftWorkDays = async (userId: string, month: string): Pro
         shiftDate.getFullYear() !== targetYear) {
         return false;
       }
-      // Đếm: ngày đi làm (shift !== OFF) HOẶC ngày nghỉ lễ (OFF + LE) hưởng lương
-      return shift.shift !== 'OFF' || shift.offType === OffType.LE;
+      // Đếm: ngày đi làm (shift !== OFF) HOẶC ngày nghỉ có lương (OFF_PN, OFF_LE)
+      // Không tính: OFF_DK (định kỳ), OFF_KL (không lương)
+      if (shift.shift !== 'OFF') {
+        return true; // Tất cả các ca làm việc đều được tính
+      }
+      // Với ca OFF, chỉ tính những loại nghỉ có lương
+      return shift.offType === OffType.OFF_PN || shift.offType === OffType.LE;
     })
     .forEach(shift => {
       const date = new Date(shift.date);
@@ -681,14 +692,14 @@ export const calculateShiftWorkDays = async (userId: string, month: string): Pro
           const dateKey = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(holidayDate.getDate()).padStart(2, '0')}`;
           
           // Kiểm tra xem ngày này có shift OFF không lương không
-          // Nếu có shift OFF không lương thì không tính công
+          // Nếu có shift OFF_DK hoặc OFF_KL thì không tính công
           const hasUnpaidOff = shiftRegistrations.some(shift => {
             const shiftDate = new Date(shift.date);
             const shiftDateKey = `${shiftDate.getFullYear()}-${String(shiftDate.getMonth() + 1).padStart(2, '0')}-${String(shiftDate.getDate()).padStart(2, '0')}`;
             return shift.status === RequestStatus.APPROVED &&
                    shiftDateKey === dateKey &&
                    shift.shift === 'OFF' &&
-                   shift.offType !== OffType.LE;
+                   (shift.offType === OffType.OFF_DK || shift.offType === OffType.OFF_KL);
           });
           
           if (!hasUnpaidOff) {
@@ -707,7 +718,7 @@ export const calculateShiftWorkDays = async (userId: string, month: string): Pro
             return shift.status === RequestStatus.APPROVED &&
                    shiftDateKey === dateKey &&
                    shift.shift === 'OFF' &&
-                   shift.offType !== OffType.LE;
+                   (shift.offType === OffType.OFF_DK || shift.offType === OffType.OFF_KL);
           });
           
           if (!hasUnpaidOff) {
