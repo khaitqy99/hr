@@ -1512,13 +1512,16 @@ export const calculatePayroll = async (
   // Công thức đúng: basicSalary (theo ngày công) + overtimePay + allowance + bonus - deductions
   const totalIncome = workDaySalary + otPay + allowance + bonus;
 
-  // Tính khấu trừ: Nếu có customDeductions (nhập tay) thì dùng, ngược lại tính theo tỷ lệ
+  // Tính khấu trừ: Chỉ nhân viên chính thức mới có khấu trừ BHXH
   let deductions = 0;
   if (customDeductions !== undefined && customDeductions !== null) {
+    // Nếu có nhập tay thì dùng giá trị nhập tay
     deductions = customDeductions;
-  } else {
-    deductions = socialInsuranceAmount; // BHXH cố định theo config
+  } else if (employee.contractType === ContractType.OFFICIAL) {
+    // Chỉ nhân viên chính thức mới tự động khấu trừ BHXH
+    deductions = socialInsuranceAmount;
   }
+  // Nhân viên học việc (TRIAL) không có khấu trừ, deductions = 0
 
   const netSalary = totalIncome - deductions;
 
