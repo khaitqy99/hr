@@ -42,7 +42,6 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
   useEffect(() => {
     const loadPayroll = async () => {
       setIsLoading(true);
-      // Reset detail dropdown when month changes
       setShowDetailDropdown(false);
       setShiftDetails([]);
       
@@ -117,11 +116,9 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
   const handleToggleDetail = async () => {
     if (!data) return;
     
-    // Toggle dropdown
     const newState = !showDetailDropdown;
     setShowDetailDropdown(newState);
     
-    // Load shift details if opening and not already loaded
     if (newState && shiftDetails.length === 0) {
       setDetailLoading(true);
       try {
@@ -207,12 +204,6 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
   // Sử dụng giá trị đã tính lại nếu có sự khác biệt (fix lỗi tính toán)
   const displayNetSalary = Math.abs(calculatedNetSalary - data.netSalary) > 100 ? calculatedNetSalary : data.netSalary;
 
-  const chartData = [
-    { name: 'Lương cơ bản', value: basicSalary, color: '#3b82f6' },
-    { name: 'OT & Thưởng', value: data.otPay + data.bonus + data.allowance, color: '#06b6d4' },
-    { name: 'Khấu trừ', value: data.deductions, color: '#ef4444' },
-  ];
-
   return (
     <div className="space-y-6 fade-up">
       {/* Header Selector */}
@@ -248,93 +239,21 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
          <div className="absolute bottom-0 right-0 w-32 h-32 bg-cyan-500 opacity-10 rounded-full blur-3xl -mr-10 -mb-10"></div>
       </div>
 
-      {/* Summary */}
-      <div className="grid grid-cols-5 gap-4">
-         <div className="col-span-5 bg-white rounded-3xl p-4 shadow-sm border border-sky-50 flex flex-col justify-center space-y-2">
-            {chartData.map((item, idx) => (
-                <div key={idx} className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                        <div className="w-2 h-2 rounded-full" style={{backgroundColor: item.color}}></div>
-                        <span className="text-xs text-slate-500 font-medium">{item.name}</span>
-                    </div>
-                    <span className="text-xs font-bold text-slate-800">{(item.value / totalIncome * 100).toFixed(0)}%</span>
-                </div>
-            ))}
-         </div>
-      </div>
 
-      {/* Payroll Calculation Details */}
+
+      {/* Payroll Calculation Details - Simplified */}
       {payrollDetails && (
         <div className="bg-white rounded-3xl shadow-sm border border-sky-50 overflow-hidden">
           <div className="p-4 border-b border-slate-50 bg-slate-50/50">
-            <h3 className="text-sm font-bold text-slate-700">Chi tiết tính lương</h3>
-            <p className="text-xs text-slate-500 mt-1">Thông tin chi tiết về lương tháng này</p>
+            <h3 className="text-sm font-bold text-slate-700">Thông tin công</h3>
           </div>
           <div className="divide-y divide-slate-50">
-            <div className="p-4 flex justify-between items-center bg-blue-50/30">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-                  </svg>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500 font-medium">Ngày công thực tế</p>
-                  {setView && (
-                    <button
-                      onClick={() => setView('shifts')}
-                      className="text-[10px] text-blue-600 hover:underline"
-                    >
-                      Xem chi tiết →
-                    </button>
-                  )}
-                </div>
-              </div>
+            <div className="p-4 flex justify-between items-center">
+              <p className="text-xs text-slate-500 font-medium">Ngày công thực tế</p>
               <p className="text-sm font-bold text-slate-800">{Math.round(data.actualWorkDays * 2) / 2} ngày</p>
             </div>
             <div className="p-4 flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-                  </svg>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500 font-medium">Ngày nghỉ từ đơn nghỉ phép (đã trừ)</p>
-                </div>
-              </div>
-              <p className="text-sm font-bold text-red-600">-{payrollDetails.leaveDays} ngày</p>
-            </div>
-            <div className="p-4 flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-                  </svg>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500 font-medium">Tổng ca đã đăng ký (đã duyệt, không OFF)</p>
-                  {setView && (
-                    <button
-                      onClick={() => setView('shifts')}
-                      className="text-[10px] text-blue-600 hover:underline"
-                    >
-                      Xem chi tiết →
-                    </button>
-                  )}
-                </div>
-              </div>
-              <p className="text-sm font-bold text-slate-800">{payrollDetails.shiftDays} ngày</p>
-            </div>
-            <div className="p-4 flex justify-between items-center bg-green-50/30">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-green-50 text-green-600 flex items-center justify-center">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <p className="text-xs text-slate-500 font-medium">Giờ làm thêm (OT)</p>
-              </div>
+              <p className="text-xs text-slate-500 font-medium">Giờ làm thêm (OT)</p>
               <p className="text-sm font-bold text-green-600">+{data.otHours}h</p>
             </div>
           </div>
@@ -349,7 +268,7 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                 onClick={handleToggleDetail}
                 className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 transition-all"
               >
-                {showDetailDropdown ? 'Thu gọn' : 'Xem chi tiết đầy đủ'}
+                {showDetailDropdown ? 'Thu gọn' : 'Xem chi tiết ngày'}
                 <svg 
                   xmlns="http://www.w3.org/2000/svg" 
                   fill="none" 
@@ -366,35 +285,37 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
               <div className="p-4 flex justify-between items-center">
                   <div>
                       <p className="text-xs text-slate-500 font-medium">Lương cơ bản</p>
-                      <p className="text-[10px] text-slate-400">Ngày công chuẩn: {data.standardWorkDays}</p>
+                      <p className="text-[10px] text-slate-400">Công thực tế: {Math.round(data.actualWorkDays * 2) / 2}/{data.standardWorkDays}</p>
                   </div>
-                  <div className="text-right">
-                      <p className="text-sm font-bold text-slate-800">{formatCurrency(basicSalary)}</p>
-                      <p className="text-[10px] text-blue-500 font-medium">Công thực tế: {Math.round(data.actualWorkDays * 2) / 2}/{data.standardWorkDays}</p>
-                  </div>
+                  <p className="text-sm font-bold text-slate-800">{formatCurrency(basicSalary)}</p>
               </div>
-              <div className="p-4 flex justify-between items-center">
-                  <div>
-                      <p className="text-xs text-slate-500 font-medium">Làm thêm giờ (OT)</p>
-                      <p className="text-[10px] text-slate-400">{data.otHours} giờ</p>
-                  </div>
-                  <p className="text-sm font-bold text-green-600">+{formatCurrency(data.otPay)}</p>
-              </div>
-              <div className="p-4 flex justify-between items-center">
-                  <p className="text-xs text-slate-500 font-medium">Phụ cấp & Ăn trưa</p>
-                  <p className="text-sm font-bold text-green-600">+{formatCurrency(data.allowance)}</p>
-              </div>
-              <div className="p-4 flex justify-between items-center">
-                  <p className="text-xs text-slate-500 font-medium">Thưởng hiệu suất</p>
-                  <p className="text-sm font-bold text-green-600">+{formatCurrency(data.bonus)}</p>
-              </div>
-              <div className="p-4 flex justify-between items-center bg-red-50/30">
-                  <div>
-                      <p className="text-xs text-slate-500 font-medium">Khấu trừ (BHXH/Thuế)</p>
-                      <p className="text-[10px] text-slate-400">10.5% lương</p>
-                  </div>
-                  <p className="text-sm font-bold text-red-500">-{formatCurrency(data.deductions)}</p>
-              </div>
+              {data.otPay > 0 && (
+                <div className="p-4 flex justify-between items-center">
+                    <div>
+                        <p className="text-xs text-slate-500 font-medium">Làm thêm giờ (OT)</p>
+                        <p className="text-[10px] text-slate-400">{data.otHours} giờ</p>
+                    </div>
+                    <p className="text-sm font-bold text-green-600">+{formatCurrency(data.otPay)}</p>
+                </div>
+              )}
+              {data.allowance > 0 && (
+                <div className="p-4 flex justify-between items-center">
+                    <p className="text-xs text-slate-500 font-medium">Phụ cấp & Ăn trưa</p>
+                    <p className="text-sm font-bold text-green-600">+{formatCurrency(data.allowance)}</p>
+                </div>
+              )}
+              {data.bonus > 0 && (
+                <div className="p-4 flex justify-between items-center">
+                    <p className="text-xs text-slate-500 font-medium">Thưởng hiệu suất</p>
+                    <p className="text-sm font-bold text-green-600">+{formatCurrency(data.bonus)}</p>
+                </div>
+              )}
+              {data.deductions > 0 && (
+                <div className="p-4 flex justify-between items-center bg-red-50/30">
+                    <p className="text-xs text-slate-500 font-medium">Khấu trừ (BHXH/Thuế)</p>
+                    <p className="text-sm font-bold text-red-500">-{formatCurrency(data.deductions)}</p>
+                </div>
+              )}
               <div className="p-4 flex justify-between items-center bg-blue-50/30">
                   <p className="text-sm font-bold text-slate-800 uppercase">Tổng nhận</p>
                   <p className="text-lg font-extrabold text-blue-600">{formatCurrency(displayNetSalary)}</p>
@@ -402,94 +323,9 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
           </div>
       </div>
 
-      {/* Expandable Detail Section */}
+      {/* Chi tiết các ngày làm việc */}
       {showDetailDropdown && (
         <div className="space-y-4 animate-fadeIn">
-          {/* Summary Cards */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-2xl p-4 border border-blue-200">
-              <p className="text-xs font-bold text-blue-600 mb-1">Lương cơ bản</p>
-              <p className="text-lg font-bold text-blue-700">{formatCurrency(data.baseSalary)}</p>
-            </div>
-            <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-2xl p-4 border border-green-200">
-              <p className="text-xs font-bold text-green-600 mb-1">Giờ làm việc</p>
-              <p className="text-lg font-bold text-green-700">{(data.actualWorkDays * workHoursPerDay).toFixed(1)}h</p>
-              <p className="text-xs text-green-600">{Math.round(data.actualWorkDays * 2) / 2} công</p>
-            </div>
-            <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-2xl p-4 border border-purple-200">
-              <p className="text-xs font-bold text-purple-600 mb-1">Giờ OT</p>
-              <p className="text-lg font-bold text-purple-700">{data.otHours}h</p>
-              <p className="text-xs text-purple-600">+{formatCurrency(data.otPay)}</p>
-            </div>
-            <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-2xl p-4 border border-orange-200">
-              <p className="text-xs font-bold text-orange-600 mb-1">Khấu trừ</p>
-              <p className="text-lg font-bold text-orange-700">-{formatCurrency(data.deductions)}</p>
-            </div>
-          </div>
-
-          {/* Salary Breakdown */}
-          <div className="bg-white rounded-3xl border border-sky-100 overflow-hidden shadow-sm">
-            <div className="bg-gradient-to-r from-slate-50 to-sky-50 px-4 py-3 border-b border-sky-100">
-              <h4 className="text-sm font-bold text-slate-700">Chi tiết tính lương</h4>
-            </div>
-            <div className="divide-y divide-slate-100">
-              <div className="p-4 flex justify-between items-center">
-                <div>
-                  <p className="text-sm text-slate-600 font-medium">Lương theo ngày công</p>
-                  <p className="text-xs text-slate-400 mt-1">
-                    ({formatCurrency(data.baseSalary)} / {data.standardWorkDays}) × {Math.round(data.actualWorkDays * 2) / 2}
-                  </p>
-                </div>
-                <p className="text-base font-bold text-slate-800">
-                  {formatCurrency((data.baseSalary / data.standardWorkDays) * data.actualWorkDays)}
-                </p>
-              </div>
-
-              {data.otHours > 0 && (
-                <div className="p-4 flex justify-between items-center bg-green-50/30">
-                  <div>
-                    <p className="text-sm text-slate-600 font-medium">Lương OT ({data.otHours}h × 1.5)</p>
-                    <p className="text-xs text-slate-400 mt-1">
-                      ({formatCurrency(data.baseSalary / data.standardWorkDays / workHoursPerDay)} / giờ) × 1.5 × {data.otHours}
-                    </p>
-                  </div>
-                  <p className="text-base font-bold text-green-600">+{formatCurrency(data.otPay)}</p>
-                </div>
-              )}
-
-              {data.allowance > 0 && (
-                <div className="p-4 flex justify-between items-center">
-                  <p className="text-sm text-slate-600 font-medium">Phụ cấp</p>
-                  <p className="text-base font-bold text-green-600">+{formatCurrency(data.allowance)}</p>
-                </div>
-              )}
-
-              {data.bonus > 0 && (
-                <div className="p-4 flex justify-between items-center">
-                  <p className="text-sm text-slate-600 font-medium">Thưởng</p>
-                  <p className="text-base font-bold text-green-600">+{formatCurrency(data.bonus)}</p>
-                </div>
-              )}
-
-              {data.deductions > 0 && (
-                <div className="p-4 flex justify-between items-center bg-red-50/30">
-                  <p className="text-sm text-slate-600 font-medium">Khấu trừ (BHXH, v.v.)</p>
-                  <p className="text-base font-bold text-red-600">-{formatCurrency(data.deductions)}</p>
-                </div>
-              )}
-
-              <div className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50">
-                <div className="flex justify-between items-center">
-                  <p className="text-base font-bold text-slate-800">Tổng thực nhận</p>
-                  <p className="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-cyan-600">
-                    {formatCurrency(data.netSalary)}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Shift Details */}
           {detailLoading ? (
             <div className="bg-white rounded-3xl border border-sky-100 p-8 text-center">
               <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
