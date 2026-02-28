@@ -510,21 +510,50 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                     <div className="bg-slate-50 rounded-xl p-6 space-y-3">
                       <h4 className="text-sm font-bold text-slate-700 mb-4">Chi tiết tính lương</h4>
                       
-                      <div className="flex justify-between items-center py-2 border-b border-slate-200">
-                        <span className="text-sm text-slate-600">Lương theo ngày công</span>
-                        <span className="text-sm font-bold text-slate-800">
-                          {formatCurrency((selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays) * selectedPayrollDetail.payroll.actualWorkDays)}
-                        </span>
-                      </div>
-                      
-                      <div className="flex justify-between items-center py-2 border-b border-slate-200">
-                        <span className="text-sm text-slate-600">
-                          Công thức: (LCB / {selectedPayrollDetail.payroll.standardWorkDays}) × {selectedPayrollDetail.payroll.actualWorkDays.toFixed(2)}
-                        </span>
-                        <span className="text-xs text-slate-500">
-                          = ({formatCurrency(selectedPayrollDetail.payroll.baseSalary)} / {selectedPayrollDetail.payroll.standardWorkDays}) × {selectedPayrollDetail.payroll.actualWorkDays.toFixed(2)}
-                        </span>
-                      </div>
+                      {(() => {
+                        // Calculate total money from shifts
+                        const dailyRate = selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays;
+                        const hourlyRate = dailyRate / workHoursPerDay;
+                        
+                        let totalShiftMoney = 0;
+                        shiftDetails.forEach(shift => {
+                          let money = 0;
+                          if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
+                            const [startHour, startMin] = shift.startTime.split(':').map(Number);
+                            const [endHour, endMin] = shift.endTime.split(':').map(Number);
+                            const hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
+                            const regularHours = Math.min(hours, workHoursPerDay);
+                            money = hourlyRate * regularHours;
+                          } else if (shift.shift === 'OFF') {
+                            if (shift.offType === OffType.OFF_PN || shift.offType === OffType.LE) {
+                              money = dailyRate;
+                            }
+                          } else {
+                            money = dailyRate;
+                          }
+                          totalShiftMoney += money;
+                        });
+
+                        return (
+                          <>
+                            <div className="flex justify-between items-center py-2 border-b border-slate-200">
+                              <span className="text-sm text-slate-600">Lương theo ca làm việc</span>
+                              <span className="text-sm font-bold text-slate-800">
+                                {formatCurrency(Math.round(totalShiftMoney))}
+                              </span>
+                            </div>
+                            
+                            <div className="flex justify-between items-center py-2 border-b border-slate-200">
+                              <span className="text-sm text-slate-600">
+                                Tính từ {shiftDetails.length} ca ({selectedPayrollDetail.payroll.actualWorkDays.toFixed(2)} công)
+                              </span>
+                              <span className="text-xs text-slate-500">
+                                = {formatCurrency(Math.round(dailyRate))}/ngày
+                              </span>
+                            </div>
+                          </>
+                        );
+                      })()}
 
                     {selectedPayrollDetail.payroll.otHours > 0 && (
                       <>

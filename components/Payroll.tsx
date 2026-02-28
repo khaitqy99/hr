@@ -24,7 +24,6 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
   } | null>(null);
   const [showDetailDropdown, setShowDetailDropdown] = useState(false);
   const [shiftDetails, setShiftDetails] = useState<ShiftRegistration[]>([]);
-  const [detailLoading, setDetailLoading] = useState(false);
   const [workHoursPerDay, setWorkHoursPerDay] = useState(8);
 
   // Generate month options (current month and 5 previous months)
@@ -42,8 +41,6 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
   useEffect(() => {
     const loadPayroll = async () => {
       setIsLoading(true);
-      setShowDetailDropdown(false);
-      setShiftDetails([]);
       
       try {
         // Load all records to get available months
@@ -65,15 +62,23 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
         if (records.length > 0) {
           setData(records[0]);
           
+          // Load shift details immediately for calculation
+          const shifts = await getShiftRegistrations(user.id);
+          const [monthStr, yearStr] = selectedMonth.split('-');
+          const targetMonth = parseInt(monthStr);
+          const targetYear = parseInt(yearStr);
+          
+          const monthShifts = shifts.filter(shift => {
+            const shiftDate = new Date(shift.date);
+            return shiftDate.getMonth() + 1 === targetMonth && 
+                   shiftDate.getFullYear() === targetYear;
+          });
+          
+          setShiftDetails(monthShifts);
+          
           // Chi tiết tính lương: nghỉ phép + số ca đăng ký (ngày công lấy từ đăng ký ca)
           try {
-            const [leaveDays, shifts] = await Promise.all([
-              calculateLeaveDays(user.id, selectedMonth),
-              getShiftRegistrations(user.id)
-            ]);
-            const [monthStr, yearStr] = selectedMonth.split('-');
-            const targetMonth = parseInt(monthStr);
-            const targetYear = parseInt(yearStr);
+            const leaveDays = await calculateLeaveDays(user.id, selectedMonth);
             const monthStart = new Date(targetYear, targetMonth - 1, 1).getTime();
             const monthEnd = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999).getTime();
             const shiftDays = new Set<string>();
@@ -92,11 +97,13 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
         } else {
           setData(null);
           setPayrollDetails(null);
+          setShiftDetails([]);
         }
       } catch (error) {
         console.error('Error loading payroll:', error);
         setData(null);
         setPayrollDetails(null);
+        setShiftDetails([]);
       } finally {
         setIsLoading(false);
       }
@@ -115,31 +122,7 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
 
   const handleToggleDetail = async () => {
     if (!data) return;
-    
-    const newState = !showDetailDropdown;
-    setShowDetailDropdown(newState);
-    
-    if (newState && shiftDetails.length === 0) {
-      setDetailLoading(true);
-      try {
-        const shifts = await getShiftRegistrations(user.id);
-        const [monthStr, yearStr] = selectedMonth.split('-');
-        const targetMonth = parseInt(monthStr);
-        const targetYear = parseInt(yearStr);
-        
-        const monthShifts = shifts.filter(shift => {
-          const shiftDate = new Date(shift.date);
-          return shiftDate.getMonth() + 1 === targetMonth && 
-                 shiftDate.getFullYear() === targetYear;
-        });
-        
-        setShiftDetails(monthShifts);
-      } catch (err) {
-        console.error('Error loading shift details:', err);
-      } finally {
-        setDetailLoading(false);
-      }
-    }
+    setShowDetailDropdown(!showDetailDropdown);
   };
 
   // Loading: giữ layout, không thay toàn bộ nội dung bằng "Đang tải..."
@@ -282,13 +265,45 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
               </button>
           </div>
           <div className="divide-y divide-slate-50">
-              <div className="p-4 flex justify-between items-center">
-                  <div>
-                      <p className="text-xs text-slate-500 font-medium">Lương cơ bản</p>
-                      <p className="text-[10px] text-slate-400">Công thực tế: {Math.round(data.actualWorkDays * 2) / 2}/{data.standardWorkDays}</p>
+              {(() => {
+                // Calculate total money from shifts (same logic as detail section)
+                const dailyRate = data.baseSalary / data.standardWorkDays;
+                const hourlyRate = dailyRate / workHoursPerDay;
+                
+                let totalShiftMoney = 0;
+                if (shiftDetails.length > 0) {
+                  shiftDetails.forEach(shift => {
+                    let money = 0;
+                    if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
+                      const [startHour, startMin] = shift.startTime.split(':').map(Number);
+                      const [endHour, endMin] = shift.endTime.split(':').map(Number);
+                      const hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
+                      const regularHours = Math.min(hours, workHoursPerDay);
+                      money = hourlyRate * regularHours;
+                    } else if (shift.shift === 'OFF') {
+                      if (shift.offType === OffType.OFF_PN || shift.offType === OffType.LE) {
+                        money = dailyRate;
+                      }
+                    } else {
+                      money = dailyRate;
+                    }
+                    totalShiftMoney += money;
+                  });
+                } else {
+                  // Fallback to simple calculation if no shift details loaded yet
+                  totalShiftMoney = basicSalary;
+                }
+
+                return (
+                  <div className="p-4 flex justify-between items-center">
+                      <div>
+                          <p className="text-xs text-slate-500 font-medium">Lương cơ bản</p>
+                          <p className="text-[10px] text-slate-400">Công thực tế: {Math.round(data.actualWorkDays * 2) / 2}/{data.standardWorkDays}</p>
+                      </div>
+                      <p className="text-sm font-bold text-slate-800">{formatCurrency(Math.round(totalShiftMoney))}</p>
                   </div>
-                  <p className="text-sm font-bold text-slate-800">{formatCurrency(basicSalary)}</p>
-              </div>
+                );
+              })()}
               {data.otPay > 0 && (
                 <div className="p-4 flex justify-between items-center">
                     <div>
@@ -324,15 +339,9 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
       </div>
 
       {/* Chi tiết các ngày làm việc */}
-      {showDetailDropdown && (
+      {showDetailDropdown && shiftDetails.length > 0 && (
         <div className="space-y-4 animate-fadeIn">
-          {detailLoading ? (
-            <div className="bg-white rounded-3xl border border-sky-100 p-8 text-center">
-              <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-              <p className="text-sm text-slate-500">Đang tải chi tiết ca làm việc...</p>
-            </div>
-          ) : shiftDetails.length > 0 ? (
-            <div className="bg-white rounded-3xl border border-sky-100 overflow-hidden shadow-sm">
+          <div className="bg-white rounded-3xl border border-sky-100 overflow-hidden shadow-sm">
               <div className="bg-gradient-to-r from-slate-50 to-sky-50 px-4 py-3 border-b border-sky-100">
                 <h4 className="text-sm font-bold text-slate-700">Chi tiết ca làm việc ({shiftDetails.length} ca)</h4>
               </div>
@@ -442,7 +451,6 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                 })()}
               </div>
             </div>
-          ) : null}
         </div>
       )}
     </div>
