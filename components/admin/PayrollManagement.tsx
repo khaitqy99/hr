@@ -204,20 +204,25 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
         const mandatoryOTHours = payroll.otHours || 0;
         const mandatoryOTSalary = payroll.otPay || 0;
 
+        // Helper function để format số tiền với dấu phẩy ngăn cách
+        const formatNumber = (num: number): string => {
+          return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        };
+
         // Tạo row cho nhân viên - chỉ các cột có dữ liệu trong hệ thống
         const row: any[] = [
           employee.name,
           employee.department || '',
-          baseSalary.toLocaleString('vi-VN'),
+          formatNumber(baseSalary), // Format với dấu phẩy: 5,000,000
           (payroll.actualWorkDays * workHoursPerDay).toFixed(1) + 'h',
           payroll.actualWorkDays.toFixed(2),
-          Math.round(workDaySalary).toLocaleString('vi-VN'),
+          formatNumber(Math.round(workDaySalary)), // Format với dấu phẩy
           mandatoryOTHours.toFixed(1),
-          Math.round(mandatoryOTSalary).toLocaleString('vi-VN'),
-          payroll.allowance.toLocaleString('vi-VN'),
-          payroll.bonus.toLocaleString('vi-VN'),
-          payroll.deductions.toLocaleString('vi-VN'),
-          payroll.netSalary.toLocaleString('vi-VN'),
+          formatNumber(Math.round(mandatoryOTSalary)), // Format với dấu phẩy
+          formatNumber(payroll.allowance), // Format với dấu phẩy
+          formatNumber(payroll.bonus), // Format với dấu phẩy
+          formatNumber(payroll.deductions), // Format với dấu phẩy
+          formatNumber(payroll.netSalary), // Format với dấu phẩy
           '', // Ghi chú
         ];
 
@@ -253,7 +258,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
             }
           });
 
-          // Logic hiển thị giống như phần đăng ký ca
+          // Logic hiển thị theo đăng ký ca
           if (isHolidayDate) {
             inValue = 'LỄ';
             outValue = 'LỄ';
@@ -278,47 +283,18 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                 outValue = '';
               }
             } else if (dayShift.shift === 'CUSTOM') {
-              // Nếu có attendance thực tế, ưu tiên hiển thị attendance
-              if (dayAttendance?.checkIn) {
-                const time = new Date(dayAttendance.checkIn.timestamp);
-                inValue = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
-              } else {
-                // Hiển thị giờ từ shift đăng ký
-                inValue = dayShift.startTime || DEFAULT_IN;
-              }
-              
-              if (dayAttendance?.checkOut) {
-                const time = new Date(dayAttendance.checkOut.timestamp);
-                outValue = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
-                // Kiểm tra có làm thêm không
-                if (dayAttendance.checkOut.status === 'OVERTIME') {
-                  outValue += ' BB';
-                }
-              } else {
-                // Hiển thị giờ từ shift đăng ký
-                outValue = dayShift.endTime || DEFAULT_OUT;
-              }
-              
-              // Nếu là học việc
-              if (employee.contractType === ContractType.TRIAL) {
-                inValue = 'HV';
-                outValue = 'HV';
-              }
+              // Luôn hiển thị giờ từ shift đăng ký
+              inValue = dayShift.startTime || DEFAULT_IN;
+              outValue = dayShift.endTime || DEFAULT_OUT;
+            } else {
+              // Ca cố định (MORNING, AFTERNOON, EVENING)
+              inValue = DEFAULT_IN;
+              outValue = DEFAULT_OUT;
             }
           } else {
-            // Không có shift đăng ký, chỉ hiển thị attendance nếu có
-            if (dayAttendance?.checkIn) {
-              const time = new Date(dayAttendance.checkIn.timestamp);
-              inValue = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
-            }
-            if (dayAttendance?.checkOut) {
-              const time = new Date(dayAttendance.checkOut.timestamp);
-              outValue = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
-              // Kiểm tra có làm thêm không
-              if (dayAttendance.checkOut.status === 'OVERTIME') {
-                outValue += ' BB';
-              }
-            }
+            // Không có shift đăng ký - để trống
+            inValue = '';
+            outValue = '';
           }
 
           row.push(inValue, outValue);
