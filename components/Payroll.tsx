@@ -343,7 +343,9 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
         <div className="space-y-4 animate-fadeIn">
           <div className="bg-white rounded-3xl border border-sky-100 overflow-hidden shadow-sm">
               <div className="bg-gradient-to-r from-slate-50 to-sky-50 px-4 py-3 border-b border-sky-100">
-                <h4 className="text-sm font-bold text-slate-700">Chi tiết ca làm việc ({shiftDetails.length} ca)</h4>
+                <h4 className="text-sm font-bold text-slate-700">
+                  Chi tiết ca làm việc ({(data.actualWorkDays * workHoursPerDay).toFixed(1)}h)
+                </h4>
               </div>
               <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
                 {(() => {

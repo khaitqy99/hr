@@ -605,7 +605,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                   {shiftDetails.length > 0 && (
                     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden h-full">
                       <div className="bg-slate-50 px-6 py-3 border-b border-slate-200">
-                        <h4 className="text-sm font-bold text-slate-700">Chi tiết ca làm việc ({shiftDetails.length} ca)</h4>
+                        <h4 className="text-sm font-bold text-slate-700">
+                          Chi tiết ca làm việc ({(selectedPayrollDetail.payroll.actualWorkDays * workHoursPerDay).toFixed(1)}h)
+                        </h4>
                       </div>
                       <div className="max-h-[600px] overflow-y-auto">
                         <table className="w-full">
