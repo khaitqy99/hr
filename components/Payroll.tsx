@@ -290,7 +290,7 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                   )}
                 </div>
               </div>
-              <p className="text-sm font-bold text-slate-800">{data.actualWorkDays.toFixed(2)} ngày</p>
+              <p className="text-sm font-bold text-slate-800">{Math.round(data.actualWorkDays * 2) / 2} ngày</p>
             </div>
             <div className="p-4 flex justify-between items-center">
               <div className="flex items-center gap-2">
@@ -370,7 +370,7 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                   </div>
                   <div className="text-right">
                       <p className="text-sm font-bold text-slate-800">{formatCurrency(basicSalary)}</p>
-                      <p className="text-[10px] text-blue-500 font-medium">Công thực tế: {data.actualWorkDays.toFixed(2)}/{data.standardWorkDays}</p>
+                      <p className="text-[10px] text-blue-500 font-medium">Công thực tế: {Math.round(data.actualWorkDays * 2) / 2}/{data.standardWorkDays}</p>
                   </div>
               </div>
               <div className="p-4 flex justify-between items-center">
@@ -414,7 +414,7 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
             <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-2xl p-4 border border-green-200">
               <p className="text-xs font-bold text-green-600 mb-1">Giờ làm việc</p>
               <p className="text-lg font-bold text-green-700">{(data.actualWorkDays * workHoursPerDay).toFixed(1)}h</p>
-              <p className="text-xs text-green-600">{data.actualWorkDays.toFixed(2)} công</p>
+              <p className="text-xs text-green-600">{Math.round(data.actualWorkDays * 2) / 2} công</p>
             </div>
             <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-2xl p-4 border border-purple-200">
               <p className="text-xs font-bold text-purple-600 mb-1">Giờ OT</p>
@@ -437,7 +437,7 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                 <div>
                   <p className="text-sm text-slate-600 font-medium">Lương theo ngày công</p>
                   <p className="text-xs text-slate-400 mt-1">
-                    ({formatCurrency(data.baseSalary)} / {data.standardWorkDays}) × {data.actualWorkDays.toFixed(2)}
+                    ({formatCurrency(data.baseSalary)} / {data.standardWorkDays}) × {Math.round(data.actualWorkDays * 2) / 2}
                   </p>
                 </div>
                 <p className="text-base font-bold text-slate-800">
@@ -588,7 +588,7 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-sm font-bold text-blue-700">Tổng cộng</p>
-                          <p className="text-xs text-blue-600">{data.actualWorkDays.toFixed(2)} công</p>
+                          <p className="text-xs text-blue-600">{Math.round(data.actualWorkDays * 2) / 2} công</p>
                         </div>
                         <div className="text-right">
                           <p className="text-sm font-bold text-blue-700">

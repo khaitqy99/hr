@@ -772,8 +772,8 @@ export const calculateShiftWorkDays = async (userId: string, month: string): Pro
   // Chuyển giờ thành công: 4 giờ = 0.5 công, 8 giờ = 1 công
   const workDays = totalHours / workHoursPerDay;
   
-  // Làm tròn 2 chữ số thập phân
-  return parseFloat(workDays.toFixed(2));
+  // Làm tròn theo đơn vị 0.5 (nửa ngày): 26.38 → 26.5, 27.00 → 27
+  return Math.round(workDays * 2) / 2;
 };
 
 // Helper: Tính số giờ OT từ shift registrations trong tháng
@@ -1476,6 +1476,8 @@ export const calculatePayroll = async (
   if (useLeave && finalWorkDays !== undefined) {
     const leaveDays = await calculateLeaveDays(employee.id, month);
     finalWorkDays = Math.max(0, finalWorkDays - leaveDays);
+    // Làm tròn theo đơn vị 0.5 sau khi trừ ngày nghỉ
+    finalWorkDays = Math.round(finalWorkDays * 2) / 2;
   }
 
   // Fallback to default if still undefined

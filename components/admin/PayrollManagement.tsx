@@ -446,6 +446,33 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
     }
   };
 
+  const handleUpdatePayrollStatus = async (status: 'PAID' | 'PENDING') => {
+    if (!selectedPayrollDetail) return;
+    
+    try {
+      const updatedPayroll = {
+        ...selectedPayrollDetail.payroll,
+        status
+      };
+      
+      await createOrUpdatePayroll(updatedPayroll);
+      
+      // Update local state
+      setSelectedPayrollDetail({
+        ...selectedPayrollDetail,
+        payroll: updatedPayroll
+      });
+      
+      // Refresh payroll list
+      await loadData(selectedMonth);
+      
+      alert(status === 'PAID' ? 'Đã đánh dấu thanh toán thành công!' : 'Đã chuyển về chờ thanh toán!');
+    } catch (err) {
+      console.error('Error updating payroll status:', err);
+      alert('Có lỗi khi cập nhật trạng thái!');
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Payroll Detail Modal */}
@@ -697,24 +724,49 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
             </div>
 
             {/* Modal Footer */}
-            <div className="border-t border-slate-200 px-6 py-4 bg-slate-50 flex justify-end gap-3">
-              <button
-                onClick={() => setSelectedPayrollDetail(null)}
-                className="px-4 py-2 bg-slate-200 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-300 transition-colors"
-              >
-                Đóng
-              </button>
-              {setView && (
+            <div className="border-t border-slate-200 px-6 py-4 bg-slate-50 flex justify-between items-center">
+              <div>
+                {selectedPayrollDetail.payroll.status === 'PENDING' ? (
+                  <button
+                    onClick={() => handleUpdatePayrollStatus('PAID')}
+                    className="px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold hover:bg-green-700 transition-colors flex items-center gap-2"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Đánh dấu đã thanh toán
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleUpdatePayrollStatus('PENDING')}
+                    className="px-4 py-2 bg-orange-600 text-white rounded-xl text-sm font-bold hover:bg-orange-700 transition-colors flex items-center gap-2"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Chuyển về chờ thanh toán
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-3">
                 <button
-                  onClick={() => {
-                    setSelectedPayrollDetail(null);
-                    setView('employee-profile', { employeeId: selectedPayrollDetail.employee.id });
-                  }}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-colors"
+                  onClick={() => setSelectedPayrollDetail(null)}
+                  className="px-4 py-2 bg-slate-200 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-300 transition-colors"
                 >
-                  Xem hồ sơ nhân viên
+                  Đóng
                 </button>
-              )}
+                {setView && (
+                  <button
+                    onClick={() => {
+                      setSelectedPayrollDetail(null);
+                      setView('employee-profile', { employeeId: selectedPayrollDetail.employee.id });
+                    }}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-colors"
+                  >
+                    Xem hồ sơ nhân viên
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
