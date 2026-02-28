@@ -347,6 +347,12 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
   };
 
   const enterEditMode = (registeredShift: ShiftRegistration, dateStr: string) => {
+    // Không cho phép sửa ca đã được duyệt
+    if (registeredShift.status === RequestStatus.APPROVED) {
+      alert('Không thể sửa ca đã được duyệt. Vui lòng liên hệ admin nếu cần thay đổi.');
+      return;
+    }
+    
     setEditingShiftId(registeredShift.id);
     setDateShifts(prev => ({ ...prev, [dateStr]: registeredShift.shift }));
     if (registeredShift.shift === ShiftTime.CUSTOM && registeredShift.startTime) {
@@ -791,23 +797,37 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                                                             )}
                                                         </div>
                                                     )}
+                                                    {registeredShift.status === RequestStatus.APPROVED && (
+                                                        <div className="mt-2 p-2.5 rounded-xl bg-green-50 border border-green-100">
+                                                            <p className="text-[11px] font-medium text-green-700">
+                                                                ✓ Ca này đã được duyệt và không thể thay đổi.
+                                                            </p>
+                                                            <p className="text-[10px] text-green-600 mt-1">
+                                                                Nếu cần thay đổi, vui lòng liên hệ admin nhé.
+                                                            </p>
+                                                        </div>
+                                                    )}
                                                 </div>
                                                 <div className="flex gap-1.5 pt-3 mt-3 border-t border-slate-100">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => enterEditMode(registeredShift, dateStr)}
-                                                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-medium transition-colors ${
-                                                            registeredShift.status === RequestStatus.REJECTED
-                                                                ? 'bg-rose-600 text-white hover:bg-rose-700'
-                                                                : 'bg-slate-900 text-white hover:bg-slate-800'
-                                                        }`}
-                                                    >
-                                                        Đổi lịch
-                                                    </button>
+                                                    {registeredShift.status !== RequestStatus.APPROVED && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => enterEditMode(registeredShift, dateStr)}
+                                                            className={`flex-1 py-1.5 rounded-lg text-[10px] font-medium transition-colors ${
+                                                                registeredShift.status === RequestStatus.REJECTED
+                                                                    ? 'bg-rose-600 text-white hover:bg-rose-700'
+                                                                    : 'bg-slate-900 text-white hover:bg-slate-800'
+                                                            }`}
+                                                        >
+                                                            Đổi lịch
+                                                        </button>
+                                                    )}
                                                     <button
                                                         type="button"
                                                         onClick={() => setExpandedDate(null)}
-                                                        className="px-3 py-1.5 rounded-lg text-slate-500 text-[10px] font-medium hover:bg-slate-50 hover:text-slate-700 transition-colors"
+                                                        className={`py-1.5 rounded-lg text-slate-500 text-[10px] font-medium hover:bg-slate-50 hover:text-slate-700 transition-colors ${
+                                                            registeredShift.status === RequestStatus.APPROVED ? 'flex-1' : 'px-3'
+                                                        }`}
                                                     >
                                                         Đóng
                                                     </button>
