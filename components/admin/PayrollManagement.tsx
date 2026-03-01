@@ -511,35 +511,16 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                       <h4 className="text-sm font-bold text-slate-700 mb-4">Chi tiết tính lương</h4>
                       
                       {(() => {
-                        // Calculate total money from shifts
+                        // Tính lương cơ bản từ số công (actualWorkDays đã được tính từ giờ)
                         const dailyRate = selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays;
-                        const hourlyRate = dailyRate / workHoursPerDay;
-                        
-                        let totalShiftMoney = 0;
-                        shiftDetails.forEach(shift => {
-                          let money = 0;
-                          if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
-                            const [startHour, startMin] = shift.startTime.split(':').map(Number);
-                            const [endHour, endMin] = shift.endTime.split(':').map(Number);
-                            const hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
-                            const regularHours = Math.min(hours, workHoursPerDay);
-                            money = hourlyRate * regularHours;
-                          } else if (shift.shift === 'OFF') {
-                            if (shift.offType === OffType.OFF_PN || shift.offType === OffType.LE) {
-                              money = dailyRate;
-                            }
-                          } else {
-                            money = dailyRate;
-                          }
-                          totalShiftMoney += money;
-                        });
+                        const basicSalary = dailyRate * selectedPayrollDetail.payroll.actualWorkDays;
 
                         return (
                           <>
                             <div className="flex justify-between items-center py-2 border-b border-slate-200">
                               <span className="text-sm text-slate-600">Lương theo ca làm việc</span>
                               <span className="text-sm font-bold text-slate-800">
-                                {formatCurrency(Math.round(totalShiftMoney))}
+                                {formatCurrency(Math.round(basicSalary))}
                               </span>
                             </div>
                             
@@ -619,8 +600,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                           </thead>
                           <tbody className="divide-y divide-slate-100">
                             {(() => {
-                              let totalMoney = 0;
+                              // Tính tổng tiền từ actualWorkDays (đã được tính chính xác từ backend)
                               const dailyRate = selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays;
+                              const totalMoney = dailyRate * selectedPayrollDetail.payroll.actualWorkDays;
                               const hourlyRate = dailyRate / workHoursPerDay;
                               
                               const rows = shiftDetails
@@ -672,8 +654,6 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                     money = dailyRate;
                                   }
 
-                                  totalMoney += money;
-
                                   return (
                                     <tr key={idx} className="hover:bg-slate-50">
                                       <td className="px-4 py-3 border-r border-slate-100">
@@ -699,7 +679,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                   );
                                 });
 
-                              // Add total row
+                              // Add total row - sử dụng totalMoney đã tính từ actualWorkDays
                               rows.push(
                                 <tr key="total" className="bg-gradient-to-r from-blue-50 to-blue-100 font-bold border-t-2 border-blue-200">
                                   <td className="px-4 py-3 border-r border-blue-200">

@@ -180,7 +180,7 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
   }
 
   // Tính toán lại để đảm bảo chính xác: basicSalary + overtimePay + allowance + bonus - deductions
-  const basicSalary = (data.baseSalary / 27) * data.actualWorkDays;
+  const basicSalary = (data.baseSalary / data.standardWorkDays) * data.actualWorkDays;
   const totalIncome = basicSalary + data.otPay + data.allowance + data.bonus;
   const calculatedNetSalary = totalIncome - data.deductions;
   
@@ -266,33 +266,9 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
           </div>
           <div className="divide-y divide-slate-50">
               {(() => {
-                // Calculate total money from shifts (same logic as detail section)
+                // Tính lương cơ bản từ số công (actualWorkDays đã được tính từ giờ)
                 const dailyRate = data.baseSalary / data.standardWorkDays;
-                const hourlyRate = dailyRate / workHoursPerDay;
-                
-                let totalShiftMoney = 0;
-                if (shiftDetails.length > 0) {
-                  shiftDetails.forEach(shift => {
-                    let money = 0;
-                    if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
-                      const [startHour, startMin] = shift.startTime.split(':').map(Number);
-                      const [endHour, endMin] = shift.endTime.split(':').map(Number);
-                      const hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
-                      const regularHours = Math.min(hours, workHoursPerDay);
-                      money = hourlyRate * regularHours;
-                    } else if (shift.shift === 'OFF') {
-                      if (shift.offType === OffType.OFF_PN || shift.offType === OffType.LE) {
-                        money = dailyRate;
-                      }
-                    } else {
-                      money = dailyRate;
-                    }
-                    totalShiftMoney += money;
-                  });
-                } else {
-                  // Fallback to simple calculation if no shift details loaded yet
-                  totalShiftMoney = basicSalary;
-                }
+                const basicSalary = dailyRate * data.actualWorkDays;
 
                 return (
                   <div className="p-4 flex justify-between items-center">
@@ -300,7 +276,7 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                           <p className="text-xs text-slate-500 font-medium">Lương cơ bản</p>
                           <p className="text-[10px] text-slate-400">Công thực tế: {Math.round(data.actualWorkDays * 2) / 2}/{data.standardWorkDays}</p>
                       </div>
-                      <p className="text-sm font-bold text-slate-800">{formatCurrency(Math.round(totalShiftMoney))}</p>
+                      <p className="text-sm font-bold text-slate-800">{formatCurrency(Math.round(basicSalary))}</p>
                   </div>
                 );
               })()}
@@ -349,8 +325,9 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
               </div>
               <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
                 {(() => {
-                  let totalMoney = 0;
+                  // Tính tổng tiền từ actualWorkDays (đã được tính chính xác từ backend)
                   const dailyRate = data.baseSalary / data.standardWorkDays;
+                  const totalMoney = dailyRate * data.actualWorkDays;
                   const hourlyRate = dailyRate / workHoursPerDay;
                   
                   const rows = shiftDetails
@@ -402,8 +379,6 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                         money = dailyRate;
                       }
 
-                      totalMoney += money;
-
                       return (
                         <div key={idx} className="p-4 hover:bg-slate-50 transition-colors">
                           <div className="flex items-start justify-between gap-3">
@@ -429,7 +404,7 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                       );
                     });
 
-                  // Add total
+                  // Add total - sử dụng totalMoney đã tính từ actualWorkDays
                   rows.push(
                     <div key="total" className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 border-t-2 border-blue-200">
                       <div className="flex items-center justify-between">
