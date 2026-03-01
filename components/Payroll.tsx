@@ -266,15 +266,38 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
           </div>
           <div className="divide-y divide-slate-50">
               {(() => {
-                // Tính lương cơ bản từ số công (actualWorkDays đã được tính từ giờ)
+                // Tính tổng giờ thực tế từ shiftDetails
+                let totalActualHours = 0;
+                if (shiftDetails.length > 0) {
+                  shiftDetails.forEach(shift => {
+                    let hours = workHoursPerDay;
+                    if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
+                      const [startHour, startMin] = shift.startTime.split(':').map(Number);
+                      const [endHour, endMin] = shift.endTime.split(':').map(Number);
+                      hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
+                      if (hours >= 6) hours = hours - 1;
+                    } else if (shift.shift === 'OFF' && shift.offType !== OffType.OFF_PN && shift.offType !== OffType.LE) {
+                      hours = 0;
+                    }
+                    if (hours > 0) totalActualHours += Math.min(hours, workHoursPerDay);
+                  });
+                }
+                
+                // Tính lương cơ bản từ tổng giờ thực tế
                 const dailyRate = data.baseSalary / data.standardWorkDays;
-                const basicSalary = dailyRate * data.actualWorkDays;
+                const hourlyRate = dailyRate / workHoursPerDay;
+                const basicSalary = totalActualHours > 0 ? hourlyRate * totalActualHours : dailyRate * data.actualWorkDays;
 
                 return (
                   <div className="p-4 flex justify-between items-center">
                       <div>
                           <p className="text-xs text-slate-500 font-medium">Lương cơ bản</p>
-                          <p className="text-[10px] text-slate-400">Công thực tế: {Math.round(data.actualWorkDays * 2) / 2}/{data.standardWorkDays}</p>
+                          <p className="text-[10px] text-slate-400">
+                            {totalActualHours > 0 
+                              ? `${totalActualHours.toFixed(1)}h (${(totalActualHours / workHoursPerDay).toFixed(2)} công)`
+                              : `Công thực tế: ${data.actualWorkDays.toFixed(2)}/${data.standardWorkDays}`
+                            }
+                          </p>
                       </div>
                       <p className="text-sm font-bold text-slate-800">{formatCurrency(Math.round(basicSalary))}</p>
                   </div>
@@ -318,17 +341,15 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
       {showDetailDropdown && shiftDetails.length > 0 && (
         <div className="space-y-4 animate-fadeIn">
           <div className="bg-white rounded-3xl border border-sky-100 overflow-hidden shadow-sm">
-              <div className="bg-gradient-to-r from-slate-50 to-sky-50 px-4 py-3 border-b border-sky-100">
-                <h4 className="text-sm font-bold text-slate-700">
-                  Chi tiết ca làm việc ({(data.actualWorkDays * workHoursPerDay).toFixed(1)}h)
-                </h4>
-              </div>
               <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
                 {(() => {
                   // Tính tổng tiền từ actualWorkDays (đã được tính chính xác từ backend)
                   const dailyRate = data.baseSalary / data.standardWorkDays;
                   const totalMoney = dailyRate * data.actualWorkDays;
                   const hourlyRate = dailyRate / workHoursPerDay;
+                  
+                  // Tính tổng giờ thực tế từ các ca làm việc
+                  let totalActualHours = 0;
                   
                   const rows = shiftDetails
                     .sort((a, b) => a.date - b.date)
@@ -347,6 +368,10 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                         const [startHour, startMin] = shift.startTime.split(':').map(Number);
                         const [endHour, endMin] = shift.endTime.split(':').map(Number);
                         hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
+                        // Tự động trừ 1 giờ nghỉ trưa nếu ca >= 6 giờ
+                        if (hours >= 6) {
+                          hours = hours - 1;
+                        }
                         const regularHours = Math.min(hours, workHoursPerDay);
                         money = hourlyRate * regularHours;
                       } else if (shift.shift === 'OFF') {
@@ -379,6 +404,11 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                         money = dailyRate;
                       }
 
+                      // Cộng dồn giờ làm việc thực tế (chỉ tính giờ có lương)
+                      if (hours > 0) {
+                        totalActualHours += Math.min(hours, workHoursPerDay);
+                      }
+
                       return (
                         <div key={idx} className="p-4 hover:bg-slate-50 transition-colors">
                           <div className="flex items-start justify-between gap-3">
@@ -404,27 +434,39 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                       );
                     });
 
-                  // Add total - sử dụng totalMoney đã tính từ actualWorkDays
+                  // Tính lại tổng tiền dựa trên tổng giờ thực tế
+                  const totalMoneyFromHours = hourlyRate * totalActualHours;
+                  
+                  // Add total - sử dụng totalMoneyFromHours tính từ giờ thực tế
                   rows.push(
                     <div key="total" className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 border-t-2 border-blue-200">
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-sm font-bold text-blue-700">Tổng cộng</p>
-                          <p className="text-xs text-blue-600">{Math.round(data.actualWorkDays * 2) / 2} công</p>
+                          <p className="text-xs text-blue-600">{(totalActualHours / workHoursPerDay).toFixed(2)} công</p>
                         </div>
                         <div className="text-right">
                           <p className="text-sm font-bold text-blue-700">
-                            {(data.actualWorkDays * workHoursPerDay).toFixed(1)}h
+                            {totalActualHours.toFixed(1)}h
                           </p>
                           <p className="text-lg font-bold text-blue-700">
-                            {formatCurrency(Math.round(totalMoney))}
+                            {formatCurrency(Math.round(totalMoneyFromHours))}
                           </p>
                         </div>
                       </div>
                     </div>
                   );
 
-                  return rows;
+                  return (
+                    <>
+                      <div className="bg-gradient-to-r from-slate-50 to-sky-50 px-4 py-3 border-b border-sky-100">
+                        <h4 className="text-sm font-bold text-slate-700">
+                          Chi tiết ca làm việc ({totalActualHours.toFixed(1)}h)
+                        </h4>
+                      </div>
+                      {rows}
+                    </>
+                  );
                 })()}
               </div>
             </div>

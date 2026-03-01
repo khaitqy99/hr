@@ -3,6 +3,24 @@ import { PayrollRecord, User, UserRole, AttendanceRecord, AttendanceType, ShiftR
 import { getAllPayrolls, getAllUsers, calculatePayroll, createOrUpdatePayroll, getShiftRegistrations, getAllAttendance, getHolidays, getConfigNumber } from '../../services/db';
 import { exportMultipleTablesToCSV } from '../../utils/export';
 
+// Helper function để tính tổng giờ thực tế từ shifts
+const calculateTotalHoursFromShifts = (shifts: ShiftRegistration[], workHoursPerDay: number): number => {
+  let totalHours = 0;
+  shifts.forEach(shift => {
+    let hours = workHoursPerDay;
+    if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
+      const [startHour, startMin] = shift.startTime.split(':').map(Number);
+      const [endHour, endMin] = shift.endTime.split(':').map(Number);
+      hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
+      if (hours >= 6) hours = hours - 1; // Trừ 1h nghỉ trưa
+    } else if (shift.shift === 'OFF' && shift.offType !== OffType.OFF_PN && shift.offType !== OffType.LE) {
+      hours = 0;
+    }
+    if (hours > 0) totalHours += Math.min(hours, workHoursPerDay);
+  });
+  return totalHours;
+};
+
 interface PayrollManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
   setView?: (view: string, options?: { replace?: boolean; adminPath?: string; employeeId?: string }) => void;
@@ -19,6 +37,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
   const [selectedPayrollDetail, setSelectedPayrollDetail] = useState<{ payroll: PayrollRecord; employee: User } | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [shiftDetails, setShiftDetails] = useState<ShiftRegistration[]>([]);
+  const [allShiftsInMonth, setAllShiftsInMonth] = useState<ShiftRegistration[]>([]); // Lưu tất cả shifts trong tháng
 
   useEffect(() => {
     const initData = async () => {
@@ -63,12 +82,28 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
   const loadData = async (month: string) => {
     try {
       setError(null);
-      const records = await getAllPayrolls(month);
+      const [records, allShifts] = await Promise.all([
+        getAllPayrolls(month),
+        getShiftRegistrations(undefined, UserRole.ADMIN)
+      ]);
       setPayrollRecords(records);
+      
+      // Lọc shifts theo tháng
+      const [monthStr, yearStr] = month.split('-');
+      const targetMonth = parseInt(monthStr);
+      const targetYear = parseInt(yearStr);
+      const monthStart = new Date(targetYear, targetMonth - 1, 1).getTime();
+      const monthEnd = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999).getTime();
+      
+      const shiftsInMonth = allShifts.filter(shift => {
+        return shift.date >= monthStart && shift.date <= monthEnd && shift.status === 'APPROVED';
+      });
+      setAllShiftsInMonth(shiftsInMonth);
     } catch (err: any) {
       setError('Không thể tải bảng lương: ' + (err?.message || 'Vui lòng thử lại'));
       console.error('Error loading payroll data:', err);
       setPayrollRecords([]);
+      setAllShiftsInMonth([]);
       throw err; // Re-throw để caller có thể handle
     }
   };
@@ -194,11 +229,16 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
         // Lấy shifts của nhân viên trong tháng
         const empShifts = shiftsInMonth.filter(s => s.userId === payroll.userId);
 
-        // Tính toán các giá trị - chỉ sử dụng dữ liệu có trong payroll record
+        // Tính toán các giá trị - tính từ tổng giờ thực tế
         const baseSalary = payroll.baseSalary;
         
-        // Tính lương theo ngày công từ payroll (đã được tính trong hệ thống)
-        const workDaySalary = (baseSalary / standardWorkDays) * payroll.actualWorkDays;
+        // Tính tổng giờ thực tế từ shifts
+        const totalActualHours = calculateTotalHoursFromShifts(empShifts, workHoursPerDay);
+        
+        // Tính lương theo giờ thực tế
+        const dailyRate = baseSalary / standardWorkDays;
+        const hourlyRate = dailyRate / workHoursPerDay;
+        const workDaySalary = hourlyRate * totalActualHours;
         
         // Sử dụng OT hours và OT pay từ payroll (đã được tính trong hệ thống)
         const mandatoryOTHours = payroll.otHours || 0;
@@ -217,8 +257,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
           employee.name,
           employee.department || '',
           formatNumber(baseSalary), // Format với dấu phẩy: 5,000,000
-          (payroll.actualWorkDays * workHoursPerDay).toFixed(1) + 'h',
-          payroll.actualWorkDays.toFixed(2),
+          totalActualHours.toFixed(1) + 'h',
+          (totalActualHours / workHoursPerDay).toFixed(2),
           formatNumber(Math.round(workDaySalary)), // Format với dấu phẩy
           mandatoryOTHours.toFixed(1),
           formatNumber(Math.round(mandatoryOTSalary)), // Format với dấu phẩy
@@ -511,9 +551,25 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                       <h4 className="text-sm font-bold text-slate-700 mb-4">Chi tiết tính lương</h4>
                       
                       {(() => {
-                        // Tính lương cơ bản từ số công (actualWorkDays đã được tính từ giờ)
+                        // Tính tổng giờ thực tế từ các ca
+                        let totalActualHours = 0;
+                        shiftDetails.forEach(shift => {
+                          let hours = workHoursPerDay;
+                          if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
+                            const [startHour, startMin] = shift.startTime.split(':').map(Number);
+                            const [endHour, endMin] = shift.endTime.split(':').map(Number);
+                            hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
+                            if (hours >= 6) hours = hours - 1;
+                          } else if (shift.shift === 'OFF' && shift.offType !== OffType.OFF_PN && shift.offType !== OffType.LE) {
+                            hours = 0;
+                          }
+                          if (hours > 0) totalActualHours += Math.min(hours, workHoursPerDay);
+                        });
+                        
+                        // Tính lương cơ bản từ tổng giờ thực tế
                         const dailyRate = selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays;
-                        const basicSalary = dailyRate * selectedPayrollDetail.payroll.actualWorkDays;
+                        const hourlyRate = dailyRate / workHoursPerDay;
+                        const basicSalary = hourlyRate * totalActualHours;
 
                         return (
                           <>
@@ -526,10 +582,10 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                             
                             <div className="flex justify-between items-center py-2 border-b border-slate-200">
                               <span className="text-sm text-slate-600">
-                                Tính từ {shiftDetails.length} ca ({selectedPayrollDetail.payroll.actualWorkDays.toFixed(2)} công)
+                                Tính từ {shiftDetails.length} ca ({totalActualHours.toFixed(1)}h = {(totalActualHours / workHoursPerDay).toFixed(2)} công)
                               </span>
                               <span className="text-xs text-slate-500">
-                                = {formatCurrency(Math.round(dailyRate))}/ngày
+                                = {formatCurrency(Math.round(hourlyRate))}/giờ
                               </span>
                             </div>
                           </>
@@ -587,7 +643,23 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden h-full">
                       <div className="bg-slate-50 px-6 py-3 border-b border-slate-200">
                         <h4 className="text-sm font-bold text-slate-700">
-                          Chi tiết ca làm việc ({(selectedPayrollDetail.payroll.actualWorkDays * workHoursPerDay).toFixed(1)}h)
+                          Chi tiết ca làm việc ({(() => {
+                            // Tính tổng giờ từ shiftDetails để hiển thị trong tiêu đề
+                            let totalHours = 0;
+                            shiftDetails.forEach(shift => {
+                              let hours = workHoursPerDay;
+                              if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
+                                const [startHour, startMin] = shift.startTime.split(':').map(Number);
+                                const [endHour, endMin] = shift.endTime.split(':').map(Number);
+                                hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
+                                if (hours >= 6) hours = hours - 1;
+                              } else if (shift.shift === 'OFF' && shift.offType !== OffType.OFF_PN && shift.offType !== OffType.LE) {
+                                hours = 0;
+                              }
+                              if (hours > 0) totalHours += Math.min(hours, workHoursPerDay);
+                            });
+                            return totalHours.toFixed(1);
+                          })()}h)
                         </h4>
                       </div>
                       <div className="max-h-[600px] overflow-y-auto">
@@ -604,6 +676,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                               const dailyRate = selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays;
                               const totalMoney = dailyRate * selectedPayrollDetail.payroll.actualWorkDays;
                               const hourlyRate = dailyRate / workHoursPerDay;
+                              
+                              // Tính tổng giờ thực tế từ các ca làm việc
+                              let totalActualHours = 0;
                               
                               const rows = shiftDetails
                                 .sort((a, b) => a.date - b.date)
@@ -622,6 +697,10 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                     const [startHour, startMin] = shift.startTime.split(':').map(Number);
                                     const [endHour, endMin] = shift.endTime.split(':').map(Number);
                                     hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
+                                    // Tự động trừ 1 giờ nghỉ trưa nếu ca >= 6 giờ
+                                    if (hours >= 6) {
+                                      hours = hours - 1;
+                                    }
                                     const regularHours = Math.min(hours, workHoursPerDay);
                                     money = hourlyRate * regularHours;
                                   } else if (shift.shift === 'OFF') {
@@ -654,6 +733,11 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                     money = dailyRate;
                                   }
 
+                                  // Cộng dồn giờ làm việc thực tế (chỉ tính giờ có lương)
+                                  if (hours > 0) {
+                                    totalActualHours += Math.min(hours, workHoursPerDay);
+                                  }
+
                                   return (
                                     <tr key={idx} className="hover:bg-slate-50">
                                       <td className="px-4 py-3 border-r border-slate-100">
@@ -679,22 +763,25 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                   );
                                 });
 
-                              // Add total row - sử dụng totalMoney đã tính từ actualWorkDays
+                              // Tính lại tổng tiền dựa trên tổng giờ thực tế
+                              const totalMoneyFromHours = hourlyRate * totalActualHours;
+                              
+                              // Add total row - sử dụng totalMoneyFromHours tính từ giờ thực tế
                               rows.push(
                                 <tr key="total" className="bg-gradient-to-r from-blue-50 to-blue-100 font-bold border-t-2 border-blue-200">
                                   <td className="px-4 py-3 border-r border-blue-200">
                                     <div className="space-y-1">
                                       <p className="text-sm text-blue-700">Tổng cộng</p>
-                                      <p className="text-xs text-blue-600">{selectedPayrollDetail.payroll.actualWorkDays.toFixed(2)} công</p>
+                                      <p className="text-xs text-blue-600">{(totalActualHours / workHoursPerDay).toFixed(2)} công</p>
                                     </div>
                                   </td>
                                   <td className="px-4 py-3 text-right">
                                     <div className="space-y-1">
                                       <p className="text-sm text-blue-700">
-                                        {(selectedPayrollDetail.payroll.actualWorkDays * workHoursPerDay).toFixed(1)}h
+                                        {totalActualHours.toFixed(1)}h
                                       </p>
                                       <p className="text-lg text-blue-700">
-                                        {formatCurrency(Math.round(totalMoney))}
+                                        {formatCurrency(Math.round(totalMoneyFromHours))}
                                       </p>
                                     </div>
                                   </td>
@@ -834,6 +921,16 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
               <tbody className="divide-y divide-slate-100">
                 {payrollRecords.map((item: PayrollRecord) => {
                   const employee = employees.find(e => e.id === item.userId);
+                  
+                  // Tính tổng giờ thực tế từ shifts của nhân viên này
+                  const userShifts = allShiftsInMonth.filter(s => s.userId === item.userId);
+                  const totalActualHours = calculateTotalHoursFromShifts(userShifts, workHoursPerDay);
+                  
+                  // Tính lương cơ bản từ tổng giờ thực tế
+                  const dailyRate = item.baseSalary / item.standardWorkDays;
+                  const hourlyRate = dailyRate / workHoursPerDay;
+                  const basicSalaryFromHours = hourlyRate * totalActualHours;
+                  
                   return (
                     <tr key={item.id} className="hover:bg-sky-50/50 transition-colors">
                       <td className="px-6 py-4">
@@ -855,8 +952,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                         <p className="text-sm text-slate-700">{formatCurrency(item.baseSalary)}</p>
                       </td>
                       <td className="px-6 py-4">
-                        <p className="text-sm text-slate-700">{(item.actualWorkDays * workHoursPerDay).toFixed(1)}h</p>
-                        <p className="text-xs text-slate-500">({item.actualWorkDays.toFixed(2)} công)</p>
+                        <p className="text-sm text-slate-700">{totalActualHours.toFixed(1)}h</p>
+                        <p className="text-xs text-slate-500">({(totalActualHours / workHoursPerDay).toFixed(2)} công)</p>
                       </td>
                       <td className="px-6 py-4">
                         <p className="text-sm text-slate-700">{item.actualWorkDays.toFixed(2)}/{item.standardWorkDays}</p>
@@ -870,7 +967,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                       <td className="px-6 py-4">
                         <p className="text-sm font-bold text-slate-700">
                           {formatCurrency(
-                            Math.round((item.baseSalary / item.standardWorkDays) * item.actualWorkDays) + 
+                            Math.round(basicSalaryFromHours) + 
                             Math.round(item.otPay) + 
                             item.allowance + 
                             item.bonus
