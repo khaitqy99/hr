@@ -179,13 +179,32 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
     );
   }
 
+  // Tính tổng giờ thực tế từ shiftDetails
+  let totalActualHours = 0;
+  if (shiftDetails.length > 0) {
+    shiftDetails.forEach(shift => {
+      let hours = workHoursPerDay;
+      if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
+        const [startHour, startMin] = shift.startTime.split(':').map(Number);
+        const [endHour, endMin] = shift.endTime.split(':').map(Number);
+        hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
+        if (hours >= 6) hours = hours - 1;
+      } else if (shift.shift === 'OFF' && shift.offType !== OffType.OFF_PN && shift.offType !== OffType.LE) {
+        hours = 0;
+      }
+      if (hours > 0) totalActualHours += Math.min(hours, workHoursPerDay);
+    });
+  }
+  
   // Tính toán lại để đảm bảo chính xác: basicSalary + overtimePay + allowance + bonus - deductions
-  const basicSalary = (data.baseSalary / data.standardWorkDays) * data.actualWorkDays;
+  const dailyRate = data.baseSalary / data.standardWorkDays;
+  const hourlyRate = dailyRate / workHoursPerDay;
+  const basicSalary = totalActualHours > 0 ? hourlyRate * totalActualHours : dailyRate * data.actualWorkDays;
   const totalIncome = basicSalary + data.otPay + data.allowance + data.bonus;
   const calculatedNetSalary = totalIncome - data.deductions;
   
-  // Sử dụng giá trị đã tính lại nếu có sự khác biệt (fix lỗi tính toán)
-  const displayNetSalary = Math.abs(calculatedNetSalary - data.netSalary) > 100 ? calculatedNetSalary : data.netSalary;
+  // Sử dụng giá trị đã tính lại từ giờ thực tế
+  const displayNetSalary = Math.round(calculatedNetSalary);
 
   return (
     <div className="space-y-6 fade-up">
@@ -265,44 +284,18 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
               </button>
           </div>
           <div className="divide-y divide-slate-50">
-              {(() => {
-                // Tính tổng giờ thực tế từ shiftDetails
-                let totalActualHours = 0;
-                if (shiftDetails.length > 0) {
-                  shiftDetails.forEach(shift => {
-                    let hours = workHoursPerDay;
-                    if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
-                      const [startHour, startMin] = shift.startTime.split(':').map(Number);
-                      const [endHour, endMin] = shift.endTime.split(':').map(Number);
-                      hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
-                      if (hours >= 6) hours = hours - 1;
-                    } else if (shift.shift === 'OFF' && shift.offType !== OffType.OFF_PN && shift.offType !== OffType.LE) {
-                      hours = 0;
-                    }
-                    if (hours > 0) totalActualHours += Math.min(hours, workHoursPerDay);
-                  });
-                }
-                
-                // Tính lương cơ bản từ tổng giờ thực tế
-                const dailyRate = data.baseSalary / data.standardWorkDays;
-                const hourlyRate = dailyRate / workHoursPerDay;
-                const basicSalary = totalActualHours > 0 ? hourlyRate * totalActualHours : dailyRate * data.actualWorkDays;
-
-                return (
-                  <div className="p-4 flex justify-between items-center">
-                      <div>
-                          <p className="text-xs text-slate-500 font-medium">Lương cơ bản</p>
-                          <p className="text-[10px] text-slate-400">
-                            {totalActualHours > 0 
-                              ? `${totalActualHours.toFixed(1)}h (${(totalActualHours / workHoursPerDay).toFixed(2)} công)`
-                              : `Công thực tế: ${data.actualWorkDays.toFixed(2)}/${data.standardWorkDays}`
-                            }
-                          </p>
-                      </div>
-                      <p className="text-sm font-bold text-slate-800">{formatCurrency(Math.round(basicSalary))}</p>
+              <div className="p-4 flex justify-between items-center">
+                  <div>
+                      <p className="text-xs text-slate-500 font-medium">Lương cơ bản</p>
+                      <p className="text-[10px] text-slate-400">
+                        {totalActualHours > 0 
+                          ? `${totalActualHours.toFixed(1)}h (${(totalActualHours / workHoursPerDay).toFixed(2)} công)`
+                          : `Công thực tế: ${data.actualWorkDays.toFixed(2)}/${data.standardWorkDays}`
+                        }
+                      </p>
                   </div>
-                );
-              })()}
+                  <p className="text-sm font-bold text-slate-800">{formatCurrency(Math.round(basicSalary))}</p>
+              </div>
               {data.otPay > 0 && (
                 <div className="p-4 flex justify-between items-center">
                     <div>

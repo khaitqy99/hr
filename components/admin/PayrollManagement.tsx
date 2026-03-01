@@ -524,6 +524,33 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* LEFT COLUMN - Summary & Breakdown */}
                   <div className="space-y-6">
+                    {(() => {
+                      // Tính tổng giờ thực tế từ các ca
+                      let totalActualHours = 0;
+                      shiftDetails.forEach(shift => {
+                        let hours = workHoursPerDay;
+                        if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
+                          const [startHour, startMin] = shift.startTime.split(':').map(Number);
+                          const [endHour, endMin] = shift.endTime.split(':').map(Number);
+                          hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
+                          if (hours >= 6) hours = hours - 1;
+                        } else if (shift.shift === 'OFF' && shift.offType !== OffType.OFF_PN && shift.offType !== OffType.LE) {
+                          hours = 0;
+                        }
+                        if (hours > 0) totalActualHours += Math.min(hours, workHoursPerDay);
+                      });
+                      
+                      // Tính lương cơ bản từ tổng giờ thực tế
+                      const dailyRate = selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays;
+                      const hourlyRate = dailyRate / workHoursPerDay;
+                      const basicSalary = hourlyRate * totalActualHours;
+                      
+                      // Tính tổng thực nhận
+                      const totalIncome = basicSalary + selectedPayrollDetail.payroll.otPay + selectedPayrollDetail.payroll.allowance + selectedPayrollDetail.payroll.bonus;
+                      const calculatedNetSalary = Math.round(totalIncome - selectedPayrollDetail.payroll.deductions);
+                      
+                      return (
+                        <>
                     {/* Summary Cards */}
                     <div className="grid grid-cols-2 gap-4">
                       <div className="bg-blue-50 rounded-xl p-4">
@@ -532,8 +559,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                       </div>
                       <div className="bg-green-50 rounded-xl p-4">
                         <p className="text-xs font-bold text-green-600 mb-1">Giờ làm việc</p>
-                        <p className="text-lg font-bold text-green-700">{(selectedPayrollDetail.payroll.actualWorkDays * workHoursPerDay).toFixed(1)}h</p>
-                        <p className="text-xs text-green-600">{selectedPayrollDetail.payroll.actualWorkDays.toFixed(2)} công</p>
+                        <p className="text-lg font-bold text-green-700">{totalActualHours.toFixed(1)}h</p>
+                        <p className="text-xs text-green-600">{(totalActualHours / workHoursPerDay).toFixed(2)} công</p>
                       </div>
                       <div className="bg-purple-50 rounded-xl p-4">
                         <p className="text-xs font-bold text-purple-600 mb-1">Giờ OT</p>
@@ -542,7 +569,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                       </div>
                       <div className="bg-orange-50 rounded-xl p-4">
                         <p className="text-xs font-bold text-orange-600 mb-1">Thực nhận</p>
-                        <p className="text-lg font-bold text-orange-700">{formatCurrency(selectedPayrollDetail.payroll.netSalary)}</p>
+                        <p className="text-lg font-bold text-orange-700">{formatCurrency(calculatedNetSalary)}</p>
                       </div>
                     </div>
 
@@ -550,29 +577,6 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                     <div className="bg-slate-50 rounded-xl p-6 space-y-3">
                       <h4 className="text-sm font-bold text-slate-700 mb-4">Chi tiết tính lương</h4>
                       
-                      {(() => {
-                        // Tính tổng giờ thực tế từ các ca
-                        let totalActualHours = 0;
-                        shiftDetails.forEach(shift => {
-                          let hours = workHoursPerDay;
-                          if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
-                            const [startHour, startMin] = shift.startTime.split(':').map(Number);
-                            const [endHour, endMin] = shift.endTime.split(':').map(Number);
-                            hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
-                            if (hours >= 6) hours = hours - 1;
-                          } else if (shift.shift === 'OFF' && shift.offType !== OffType.OFF_PN && shift.offType !== OffType.LE) {
-                            hours = 0;
-                          }
-                          if (hours > 0) totalActualHours += Math.min(hours, workHoursPerDay);
-                        });
-                        
-                        // Tính lương cơ bản từ tổng giờ thực tế
-                        const dailyRate = selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays;
-                        const hourlyRate = dailyRate / workHoursPerDay;
-                        const basicSalary = hourlyRate * totalActualHours;
-
-                        return (
-                          <>
                             <div className="flex justify-between items-center py-2 border-b border-slate-200">
                               <span className="text-sm text-slate-600">Lương theo ca làm việc</span>
                               <span className="text-sm font-bold text-slate-800">
@@ -588,9 +592,6 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                 = {formatCurrency(Math.round(hourlyRate))}/giờ
                               </span>
                             </div>
-                          </>
-                        );
-                      })()}
 
                     {selectedPayrollDetail.payroll.otHours > 0 && (
                       <>
@@ -632,9 +633,12 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
 
                     <div className="flex justify-between items-center py-3 bg-blue-50 rounded-lg px-4 mt-4">
                       <span className="text-base font-bold text-blue-700">Tổng thực nhận</span>
-                      <span className="text-xl font-bold text-blue-700">{formatCurrency(selectedPayrollDetail.payroll.netSalary)}</span>
+                      <span className="text-xl font-bold text-blue-700">{formatCurrency(calculatedNetSalary)}</span>
                     </div>
                   </div>
+                        </>
+                      );
+                    })()}
                 </div>
 
                 {/* RIGHT COLUMN - Shift Details */}
@@ -978,7 +982,15 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                         <p className="text-sm text-red-600">-{formatCurrency(item.deductions)}</p>
                       </td>
                       <td className="px-6 py-4">
-                        <p className="text-sm font-bold text-blue-600">{formatCurrency(item.netSalary)}</p>
+                        <p className="text-sm font-bold text-blue-600">
+                          {formatCurrency(
+                            Math.round(basicSalaryFromHours) + 
+                            Math.round(item.otPay) + 
+                            item.allowance + 
+                            item.bonus - 
+                            item.deductions
+                          )}
+                        </p>
                       </td>
                       <td className="px-6 py-4">
                         <span className={`text-xs font-bold px-2 py-1 rounded-lg ${
