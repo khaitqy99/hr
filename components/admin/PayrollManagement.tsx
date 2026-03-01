@@ -845,8 +845,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Giờ làm việc</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Ngày công</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">OT</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Phụ cấp</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Thưởng</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Tổng lương (trước BHXH)</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Khấu trừ</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Thực nhận</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Trạng thái</th>
@@ -889,18 +888,14 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                         )}
                       </td>
                       <td className="px-6 py-4">
-                        {item.allowance > 0 ? (
-                          <p className="text-sm text-green-600">+{formatCurrency(item.allowance)}</p>
-                        ) : (
-                          <p className="text-sm text-slate-400">-</p>
-                        )}
-                      </td>
-                      <td className="px-6 py-4">
-                        {item.bonus > 0 ? (
-                          <p className="text-sm text-green-600">+{formatCurrency(item.bonus)}</p>
-                        ) : (
-                          <p className="text-sm text-slate-400">-</p>
-                        )}
+                        <p className="text-sm font-bold text-slate-700">
+                          {formatCurrency(
+                            Math.round((item.baseSalary / item.standardWorkDays) * item.actualWorkDays) + 
+                            Math.round(item.otPay) + 
+                            item.allowance + 
+                            item.bonus
+                          )}
+                        </p>
                       </td>
                       <td className="px-6 py-4">
                         <p className="text-sm text-red-600">-{formatCurrency(item.deductions)}</p>
