@@ -676,6 +676,32 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                             return totalHours.toFixed(1);
                           })()}h)
                         </h4>
+                        {(() => {
+                          // Đếm số ngày có OT
+                          let otDaysCount = 0;
+                          shiftDetails.forEach(shift => {
+                            if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
+                              const [startHour, startMin] = shift.startTime.split(':').map(Number);
+                              const [endHour, endMin] = shift.endTime.split(':').map(Number);
+                              let hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
+                              if (hours >= 6 && !noLunchBreakDates.has(shift.date)) {
+                                hours = hours - 1;
+                              }
+                              if (hours > workHoursPerDay) {
+                                otDaysCount++;
+                              }
+                            }
+                          });
+                          
+                          if (otDaysCount > 0) {
+                            return (
+                              <p className="text-xs text-purple-600 mt-1">
+                                {otDaysCount} ngày có OT
+                              </p>
+                            );
+                          }
+                          return null;
+                        })()}
                       </div>
                       <div className="max-h-[600px] overflow-y-auto">
                         <table className="w-full">
@@ -689,11 +715,12 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                             {(() => {
                               // Tính tổng tiền từ actualWorkDays (đã được tính chính xác từ backend)
                               const dailyRate = selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays;
-                              const totalMoney = dailyRate * selectedPayrollDetail.payroll.actualWorkDays;
                               const hourlyRate = dailyRate / workHoursPerDay;
                               
                               // Tính tổng giờ thực tế từ các ca làm việc
                               let totalActualHours = 0;
+                              let totalOTHours = 0;
+                              let totalOTMoney = 0;
                               
                               const rows = shiftDetails
                                 .sort((a, b) => a.date - b.date)
@@ -707,6 +734,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                   let typeColor = 'text-green-600 bg-green-50';
                                   let money = 0;
                                   let isCustomShift = false;
+                                  let otHours = 0;
+                                  let otMoney = 0;
 
                                   if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
                                     isCustomShift = true;
@@ -718,8 +747,17 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                     if (hours >= 6 && !noLunchBreakDates.has(shift.date)) {
                                       hours = hours - 1;
                                     }
+                                    
+                                    // Tính giờ thường và giờ OT
                                     const regularHours = Math.min(hours, workHoursPerDay);
                                     money = hourlyRate * regularHours;
+                                    
+                                    // Nếu làm việc vượt quá workHoursPerDay thì tính OT
+                                    if (hours > workHoursPerDay) {
+                                      otHours = hours - workHoursPerDay;
+                                      const otHourlyRate = hourlyRate * 1.5; // OT rate x1.5
+                                      otMoney = otHourlyRate * otHours;
+                                    }
                                   } else if (shift.shift === 'OFF') {
                                     if (shift.offType === OffType.OFF_PN) {
                                       typeLabel = 'Phép năm';
@@ -750,16 +788,29 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                     money = dailyRate;
                                   }
 
-                                  // Cộng dồn giờ làm việc thực tế (chỉ tính giờ có lương)
+                              // Cộng dồn giờ làm việc thực tế (chỉ tính giờ có lương)
                                   if (hours > 0) {
                                     totalActualHours += Math.min(hours, workHoursPerDay);
+                                  }
+                                  
+                                  // Cộng dồn OT
+                                  if (otHours > 0) {
+                                    totalOTHours += otHours;
+                                    totalOTMoney += otMoney;
                                   }
 
                                   return (
                                     <tr key={idx} className="hover:bg-slate-50">
                                       <td className="px-4 py-3 border-r border-slate-100">
                                         <div className="space-y-1">
-                                          <p className="text-sm font-bold text-slate-700">{dateStr}</p>
+                                          <div className="flex items-center gap-2">
+                                            <p className="text-sm font-bold text-slate-700">{dateStr}</p>
+                                            {otHours > 0 && (
+                                              <span className="inline-block text-xs font-bold px-2 py-0.5 rounded bg-purple-100 text-purple-700">
+                                                OT
+                                              </span>
+                                            )}
+                                          </div>
                                           <p className="text-xs text-slate-600">{shiftLabel}</p>
                                           <span className={`inline-block text-xs font-bold px-2 py-0.5 rounded ${typeColor}`}>
                                             {typeLabel}
@@ -787,6 +838,16 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                           <p className="text-base font-bold text-blue-600">
                                             {money > 0 ? formatCurrency(Math.round(money)) : '-'}
                                           </p>
+                                          {otHours > 0 && (
+                                            <>
+                                              <p className="text-xs font-bold text-purple-600 mt-1">
+                                                OT: {otHours.toFixed(1)}h
+                                              </p>
+                                              <p className="text-sm font-bold text-purple-600">
+                                                +{formatCurrency(Math.round(otMoney))}
+                                              </p>
+                                            </>
+                                          )}
                                         </div>
                                       </td>
                                     </tr>
@@ -803,6 +864,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                     <div className="space-y-1">
                                       <p className="text-sm text-blue-700">Tổng cộng</p>
                                       <p className="text-xs text-blue-600">{(totalActualHours / workHoursPerDay).toFixed(2)} công</p>
+                                      {totalOTHours > 0 && (
+                                        <p className="text-xs text-purple-600">+ {totalOTHours.toFixed(1)}h OT</p>
+                                      )}
                                     </div>
                                   </td>
                                   <td className="px-4 py-3 text-right">
@@ -813,6 +877,16 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                       <p className="text-lg text-blue-700">
                                         {formatCurrency(Math.round(totalMoneyFromHours))}
                                       </p>
+                                      {totalOTHours > 0 && (
+                                        <>
+                                          <p className="text-xs text-purple-600 mt-1">
+                                            OT: {totalOTHours.toFixed(1)}h
+                                          </p>
+                                          <p className="text-base text-purple-700">
+                                            +{formatCurrency(Math.round(totalOTMoney))}
+                                          </p>
+                                        </>
+                                      )}
                                     </div>
                                   </td>
                                 </tr>

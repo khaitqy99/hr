@@ -2,7 +2,10 @@
 
 ## Tổng quan
 
-Tính năng mới này cho phép admin điều chỉnh tính lương cho những ngày mà nhân viên không có nghỉ trưa (không trừ 1 giờ) trong dialog chi tiết lương.
+Tính năng mới này cho phép admin:
+1. Chọn những ngày mà nhân viên không có nghỉ trưa (không trừ 1 giờ) trong dialog chi tiết lương
+2. Xem chi tiết giờ OT cho từng ngày làm việc
+3. Theo dõi tổng OT trong tháng
 
 ## Cách sử dụng
 
@@ -16,7 +19,14 @@ Tính năng mới này cho phép admin điều chỉnh tính lương cho những
 
 Trong dialog chi tiết lương, bạn sẽ thấy:
 - Phần bên trái: Tổng quan lương (lương cơ bản, giờ làm việc, OT, thực nhận)
-- Phần bên phải: Chi tiết từng ca làm việc
+- Phần bên phải: Chi tiết từng ca làm việc với:
+  - Ngày làm việc
+  - Giờ vào - giờ ra
+  - Loại ca (Làm việc, OFF, Phép năm, v.v.)
+  - Số giờ làm việc thường
+  - Số tiền lương thường
+  - **Số giờ OT (nếu có)** - màu tím
+  - **Số tiền OT (nếu có)** - màu tím
 
 ### Bước 3: Chọn ngày không nghỉ trưa
 
@@ -30,11 +40,62 @@ Với mỗi ca CUSTOM có thời gian >= 6 giờ, bạn sẽ thấy một checkb
 
 Khi bạn check/uncheck checkbox, hệ thống sẽ tự động:
 - Cập nhật số giờ làm việc của ca đó
+- Tính lại số giờ OT (nếu vượt quá 8h)
 - Tính lại tổng giờ làm việc trong tháng
+- Tính lại tổng OT trong tháng
 - Tính lại lương tương ứng
 - Cập nhật số tiền thực nhận
 
 Tất cả các thay đổi được hiển thị real-time, không cần reload trang.
+
+## Hiển thị OT trong chi tiết ca
+
+### Tiêu đề bảng
+Ở đầu bảng chi tiết ca làm việc, bạn sẽ thấy:
+```
+Chi tiết ca làm việc (176.0h)
+5 ngày có OT  ← Số ngày có OT trong tháng (màu tím)
+```
+
+### Chi tiết từng ca
+Với mỗi ca làm việc, nếu có OT (làm việc > 8 giờ), hệ thống sẽ hiển thị:
+
+```
+15/01 [OT]    ← Badge OT màu tím
+08:00 - 18:00
+Làm việc
+
+8.0h              ← Giờ thường
+500,000đ          ← Lương thường
+
+OT: 2.0h          ← Giờ OT (màu tím)
++150,000đ         ← Lương OT (màu tím)
+```
+
+### Các ngày KHÔNG có OT
+```
+10/01
+08:00 - 16:00
+Làm việc
+
+7.0h              ← Giờ thường (< 8h)
+437,500đ          ← Lương thường
+                  ← Không có OT
+```
+
+### Phần tổng cộng
+Phần tổng cộng cũng sẽ hiển thị:
+```
+Tổng cộng
+22.50 công
++ 5.0h OT         ← Tổng OT trong tháng
+
+176.0h
+14,080,000đ
+
+OT: 5.0h          ← Chi tiết OT
++750,000đ         ← Tiền OT
+```
 
 ## Ví dụ minh họa
 
@@ -44,13 +105,15 @@ Tất cả các thay đổi được hiển thị real-time, không cần reload
 
 - **Không check "Không nghỉ trưa":**
   - Giờ làm việc tính lương: 10h - 1h = 9h
-  - Nhưng chỉ tính tối đa 8h (work_hours_per_day)
-  - Lương = 8h × hourly_rate
+  - Giờ thường: 8h → Lương = 8h × hourly_rate
+  - Giờ OT: 1h → Lương OT = 1h × hourly_rate × 1.5
+  - **Hiển thị:** 8.0h + OT: 1.0h
 
 - **Check "Không nghỉ trưa":**
   - Giờ làm việc tính lương: 10h (không trừ)
-  - Nhưng chỉ tính tối đa 8h (work_hours_per_day)
-  - Lương = 8h × hourly_rate
+  - Giờ thường: 8h → Lương = 8h × hourly_rate
+  - Giờ OT: 2h → Lương OT = 2h × hourly_rate × 1.5 ✅ **+1 giờ OT**
+  - **Hiển thị:** 8.0h + OT: 2.0h
 
 ### Trường hợp 2: Ca làm việc ngắn hơn
 
@@ -58,11 +121,31 @@ Tất cả các thay đổi được hiển thị real-time, không cần reload
 
 - **Không check "Không nghỉ trưa":**
   - Giờ làm việc tính lương: 6h - 1h = 5h
-  - Lương = 5h × hourly_rate
+  - Giờ thường: 5h → Lương = 5h × hourly_rate
+  - Giờ OT: 0h (không có OT)
+  - **Hiển thị:** 5.0h
 
 - **Check "Không nghỉ trưa":**
   - Giờ làm việc tính lương: 6h (không trừ)
-  - Lương = 6h × hourly_rate
+  - Giờ thường: 6h → Lương = 6h × hourly_rate ✅ **+1 giờ**
+  - Giờ OT: 0h (vẫn chưa đủ 8h để có OT)
+  - **Hiển thị:** 6.0h
+
+### Trường hợp 3: Ca làm việc dài
+
+**Ca làm việc:** 08:00 - 20:00 (12 giờ)
+
+- **Không check "Không nghỉ trưa":**
+  - Giờ làm việc tính lương: 12h - 1h = 11h
+  - Giờ thường: 8h → Lương = 8h × hourly_rate
+  - Giờ OT: 3h → Lương OT = 3h × hourly_rate × 1.5
+  - **Hiển thị:** 8.0h + OT: 3.0h
+
+- **Check "Không nghỉ trưa":**
+  - Giờ làm việc tính lương: 12h (không trừ)
+  - Giờ thường: 8h → Lương = 8h × hourly_rate
+  - Giờ OT: 4h → Lương OT = 4h × hourly_rate × 1.5 ✅ **+1 giờ OT**
+  - **Hiển thị:** 8.0h + OT: 4.0h
 
 ## Lưu ý quan trọng
 
@@ -111,8 +194,17 @@ A: Checkbox chỉ hiển thị cho ca CUSTOM có thời gian >= 6 giờ. Các ca
 **Q: Làm sao để lưu lại các thay đổi?**
 A: Hiện tại tính năng này chỉ để xem và tính toán tạm thời. Nếu cần lưu lại, vui lòng liên hệ với đội phát triển để thêm tính năng lưu trữ.
 
-**Q: Tại sao số giờ vẫn là 8h dù tôi đã check "Không nghỉ trưa"?**
-A: Hệ thống có giới hạn tối đa là work_hours_per_day (mặc định 8h). Nếu ca làm việc dài hơn, phần vượt quá sẽ được tính là OT.
+**Q: OT được tính như thế nào?**
+A: OT được tính khi số giờ làm việc vượt quá 8h (work_hours_per_day). Công thức: OT_hours = total_hours - 8h. Lương OT = OT_hours × hourly_rate × 1.5
+
+**Q: Tại sao khi tick "Không nghỉ trưa" thì OT tăng thêm 1 giờ?**
+A: Vì khi không trừ 1 giờ nghỉ trưa, tổng giờ làm việc tăng lên 1 giờ. Nếu ca đã vượt quá 8h, giờ tăng thêm này sẽ được tính vào OT.
 
 **Q: Có thể áp dụng cho tất cả các ca trong tháng không?**
 A: Hiện tại cần check từng ca một. Nếu cần tính năng "Áp dụng cho tất cả", vui lòng liên hệ với đội phát triển.
+
+**Q: Làm sao biết ngày nào có OT?**
+A: Các ngày có OT sẽ được đánh dấu bằng badge màu tím [OT] bên cạnh ngày tháng. Ở đầu bảng cũng hiển thị tổng số ngày có OT trong tháng.
+
+**Q: Màu tím trong bảng chi tiết là gì?**
+A: Màu tím được dùng để hiển thị thông tin OT (badge OT, số giờ OT, tiền OT), giúp dễ phân biệt với giờ làm việc thường (màu xanh).
