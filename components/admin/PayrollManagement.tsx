@@ -38,6 +38,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
   const [detailLoading, setDetailLoading] = useState(false);
   const [shiftDetails, setShiftDetails] = useState<ShiftRegistration[]>([]);
   const [allShiftsInMonth, setAllShiftsInMonth] = useState<ShiftRegistration[]>([]); // Lưu tất cả shifts trong tháng
+  const [noLunchBreakDates, setNoLunchBreakDates] = useState<Set<number>>(new Set()); // Lưu các ngày không có nghỉ trưa
+  const [isRecalculatingDetail, setIsRecalculatingDetail] = useState(false);
 
   useEffect(() => {
     const initData = async () => {
@@ -443,6 +445,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
   const handleViewPayrollDetail = async (payroll: PayrollRecord, employee: User) => {
     setSelectedPayrollDetail({ payroll, employee });
     setDetailLoading(true);
+    setNoLunchBreakDates(new Set()); // Reset khi mở dialog mới
     try {
       // Load shift details for the month
       const shifts = await getShiftRegistrations(employee.id);
@@ -463,6 +466,38 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
     } finally {
       setDetailLoading(false);
     }
+  };
+
+  const toggleNoLunchBreak = (shiftDate: number) => {
+    setNoLunchBreakDates(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(shiftDate)) {
+        newSet.delete(shiftDate);
+      } else {
+        newSet.add(shiftDate);
+      }
+      return newSet;
+    });
+  };
+
+  const calculateTotalHoursWithNoLunchBreak = (shifts: ShiftRegistration[], noLunchDates: Set<number>): number => {
+    let totalHours = 0;
+    shifts.forEach(shift => {
+      let hours = workHoursPerDay;
+      if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
+        const [startHour, startMin] = shift.startTime.split(':').map(Number);
+        const [endHour, endMin] = shift.endTime.split(':').map(Number);
+        hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
+        // Chỉ trừ 1h nghỉ trưa nếu ca >= 6 giờ VÀ ngày này KHÔNG được đánh dấu "không nghỉ trưa"
+        if (hours >= 6 && !noLunchDates.has(shift.date)) {
+          hours = hours - 1;
+        }
+      } else if (shift.shift === 'OFF' && shift.offType !== OffType.OFF_PN && shift.offType !== OffType.LE) {
+        hours = 0;
+      }
+      if (hours > 0) totalHours += Math.min(hours, workHoursPerDay);
+    });
+    return totalHours;
   };
 
   const handleUpdatePayrollStatus = async (status: 'PAID' | 'PENDING') => {
@@ -525,20 +560,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                   {/* LEFT COLUMN - Summary & Breakdown */}
                   <div className="space-y-6">
                     {(() => {
-                      // Tính tổng giờ thực tế từ các ca
-                      let totalActualHours = 0;
-                      shiftDetails.forEach(shift => {
-                        let hours = workHoursPerDay;
-                        if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
-                          const [startHour, startMin] = shift.startTime.split(':').map(Number);
-                          const [endHour, endMin] = shift.endTime.split(':').map(Number);
-                          hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
-                          if (hours >= 6) hours = hours - 1;
-                        } else if (shift.shift === 'OFF' && shift.offType !== OffType.OFF_PN && shift.offType !== OffType.LE) {
-                          hours = 0;
-                        }
-                        if (hours > 0) totalActualHours += Math.min(hours, workHoursPerDay);
-                      });
+                      // Tính tổng giờ thực tế từ các ca - có tính đến noLunchBreakDates
+                      const totalActualHours = calculateTotalHoursWithNoLunchBreak(shiftDetails, noLunchBreakDates);
                       
                       // Tính lương cơ bản từ tổng giờ thực tế
                       const dailyRate = selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays;
@@ -648,20 +671,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                       <div className="bg-slate-50 px-6 py-3 border-b border-slate-200">
                         <h4 className="text-sm font-bold text-slate-700">
                           Chi tiết ca làm việc ({(() => {
-                            // Tính tổng giờ từ shiftDetails để hiển thị trong tiêu đề
-                            let totalHours = 0;
-                            shiftDetails.forEach(shift => {
-                              let hours = workHoursPerDay;
-                              if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
-                                const [startHour, startMin] = shift.startTime.split(':').map(Number);
-                                const [endHour, endMin] = shift.endTime.split(':').map(Number);
-                                hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
-                                if (hours >= 6) hours = hours - 1;
-                              } else if (shift.shift === 'OFF' && shift.offType !== OffType.OFF_PN && shift.offType !== OffType.LE) {
-                                hours = 0;
-                              }
-                              if (hours > 0) totalHours += Math.min(hours, workHoursPerDay);
-                            });
+                            // Tính tổng giờ từ shiftDetails với xét đến noLunchBreakDates
+                            const totalHours = calculateTotalHoursWithNoLunchBreak(shiftDetails, noLunchBreakDates);
                             return totalHours.toFixed(1);
                           })()}h)
                         </h4>
@@ -695,14 +706,16 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                   let typeLabel = 'Làm việc';
                                   let typeColor = 'text-green-600 bg-green-50';
                                   let money = 0;
+                                  let isCustomShift = false;
 
                                   if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
+                                    isCustomShift = true;
                                     shiftLabel = `${shift.startTime} - ${shift.endTime}`;
                                     const [startHour, startMin] = shift.startTime.split(':').map(Number);
                                     const [endHour, endMin] = shift.endTime.split(':').map(Number);
                                     hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
-                                    // Tự động trừ 1 giờ nghỉ trưa nếu ca >= 6 giờ
-                                    if (hours >= 6) {
+                                    // Tự động trừ 1 giờ nghỉ trưa nếu ca >= 6 giờ VÀ không được đánh dấu "không nghỉ trưa"
+                                    if (hours >= 6 && !noLunchBreakDates.has(shift.date)) {
                                       hours = hours - 1;
                                     }
                                     const regularHours = Math.min(hours, workHoursPerDay);
@@ -751,6 +764,19 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                           <span className={`inline-block text-xs font-bold px-2 py-0.5 rounded ${typeColor}`}>
                                             {typeLabel}
                                           </span>
+                                          {isCustomShift && hours >= 5 && (
+                                            <div className="mt-2">
+                                              <label className="flex items-center gap-2 cursor-pointer">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={noLunchBreakDates.has(shift.date)}
+                                                  onChange={() => toggleNoLunchBreak(shift.date)}
+                                                  className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                                                />
+                                                <span className="text-xs text-slate-600">Không nghỉ trưa</span>
+                                              </label>
+                                            </div>
+                                          )}
                                         </div>
                                       </td>
                                       <td className="px-4 py-3 text-right">
