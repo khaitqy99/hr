@@ -248,6 +248,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
 
         // Tính tổng lương trước BHXH
         const totalBeforeDeduction = Math.round(workDaySalary) + Math.round(mandatoryOTSalary) + payroll.allowance + payroll.bonus;
+        
+        // Tính thực lãnh sau BHXH (giống như trên UI)
+        const netSalaryCalculated = totalBeforeDeduction - payroll.deductions;
 
         // Helper function để format số tiền với dấu phẩy ngăn cách
         const formatNumber = (num: number): string => {
@@ -267,7 +270,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
           formatNumber(payroll.allowance), // Format với dấu phẩy
           formatNumber(payroll.bonus), // Format với dấu phẩy
           formatNumber(totalBeforeDeduction), // Tổng lương trước BHXH
-          formatNumber(payroll.netSalary), // Thực lãnh sau BHXH
+          formatNumber(netSalaryCalculated), // Thực lãnh sau BHXH - tính từ giờ thực tế
           '', // Ghi chú
         ];
 
