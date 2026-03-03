@@ -133,6 +133,7 @@ export interface ShiftRegistration {
   endTime?: string;   // Format "HH:mm" - chỉ dùng khi shift === CUSTOM
   offType?: OffType;  // Loại off - chỉ dùng khi shift === OFF
   status: RequestStatus;
+  reason?: string; // Lý do đăng ký/đổi lịch (nhân viên nhập)
   rejectionReason?: string; // Lý do từ chối (khi status === REJECTED)
   createdAt: number;
 }

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { ShiftRegistration, RequestStatus, User, UserRole, ShiftTime, OFF_TYPE_LABELS, Holiday, Department, OffType } from '../../types';
+import { ShiftRegistration, RequestStatus, User, UserRole, ShiftTime, OFF_TYPE_LABELS, Holiday, Department, OffType, EmployeeStatus } from '../../types';
 import { getShiftRegistrations, updateShiftStatus, updateShiftRegistration, registerShift, getAllUsers, getHolidays, getDepartments } from '../../services/db';
 import { exportToCSV } from '../../utils/export';
 import CustomSelect from '../CustomSelect';
@@ -272,6 +272,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
   const gridEmployees = useMemo(() => {
     return employees
       .filter((u) => u.role === UserRole.EMPLOYEE || u.role === UserRole.MANAGER || u.role === UserRole.HR)
+      .filter((u) => u.status !== EmployeeStatus.LEFT) // Lọc bỏ nhân viên đã nghỉ việc
       .filter((u) => !departmentFilter || u.department === departmentFilter)
       .filter((u) => !searchName.trim() || u.name.toLowerCase().includes(searchName.trim().toLowerCase()));
   }, [employees, departmentFilter, searchName]);
@@ -959,6 +960,12 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                           <p><span className="font-medium text-slate-600">Giờ vào:</span> {cellDetail.reg.startTime ?? DEFAULT_IN}</p>
                           <p><span className="font-medium text-slate-600">Giờ ra:</span> {cellDetail.reg.endTime ?? DEFAULT_OUT}</p>
                         </>
+                      )}
+                      {cellDetail.reg.reason && (
+                        <p className="mt-2 pt-2 border-t border-slate-100">
+                          <span className="font-medium text-slate-600">Lý do đăng ký:</span>{' '}
+                          <span className="text-slate-700 italic">{cellDetail.reg.reason}</span>
+                        </p>
                       )}
                       {cellDetail.reg.status === RequestStatus.REJECTED && cellDetail.reg.rejectionReason && (
                         <p className="mt-2 pt-2 border-t border-slate-100">

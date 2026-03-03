@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, ShiftRegistration, ShiftTime, RequestStatus, OffType, OFF_TYPE_LABELS, Holiday } from '../types';
 import { registerShift, getShiftRegistrations, getHolidays, updateShiftRegistration } from '../services/db';
+import { sendShiftChangeNotification } from '../services/email';
 import CustomSelect from './CustomSelect';
 
 interface ShiftRegisterProps {
@@ -36,6 +37,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
   const [dateShifts, setDateShifts] = useState<Record<string, ShiftTime | null>>({});
   const [dateCustomTimes, setDateCustomTimes] = useState<Record<string, { startTime: string; endTime: string }>>({});
   const [dateOffTypes, setDateOffTypes] = useState<Record<string, OffType>>({});
+  const [dateReasons, setDateReasons] = useState<Record<string, string>>({});
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
@@ -241,6 +243,9 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
     const newOffTypes = { ...dateOffTypes };
     delete newOffTypes[dateStr];
     setDateOffTypes(newOffTypes);
+    const newReasons = { ...dateReasons };
+    delete newReasons[dateStr];
+    setDateReasons(newReasons);
     if (expandedDate === dateStr) {
       setExpandedDate(null);
     }
@@ -347,14 +352,9 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
   };
 
   const enterEditMode = (registeredShift: ShiftRegistration, dateStr: string) => {
-    // Không cho phép sửa ca đã được duyệt
-    if (registeredShift.status === RequestStatus.APPROVED) {
-      alert('Không thể sửa ca đã được duyệt. Vui lòng liên hệ admin nếu cần thay đổi.');
-      return;
-    }
-    
     setEditingShiftId(registeredShift.id);
     setDateShifts(prev => ({ ...prev, [dateStr]: registeredShift.shift }));
+    setDateReasons(prev => ({ ...prev, [dateStr]: registeredShift.reason || '' }));
     if (registeredShift.shift === ShiftTime.CUSTOM && registeredShift.startTime) {
       setDateCustomTimes(prev => ({
         ...prev,
@@ -379,6 +379,9 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
     const newOffTypes = { ...dateOffTypes };
     delete newOffTypes[dateStr];
     setDateOffTypes(newOffTypes);
+    const newReasons = { ...dateReasons };
+    delete newReasons[dateStr];
+    setDateReasons(newReasons);
   };
 
   const allDatesHaveShiftsForEdit = (dateStr: string): boolean => {
@@ -387,37 +390,110 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
     return !!(dateCustomTimes[dateStr]?.startTime);
   };
 
+  const isReasonRequiredForEdit = (registeredShift: ShiftRegistration | undefined): boolean => {
+    // Yêu cầu lý do nếu ca đã được duyệt
+    return registeredShift?.status === RequestStatus.APPROVED;
+  };
+
   const handleSaveChange = async (dateStr: string) => {
+    const registeredShift = shifts.find(s => toLocalDateStr(new Date(s.date)) === dateStr);
+    
     if (!editingShiftId || !allDatesHaveShiftsForEdit(dateStr)) return;
+    
+    // Kiểm tra lý do bắt buộc cho ca đã duyệt
+    if (isReasonRequiredForEdit(registeredShift) && !dateReasons[dateStr]?.trim()) {
+      alert('Vui lòng nhập lý do đổi ca đã được duyệt.');
+      return;
+    }
+    
     setLoading(true);
     try {
       const shiftType = dateShifts[dateStr];
       const customTime = dateCustomTimes[dateStr];
       const offType = dateOffTypes[dateStr];
+      const reason = dateReasons[dateStr]?.trim() || undefined;
+      
+      // Lưu thông tin ca cũ để gửi email
+      const wasApproved = registeredShift?.status === RequestStatus.APPROVED;
+      let oldShiftInfo = '';
+      let newShiftInfo = '';
+      
+      if (wasApproved && registeredShift) {
+        // Format thông tin ca cũ
+        if (registeredShift.shift === ShiftTime.OFF) {
+          oldShiftInfo = registeredShift.offType && OFF_TYPE_LABELS[registeredShift.offType] 
+            ? OFF_TYPE_LABELS[registeredShift.offType] 
+            : 'Ngày off';
+        } else {
+          oldShiftInfo = `Ca làm ${registeredShift.startTime || '09:00'} - ${registeredShift.endTime || '18:00'}`;
+        }
+      }
+      
       if (shiftType === ShiftTime.OFF) {
         await updateShiftRegistration(editingShiftId, {
           shift: ShiftTime.OFF,
           startTime: null,
           endTime: null,
-          offType: offType || OffType.OFF_PN
+          offType: offType || OffType.OFF_PN,
+          reason
         });
+        
+        if (wasApproved) {
+          newShiftInfo = offType && OFF_TYPE_LABELS[offType] 
+            ? OFF_TYPE_LABELS[offType] 
+            : 'Ngày off';
+        }
       } else if (customTime?.startTime) {
         const endTime = customTime.endTime || startTimePlus9Hours(customTime.startTime);
         await updateShiftRegistration(editingShiftId, {
           shift: ShiftTime.CUSTOM,
           startTime: customTime.startTime,
           endTime,
-          offType: null
+          offType: null,
+          reason
         });
+        
+        if (wasApproved) {
+          newShiftInfo = `Ca làm ${customTime.startTime} - ${endTime}`;
+        }
       } else {
         setLoading(false);
         return;
       }
+      
+      // Gửi email thông báo đến admin nếu ca đã duyệt
+      if (wasApproved && reason) {
+        const dateFormatted = new Date(dateStr + 'T12:00:00').toLocaleDateString('vi-VN', { 
+          weekday: 'long', 
+          day: 'numeric', 
+          month: 'long', 
+          year: 'numeric' 
+        });
+        
+        // Gửi email không đồng bộ, không chặn UI
+        sendShiftChangeNotification(
+          user.name,
+          user.email,
+          dateFormatted,
+          oldShiftInfo,
+          newShiftInfo,
+          reason
+        ).catch(error => {
+          console.error('Failed to send notification email:', error);
+          // Không hiển thị lỗi cho user vì đã lưu thành công
+        });
+      }
+      
       const updatedShifts = await getShiftRegistrations(user.id);
       updatedShifts.sort((a, b) => b.date - a.date);
       setShifts([...updatedShifts]);
       exitEditMode(dateStr);
       setExpandedDate(null);
+      
+      // Thông báo cho nhân viên biết ca sẽ cần duyệt lại
+      if (wasApproved) {
+        alert('Đã gửi yêu cầu đổi lịch. Ca sẽ chuyển về trạng thái chờ duyệt và admin sẽ nhận được email thông báo.');
+      }
     } catch (error: any) {
       console.error('Error updating shift:', error);
       alert('Lỗi khi đổi lịch: ' + (error?.message || 'Vui lòng thử lại'));
@@ -437,6 +513,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
       const shiftType = dateShifts[dateStr];
       const customTime = dateCustomTimes[dateStr];
       const offType = dateOffTypes[dateStr];
+      const reason = dateReasons[dateStr]?.trim() || undefined;
       
       if (shiftType === ShiftTime.OFF) {
         return {
@@ -445,6 +522,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
           date: dateObj.getTime(),
           shift: ShiftTime.OFF,
           offType: offType || OffType.OFF_PN,
+          reason,
           status: RequestStatus.PENDING,
           createdAt: Date.now()
         };
@@ -458,6 +536,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
         shift: ShiftTime.CUSTOM,
         startTime: customTime.startTime,
         endTime,
+        reason,
         status: RequestStatus.PENDING,
         createdAt: Date.now()
       };
@@ -497,6 +576,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
         setDateShifts({});
         setDateCustomTimes({});
         setDateOffTypes({});
+        setDateReasons({});
         setExpandedDate(null);
       }
     } catch (error: any) {
@@ -738,6 +818,29 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                                                         </div>
                                                     </div>
                                                 )}
+                                                <div className="mb-3">
+                                                    <p className="text-[11px] text-slate-600 font-medium mb-1.5">
+                                                        Lý do đổi lịch {isReasonRequiredForEdit(registeredShift) && <span className="text-red-600">*</span>}
+                                                    </p>
+                                                    {isReasonRequiredForEdit(registeredShift) && (
+                                                        <p className="text-[9px] text-amber-600 mb-1.5">
+                                                            ⚠️ Ca đã duyệt - Bắt buộc nhập lý do để admin xem xét lại
+                                                        </p>
+                                                    )}
+                                                    <textarea
+                                                        value={dateReasons[dateStr] || ''}
+                                                        onChange={(e) => setDateReasons(prev => ({ ...prev, [dateStr]: e.target.value }))}
+                                                        placeholder={isReasonRequiredForEdit(registeredShift) 
+                                                            ? "Ví dụ: Có việc đột xuất, cần thay đổi giờ làm..." 
+                                                            : "Ví dụ: Có việc đột xuất (tùy chọn)"}
+                                                        className={`w-full rounded-lg border px-2.5 py-2 text-[11px] text-slate-700 placeholder:text-slate-400 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 ${
+                                                            isReasonRequiredForEdit(registeredShift) 
+                                                                ? 'border-amber-300 bg-amber-50/30' 
+                                                                : 'border-slate-200'
+                                                        }`}
+                                                        rows={2}
+                                                    />
+                                                </div>
                                                 <div className="flex gap-1.5 pt-2 border-t border-slate-200">
                                                     <button
                                                         type="button"
@@ -798,36 +901,34 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                                                         </div>
                                                     )}
                                                     {registeredShift.status === RequestStatus.APPROVED && (
-                                                        <div className="mt-2 p-2.5 rounded-xl bg-green-50 border border-green-100">
-                                                            <p className="text-[11px] font-medium text-green-700">
-                                                                ✓ Ca này đã được duyệt và không thể thay đổi.
+                                                        <div className="mt-2 p-2.5 rounded-xl bg-blue-50 border border-blue-100">
+                                                            <p className="text-[11px] font-medium text-blue-700">
+                                                                ✓ Ca này đã được duyệt.
                                                             </p>
-                                                            <p className="text-[10px] text-green-600 mt-1">
-                                                                Nếu cần thay đổi, vui lòng liên hệ admin nhé.
+                                                            <p className="text-[10px] text-blue-600 mt-1">
+                                                                Bạn vẫn có thể đổi lịch, nhưng cần nhập lý do và chờ admin duyệt lại.
                                                             </p>
                                                         </div>
                                                     )}
                                                 </div>
                                                 <div className="flex gap-1.5 pt-3 mt-3 border-t border-slate-100">
-                                                    {registeredShift.status !== RequestStatus.APPROVED && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => enterEditMode(registeredShift, dateStr)}
-                                                            className={`flex-1 py-1.5 rounded-lg text-[10px] font-medium transition-colors ${
-                                                                registeredShift.status === RequestStatus.REJECTED
-                                                                    ? 'bg-rose-600 text-white hover:bg-rose-700'
-                                                                    : 'bg-slate-900 text-white hover:bg-slate-800'
-                                                            }`}
-                                                        >
-                                                            Đổi lịch
-                                                        </button>
-                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => enterEditMode(registeredShift, dateStr)}
+                                                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-medium transition-colors ${
+                                                            registeredShift.status === RequestStatus.REJECTED
+                                                                ? 'bg-rose-600 text-white hover:bg-rose-700'
+                                                                : registeredShift.status === RequestStatus.APPROVED
+                                                                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                                                                : 'bg-slate-900 text-white hover:bg-slate-800'
+                                                        }`}
+                                                    >
+                                                        Đổi lịch
+                                                    </button>
                                                     <button
                                                         type="button"
                                                         onClick={() => setExpandedDate(null)}
-                                                        className={`py-1.5 rounded-lg text-slate-500 text-[10px] font-medium hover:bg-slate-50 hover:text-slate-700 transition-colors ${
-                                                            registeredShift.status === RequestStatus.APPROVED ? 'flex-1' : 'px-3'
-                                                        }`}
+                                                        className="px-3 py-1.5 rounded-lg text-slate-500 text-[10px] font-medium hover:bg-slate-50 hover:text-slate-700 transition-colors"
                                                     >
                                                         Đóng
                                                     </button>
@@ -902,6 +1003,16 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                                                         </div>
                                                     </div>
                                                 )}
+                                                <div className="mb-3">
+                                                    <p className="text-[11px] text-slate-600 font-medium mb-1.5">Lý do đăng ký (tùy chọn)</p>
+                                                    <textarea
+                                                        value={dateReasons[dateStr] || ''}
+                                                        onChange={(e) => setDateReasons(prev => ({ ...prev, [dateStr]: e.target.value }))}
+                                                        placeholder="Ví dụ: Có việc gia đình, cần đổi ca..."
+                                                        className="w-full rounded-lg border border-slate-200 px-2.5 py-2 text-[11px] text-slate-700 placeholder:text-slate-400 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                                                        rows={2}
+                                                    />
+                                                </div>
                                                 <div className="flex gap-1.5 pt-3 border-t border-sky-100">
                                                     <button
                                                         type="button"

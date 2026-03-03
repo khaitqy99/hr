@@ -3,8 +3,8 @@
  * Edge Function chạy trên server-side nên không có vấn đề CORS và API key được bảo mật
  */
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || '';
+const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
 
 /**
  * Gửi email OTP qua Supabase Edge Function
@@ -75,6 +75,82 @@ export const sendOTPEmail = async (
     return {
       success: false,
       error: error.message || 'Không thể gửi email OTP',
+    };
+  }
+};
+
+/**
+ * Gửi email thông báo đến admin khi nhân viên đổi ca đã duyệt
+ */
+export const sendShiftChangeNotification = async (
+  employeeName: string,
+  employeeEmail: string,
+  date: string,
+  oldShift: string,
+  newShift: string,
+  reason: string
+): Promise<{ success: boolean; error?: string }> => {
+  try {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      return { success: false, error: 'Supabase chưa được cấu hình' };
+    }
+
+    const functionUrl = `${SUPABASE_URL}/functions/v1/send-shift-change-notification`;
+    
+    const response = await fetch(functionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'apikey': SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({
+        employeeName,
+        employeeEmail,
+        date,
+        oldShift,
+        newShift,
+        reason,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = { error: errorText || `HTTP ${response.status}` };
+      }
+      
+      console.error('Edge Function error:', {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorData,
+      });
+      
+      return {
+        success: false,
+        error: errorData.error || `Không thể gửi email thông báo. Status: ${response.status}`,
+      };
+    }
+
+    const data = await response.json();
+    
+    if (!data || !data.success) {
+      return {
+        success: false,
+        error: data?.error || 'Không thể gửi email thông báo',
+      };
+    }
+
+    console.log('Shift change notification sent successfully');
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error sending shift change notification:', error);
+    return {
+      success: false,
+      error: error.message || 'Không thể gửi email thông báo',
     };
   }
 };

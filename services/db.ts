@@ -1072,6 +1072,7 @@ export const getShiftRegistrations = async (userId?: string, role?: UserRole): P
         startTime: shift.start_time || undefined,
         endTime: shift.end_time || undefined,
         offType: shift.off_type as any,
+        reason: shift.reason || undefined,
         status: shift.status as RequestStatus,
         rejectionReason: shift.rejection_reason || undefined,
         createdAt: shift.created_at,
@@ -1107,6 +1108,7 @@ export const registerShift = async (
           start_time: shift.startTime || null,
           end_time: shift.endTime || null,
           off_type: shift.offType || null,
+          reason: shift.reason || null,
           status,
           created_at: shift.createdAt,
         });
@@ -1178,7 +1180,7 @@ export const updateShiftStatus = async (id: string, status: RequestStatus, rejec
 /** Cập nhật nội dung ca đã đăng ký (đổi lịch). Nhân viên: chuyển PENDING. Admin: keepStatus=true giữ nguyên trạng thái. */
 export const updateShiftRegistration = async (
   id: string,
-  data: { shift: string; startTime?: string | null; endTime?: string | null; offType?: string | null },
+  data: { shift: string; startTime?: string | null; endTime?: string | null; offType?: string | null; reason?: string },
   options?: { keepStatus?: boolean }
 ): Promise<void> => {
   const setPending = !options?.keepStatus;
@@ -1189,6 +1191,7 @@ export const updateShiftRegistration = async (
         start_time: data.startTime || null,
         end_time: data.endTime || null,
         off_type: data.offType || null,
+        reason: data.reason || null,
         rejection_reason: null,
       };
       if (setPending) {
@@ -1219,6 +1222,7 @@ export const updateShiftRegistration = async (
       startTime: data.startTime || undefined,
       endTime: data.endTime || undefined,
       offType: (data.offType as OffType) || undefined,
+      reason: data.reason || undefined,
       status: setPending ? RequestStatus.PENDING : all[idx].status,
       rejectionReason: undefined,
     };
