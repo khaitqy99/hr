@@ -1029,6 +1029,11 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                 {payrollRecords.map((item: PayrollRecord) => {
                   const employee = employees.find(e => e.id === item.userId);
                   
+                  // Ẩn nhân viên đã nghỉ việc
+                  if (!employee || employee.status !== 'ACTIVE') {
+                    return null;
+                  }
+                  
                   // Tính tổng giờ thực tế từ shifts của nhân viên này
                   const userShifts = allShiftsInMonth.filter(s => s.userId === item.userId);
                   const totalActualHours = calculateTotalHoursFromShifts(userShifts, workHoursPerDay);
