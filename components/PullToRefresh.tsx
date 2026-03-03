@@ -42,10 +42,16 @@ const PullToRefresh: React.FC<PullToRefreshProps> = ({
       const currentY = e.touches[0].clientY;
       const distance = currentY - touchStartY.current;
 
+      // Chỉ preventDefault khi kéo xuống (pull down), không chặn khi vuốt lên
       if (distance > 0) {
         e.preventDefault();
         setIsPulling(true);
         setPullDistance(Math.min(distance, threshold * 1.5));
+      } else {
+        // Vuốt lên - reset và cho phép scroll bình thường
+        touchStartY.current = null;
+        setIsPulling(false);
+        setPullDistance(0);
       }
     };
 
