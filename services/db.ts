@@ -1075,6 +1075,7 @@ export const getShiftRegistrations = async (userId?: string, role?: UserRole): P
         reason: shift.reason || undefined,
         status: shift.status as RequestStatus,
         rejectionReason: shift.rejection_reason || undefined,
+        note: shift.note || undefined,
         createdAt: shift.created_at,
       }));
     } catch (error) {
@@ -1180,7 +1181,7 @@ export const updateShiftStatus = async (id: string, status: RequestStatus, rejec
 /** Cập nhật nội dung ca đã đăng ký (đổi lịch). Nhân viên: chuyển PENDING. Admin: keepStatus=true giữ nguyên trạng thái. */
 export const updateShiftRegistration = async (
   id: string,
-  data: { shift: string; startTime?: string | null; endTime?: string | null; offType?: string | null; reason?: string },
+  data: { shift: string; startTime?: string | null; endTime?: string | null; offType?: string | null; reason?: string; note?: string },
   options?: { keepStatus?: boolean }
 ): Promise<void> => {
   const setPending = !options?.keepStatus;
@@ -1194,6 +1195,12 @@ export const updateShiftRegistration = async (
         reason: data.reason || null,
         rejection_reason: null,
       };
+      
+      // Only update note if it's provided (admin can update note)
+      if (data.note !== undefined) {
+        payload.note = data.note || null;
+      }
+      
       if (setPending) {
         (payload as Record<string, RequestStatus>).status = RequestStatus.PENDING;
       }
@@ -1226,6 +1233,12 @@ export const updateShiftRegistration = async (
       status: setPending ? RequestStatus.PENDING : all[idx].status,
       rejectionReason: undefined,
     };
+    
+    // Update note if provided
+    if (data.note !== undefined) {
+      all[idx].note = data.note || undefined;
+    }
+    
     localStorage.setItem(SHIFTS_KEY, JSON.stringify(all));
     invalidateShiftsCache();
     await emitShiftEvent('updated', id);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { PayrollRecord, User, UserRole, AttendanceRecord, AttendanceType, ShiftRegistration, OffType, Holiday, ContractType } from '../../types';
-import { getAllPayrolls, getAllUsers, calculatePayroll, createOrUpdatePayroll, getShiftRegistrations, getAllAttendance, getHolidays, getConfigNumber } from '../../services/db';
+import { getAllPayrolls, getAllUsers, calculatePayroll, createOrUpdatePayroll, getShiftRegistrations, getAllAttendance, getHolidays, getConfigNumber, updateShiftRegistration } from '../../services/db';
 import { exportMultipleTablesToCSV } from '../../utils/export';
 
 // Helper function để tính tổng giờ thực tế từ shifts
@@ -40,6 +40,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
   const [allShiftsInMonth, setAllShiftsInMonth] = useState<ShiftRegistration[]>([]); // Lưu tất cả shifts trong tháng
   const [noLunchBreakDates, setNoLunchBreakDates] = useState<Set<number>>(new Set()); // Lưu các ngày không có nghỉ trưa
   const [isRecalculatingDetail, setIsRecalculatingDetail] = useState(false);
+  const [editingNoteShiftId, setEditingNoteShiftId] = useState<string | null>(null);
+  const [noteInputValue, setNoteInputValue] = useState<string>('');
 
   useEffect(() => {
     const initData = async () => {
@@ -530,6 +532,49 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
     }
   };
 
+  const handleEditNote = (shift: ShiftRegistration) => {
+    setEditingNoteShiftId(shift.id);
+    setNoteInputValue(shift.note || '');
+  };
+
+  const handleSaveNote = async (shiftId: string) => {
+    try {
+      // Find the shift to get its current data
+      const shift = shiftDetails.find(s => s.id === shiftId);
+      if (!shift) {
+        alert('Không tìm thấy ca làm việc!');
+        return;
+      }
+      
+      await updateShiftRegistration(shiftId, { 
+        shift: shift.shift,
+        startTime: shift.startTime,
+        endTime: shift.endTime,
+        offType: shift.offType,
+        reason: shift.reason,
+        note: noteInputValue 
+      }, { keepStatus: true });
+      
+      // Update local state
+      setShiftDetails(prev => prev.map(s => 
+        s.id === shiftId ? { ...s, note: noteInputValue } : s
+      ));
+      
+      setEditingNoteShiftId(null);
+      setNoteInputValue('');
+      
+      alert('Đã lưu ghi chú thành công!');
+    } catch (err) {
+      console.error('Error saving note:', err);
+      alert('Có lỗi khi lưu ghi chú!');
+    }
+  };
+
+  const handleCancelEditNote = () => {
+    setEditingNoteShiftId(null);
+    setNoteInputValue('');
+  };
+
   return (
     <div className="space-y-6">
       {/* Payroll Detail Modal */}
@@ -831,6 +876,51 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                               </label>
                                             </div>
                                           )}
+                                          
+                                          {/* Note Section */}
+                                          <div className="mt-2 pt-2 border-t border-slate-200">
+                                            {editingNoteShiftId === shift.id ? (
+                                              <div className="space-y-2">
+                                                <textarea
+                                                  value={noteInputValue}
+                                                  onChange={(e) => setNoteInputValue(e.target.value)}
+                                                  placeholder="Nhập ghi chú..."
+                                                  className="w-full text-xs border border-slate-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                  rows={2}
+                                                />
+                                                <div className="flex gap-2">
+                                                  <button
+                                                    onClick={() => handleSaveNote(shift.id)}
+                                                    className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                                                  >
+                                                    Lưu
+                                                  </button>
+                                                  <button
+                                                    onClick={handleCancelEditNote}
+                                                    className="text-xs px-2 py-1 bg-slate-200 text-slate-700 rounded hover:bg-slate-300 transition-colors"
+                                                  >
+                                                    Hủy
+                                                  </button>
+                                                </div>
+                                              </div>
+                                            ) : (
+                                              <div className="space-y-1">
+                                                {shift.note ? (
+                                                  <div className="bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                                                    <p className="text-xs text-amber-800">{shift.note}</p>
+                                                  </div>
+                                                ) : (
+                                                  <p className="text-xs text-slate-400 italic">Chưa có ghi chú</p>
+                                                )}
+                                                <button
+                                                  onClick={() => handleEditNote(shift)}
+                                                  className="text-xs text-blue-600 hover:text-blue-700 hover:underline"
+                                                >
+                                                  {shift.note ? 'Sửa ghi chú' : 'Thêm ghi chú'}
+                                                </button>
+                                              </div>
+                                            )}
+                                          </div>
                                         </div>
                                       </td>
                                       <td className="px-4 py-3 text-right">

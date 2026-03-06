@@ -135,6 +135,7 @@ export interface ShiftRegistration {
   status: RequestStatus;
   reason?: string; // Lý do đăng ký/đổi lịch (nhân viên nhập)
   rejectionReason?: string; // Lý do từ chối (khi status === REJECTED)
+  note?: string; // Ghi chú từ admin cho ca làm việc
   createdAt: number;
 }
 

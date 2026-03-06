@@ -413,6 +413,16 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                                 </span>
                               </div>
                               <p className="text-xs text-slate-500 truncate">{shiftLabel}</p>
+                              
+                              {/* Display note if exists */}
+                              {shift.note && (
+                                <div className="mt-2 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                                  <p className="text-xs text-amber-800">
+                                    <span className="font-bold">Ghi chú: </span>
+                                    {shift.note}
+                                  </p>
+                                </div>
+                              )}
                             </div>
                             <div className="text-right flex-shrink-0">
                               <p className="text-sm font-bold text-slate-800">
