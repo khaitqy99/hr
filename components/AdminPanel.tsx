@@ -53,6 +53,7 @@ const DEFAULT_TAB: Tab = 'USERS';
 const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmployeeId, onLogout, initialTab, onTabChange }) => {
   const tabFromUrl = (initialTab && PATH_TO_TAB[initialTab]) ? PATH_TO_TAB[initialTab] : DEFAULT_TAB;
   const [activeTab, setActiveTab] = useState<Tab>(tabFromUrl);
+  const [language, setLanguage] = useState<'vi' | 'en'>('en');
 
   // Đồng bộ tab khi URL thay đổi (back/forward)
   React.useEffect(() => {
@@ -161,13 +162,13 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
   const renderContent = () => {
     switch (activeTab) {
       case 'USERS':
-        return <UsersManagement onEditUser={handleEditUser} onRegisterReload={registerReloadHandler} />;
+        return <UsersManagement onEditUser={handleEditUser} onRegisterReload={registerReloadHandler} language={language} />;
       case 'ATTENDANCE':
-        return <AttendanceManagement onRegisterReload={registerReloadHandler} setView={setView} />;
+        return <AttendanceManagement onRegisterReload={registerReloadHandler} setView={setView} language={language} />;
       case 'SHIFT':
-        return <ShiftManagement onRegisterReload={registerReloadHandler} setView={setView} />;
+        return <ShiftManagement onRegisterReload={registerReloadHandler} setView={setView} language={language} />;
       case 'PAYROLL':
-        return <PayrollManagement onRegisterReload={registerReloadHandler} setView={setView} />;
+        return <PayrollManagement onRegisterReload={registerReloadHandler} setView={setView} language={language} />;
       case 'REPORTS':
         return <ReportsDashboard onRegisterReload={registerReloadHandler} setView={setView} />;
       case 'DEPARTMENTS':
@@ -183,7 +184,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
       case 'SETTINGS':
         return <SettingsPanel onRegisterReload={registerReloadHandler} />;
       default:
-        return <UsersManagement onEditUser={handleEditUser} onRegisterReload={registerReloadHandler} />;
+        return <UsersManagement onEditUser={handleEditUser} onRegisterReload={registerReloadHandler} language={language} />;
     }
   };
 
@@ -261,6 +262,16 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
               </div>
             </div>
             <div className="flex items-center space-x-3">
+              <button
+                onClick={() => setLanguage(language === 'vi' ? 'en' : 'vi')}
+                className="flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-50 text-slate-700 hover:bg-slate-100 transition-colors"
+                title={language === 'vi' ? 'Switch to English' : 'Chuyển sang Tiếng Việt'}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 21l5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 016-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 01-3.827-5.802" />
+                </svg>
+                <span className="font-bold">{language === 'vi' ? 'EN' : 'VI'}</span>
+              </button>
               <button
                 onClick={handleReload}
                 disabled={isReloading || !reloadHandlerRef.current}

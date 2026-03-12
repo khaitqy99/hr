@@ -54,12 +54,13 @@ function formatDateLabel(d: Date): string {
 interface ShiftManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
   setView?: (view: string, options?: { replace?: boolean; adminPath?: string; employeeId?: string }) => void;
+  language: 'vi' | 'en';
 }
 
 /** Modal từ chối: đơn (id) hoặc hàng loạt (userId) */
 type RejectTarget = { type: 'single'; id: string } | { type: 'bulk'; userId: string };
 
-const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, setView }) => {
+const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, setView, language }) => {
   const [shiftRequests, setShiftRequests] = useState<ShiftRegistration[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
@@ -86,6 +87,167 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
   }>({ shift: ShiftTime.CUSTOM, startTime: '09:00', endTime: '18:00', offType: OffType.OFF_PN });
   const [cellActionLoading, setCellActionLoading] = useState(false);
 
+  const t = {
+    vi: {
+      week: 'Tuần',
+      prev: '← Trước',
+      thisWeek: 'Tuần này',
+      next: 'Sau →',
+      pending: 'Chờ',
+      approved: 'Đã duyệt',
+      rejected: 'Từ chối',
+      filter: 'Lọc',
+      allDepartments: 'Tất cả bộ phận',
+      searchByName: 'Tìm theo tên...',
+      goToPayroll: 'Tính lương',
+      exportCSV: 'Xuất CSV',
+      pendingRequests: 'đăng ký chờ duyệt của nhân viên này trong tuần.',
+      approveAll: 'Duyệt tất cả',
+      rejectAll: 'Từ chối tất cả',
+      loading: 'Đang tải...',
+      employee: 'Nhân viên',
+      department: 'Bộ phận',
+      checkIn: 'Vào',
+      checkOut: 'Ra',
+      noEmployees: 'Không có nhân viên nào.',
+      approve: 'Duyệt',
+      reject: 'Từ chối',
+      dayOff: 'Ngày off',
+      pendingStatus: 'Chờ duyệt',
+      approvedStatus: 'Đã duyệt',
+      rejectedStatus: 'Từ chối',
+      dayDetail: 'Chi tiết ngày',
+      editSchedule: 'Đổi lịch',
+      addShift: 'Thêm ca',
+      status: 'Trạng thái',
+      type: 'Loại',
+      timeIn: 'Giờ vào',
+      timeOut: 'Giờ ra',
+      registrationReason: 'Lý do đăng ký',
+      rejectionReason: 'Lý do từ chối',
+      close: 'Đóng',
+      workShift: 'Ca làm',
+      offDay: 'Ngày off',
+      offType: 'Loại off',
+      selectOffType: 'Chọn loại off',
+      selectTimeIn: 'Chọn giờ vào',
+      selectTimeOut: 'Chọn giờ ra',
+      save: 'Lưu',
+      saving: 'Đang lưu...',
+      cancel: 'Hủy',
+      noRegistration: 'Chưa đăng ký ca cho ngày này.',
+      rejectReasonTitle: 'Lý do từ chối',
+      rejectReasonDesc: 'Nhập lý do từ chối đăng ký ca này. Nhân viên sẽ xem được lý do.',
+      rejectReasonBulkDesc: 'Nhập lý do từ chối (áp dụng cho tất cả đăng ký đang chờ trong tuần).',
+      rejectReasonPlaceholder: 'Ví dụ: Thiếu thông tin, không đúng quy định...',
+      confirmReject: 'Xác nhận từ chối',
+      approvedMsg: 'Đã chấp thuận.',
+      approvedBulkMsg: 'Đã chấp thuận {count} đăng ký.',
+      rejectedMsg: 'Đã từ chối.',
+      rejectedBulkMsg: 'Đã từ chối {count} đăng ký.',
+      updateFailed: 'Cập nhật thất bại. Thử lại.',
+      loadFailed: 'Không tải được dữ liệu. Thử lại sau.',
+      scheduleUpdated: 'Đã cập nhật lịch.',
+      shiftAdded: 'Đã thêm ca cho nhân viên.',
+      actionFailed: 'Thao tác thất bại. Thử lại.',
+      noDataToExport: 'Không có dữ liệu để xuất',
+      exportEmployee: 'Nhân viên',
+      exportDepartment: 'Phòng ban',
+      exportDate: 'Ngày',
+      exportShiftType: 'Loại ca',
+      exportWorkShift: 'Ca làm việc',
+      exportTimeIn: 'Giờ vào',
+      exportTimeOut: 'Giờ ra',
+      exportStatus: 'Trạng thái',
+      exportRejectionReason: 'Lý do từ chối',
+      exportCreatedDate: 'Ngày tạo',
+      nationalHoliday: 'Ngày lễ quốc gia',
+      companyHoliday: 'Ngày lễ công ty',
+      localHoliday: 'Ngày lễ địa phương',
+      recurringYearly: 'Lặp lại hàng năm',
+    },
+    en: {
+      week: 'Week',
+      prev: '← Prev',
+      thisWeek: 'This Week',
+      next: 'Next →',
+      pending: 'Pending',
+      approved: 'Approved',
+      rejected: 'Rejected',
+      filter: 'Filter',
+      allDepartments: 'All Departments',
+      searchByName: 'Search by name...',
+      goToPayroll: 'Go to Payroll',
+      exportCSV: 'Export CSV',
+      pendingRequests: 'pending requests for this employee this week.',
+      approveAll: 'Approve All',
+      rejectAll: 'Reject All',
+      loading: 'Loading...',
+      employee: 'Employee',
+      department: 'Department',
+      checkIn: 'In',
+      checkOut: 'Out',
+      noEmployees: 'No employees.',
+      approve: 'Approve',
+      reject: 'Reject',
+      dayOff: 'Day Off',
+      pendingStatus: 'Pending',
+      approvedStatus: 'Approved',
+      rejectedStatus: 'Rejected',
+      dayDetail: 'Day Details',
+      editSchedule: 'Edit Schedule',
+      addShift: 'Add Shift',
+      status: 'Status',
+      type: 'Type',
+      timeIn: 'Time In',
+      timeOut: 'Time Out',
+      registrationReason: 'Registration Reason',
+      rejectionReason: 'Rejection Reason',
+      close: 'Close',
+      workShift: 'Work Shift',
+      offDay: 'Day Off',
+      offType: 'Off Type',
+      selectOffType: 'Select off type',
+      selectTimeIn: 'Select time in',
+      selectTimeOut: 'Select time out',
+      save: 'Save',
+      saving: 'Saving...',
+      cancel: 'Cancel',
+      noRegistration: 'No shift registered for this day.',
+      rejectReasonTitle: 'Rejection Reason',
+      rejectReasonDesc: 'Enter the reason for rejecting this shift registration. The employee will see this reason.',
+      rejectReasonBulkDesc: 'Enter rejection reason (applies to all pending registrations this week).',
+      rejectReasonPlaceholder: 'E.g., Missing information, does not comply with regulations...',
+      confirmReject: 'Confirm Rejection',
+      approvedMsg: 'Approved.',
+      approvedBulkMsg: 'Approved {count} registrations.',
+      rejectedMsg: 'Rejected.',
+      rejectedBulkMsg: 'Rejected {count} registrations.',
+      updateFailed: 'Update failed. Try again.',
+      loadFailed: 'Failed to load data. Try again later.',
+      scheduleUpdated: 'Schedule updated.',
+      shiftAdded: 'Shift added for employee.',
+      actionFailed: 'Action failed. Try again.',
+      noDataToExport: 'No data to export',
+      exportEmployee: 'Employee',
+      exportDepartment: 'Department',
+      exportDate: 'Date',
+      exportShiftType: 'Shift Type',
+      exportWorkShift: 'Work Shift',
+      exportTimeIn: 'Time In',
+      exportTimeOut: 'Time Out',
+      exportStatus: 'Status',
+      exportRejectionReason: 'Rejection Reason',
+      exportCreatedDate: 'Created Date',
+      nationalHoliday: 'National Holiday',
+      companyHoliday: 'Company Holiday',
+      localHoliday: 'Local Holiday',
+      recurringYearly: 'Recurring Yearly',
+    }
+  };
+
+  const text = t[language];
+
   useEffect(() => {
     loadData();
     loadHolidays();
@@ -109,7 +271,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       setShiftRequests(shifts);
       setEmployees(users);
     } catch (e) {
-      setMessage({ type: 'error', text: 'Không tải được dữ liệu. Thử lại sau.' });
+      setMessage({ type: 'error', text: text.loadFailed });
     } finally {
       setLoading(false);
     }
@@ -149,9 +311,9 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
     try {
       await updateShiftStatus(id, status);
       await loadData();
-      showMsg('success', 'Đã chấp thuận.');
+      showMsg('success', text.approvedMsg);
     } catch (e) {
-      showMsg('error', 'Cập nhật thất bại. Thử lại.');
+      showMsg('error', text.updateFailed);
     } finally {
       setActionLoadingId(null);
     }
@@ -177,9 +339,9 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
         await updateShiftStatus(r.id, status);
       }
       await loadData();
-      showMsg('success', `Đã chấp thuận ${pendingInWeek.length} đăng ký.`);
+      showMsg('success', text.approvedBulkMsg.replace('{count}', String(pendingInWeek.length)));
     } catch (e) {
-      showMsg('error', 'Cập nhật thất bại. Thử lại.');
+      showMsg('error', text.updateFailed);
     } finally {
       setActionLoadingId(null);
     }
@@ -194,9 +356,9 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       try {
         await updateShiftStatus(rejectTarget.id, RequestStatus.REJECTED, reason);
         await loadData();
-        showMsg('success', 'Đã từ chối.');
+        showMsg('success', text.rejectedMsg);
       } catch (e) {
-        showMsg('error', 'Cập nhật thất bại. Thử lại.');
+        showMsg('error', text.updateFailed);
       } finally {
         setActionLoadingId(null);
       }
@@ -214,9 +376,9 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
           await updateShiftStatus(r.id, RequestStatus.REJECTED, reason);
         }
         await loadData();
-        showMsg('success', `Đã từ chối ${pendingInWeek.length} đăng ký.`);
+        showMsg('success', text.rejectedBulkMsg.replace('{count}', String(pendingInWeek.length)));
       } catch (e) {
-        showMsg('error', 'Cập nhật thất bại. Thử lại.');
+        showMsg('error', text.updateFailed);
       } finally {
         setActionLoadingId(null);
       }
@@ -395,7 +557,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
           endTime: editForm.shift === ShiftTime.CUSTOM ? editForm.endTime : null,
           offType: editForm.shift === ShiftTime.OFF ? editForm.offType : null,
         }, { keepStatus: true });
-        showMsg('success', 'Đã cập nhật lịch.');
+        showMsg('success', text.scheduleUpdated);
       } else if (cellEditMode === 'add') {
         const [y, m, d] = [
           cellDetail.date.getFullYear(),
@@ -415,13 +577,13 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
           createdAt: Date.now(),
         };
         await registerShift(newShift, { initialStatus: RequestStatus.APPROVED });
-        showMsg('success', 'Đã thêm ca cho nhân viên.');
+        showMsg('success', text.shiftAdded);
       }
       await loadData();
       setCellDetail(null);
       exitCellEdit();
     } catch (e) {
-      showMsg('error', 'Thao tác thất bại. Thử lại.');
+      showMsg('error', text.actionFailed);
     } finally {
       setCellActionLoading(false);
     }
@@ -429,24 +591,24 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
 
   const handleExport = () => {
     if (getShiftsInWeek.length === 0) {
-      alert('Không có dữ liệu để xuất');
+      alert(text.noDataToExport);
       return;
     }
     const exportData = getShiftsInWeek.map(s => {
       const emp = employees.find(e => e.id === s.userId);
       return {
-        'Nhân viên': emp?.name || s.userId,
-        'Phòng ban': emp?.department || '',
-        'Ngày': new Date(s.date).toLocaleDateString('vi-VN'),
-        'Loại ca': s.shift === ShiftTime.OFF ?
-          (s.offType && OFF_TYPE_LABELS[s.offType] ? OFF_TYPE_LABELS[s.offType] : 'Ngày off') :
-          'Ca làm việc',
-        'Giờ vào': s.startTime || '',
-        'Giờ ra': s.endTime || '',
-        'Trạng thái': s.status === RequestStatus.PENDING ? 'Chờ duyệt' :
-          s.status === RequestStatus.APPROVED ? 'Đã duyệt' : 'Từ chối',
-        'Lý do từ chối': s.rejectionReason || '',
-        'Ngày tạo': new Date(s.createdAt).toLocaleDateString('vi-VN'),
+        [text.exportEmployee]: emp?.name || s.userId,
+        [text.exportDepartment]: emp?.department || '',
+        [text.exportDate]: new Date(s.date).toLocaleDateString(language === 'vi' ? 'vi-VN' : 'en-US'),
+        [text.exportShiftType]: s.shift === ShiftTime.OFF ?
+          (s.offType && OFF_TYPE_LABELS[s.offType] ? OFF_TYPE_LABELS[s.offType] : text.dayOff) :
+          text.exportWorkShift,
+        [text.exportTimeIn]: s.startTime || '',
+        [text.exportTimeOut]: s.endTime || '',
+        [text.exportStatus]: s.status === RequestStatus.PENDING ? text.pendingStatus :
+          s.status === RequestStatus.APPROVED ? text.approvedStatus : text.rejectedStatus,
+        [text.exportRejectionReason]: s.rejectionReason || '',
+        [text.exportCreatedDate]: new Date(s.createdAt).toLocaleDateString(language === 'vi' ? 'vi-VN' : 'en-US'),
       };
     });
     const filename = `shift_registrations_${weekRangeLabel.replace(/\s+/g, '_')}_${Date.now()}.csv`;
@@ -468,58 +630,58 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       <div className="bg-white p-4 rounded-2xl shadow-sm border border-sky-50">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
-            <span className="text-sm font-medium text-slate-600">Tuần:</span>
+            <span className="text-sm font-medium text-slate-600">{text.week}:</span>
             <span className="text-sm font-semibold text-slate-800">{weekRangeLabel}</span>
             <button
               type="button"
               onClick={prevWeek}
               className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 text-sm font-medium"
             >
-              ← Trước
+              {text.prev}
             </button>
             <button
               type="button"
               onClick={goToToday}
               className="px-3 py-2 rounded-xl border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100 text-sm font-medium"
             >
-              Tuần này
+              {text.thisWeek}
             </button>
             <button
               type="button"
               onClick={nextWeek}
               className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 text-sm font-medium"
             >
-              Sau →
+              {text.next}
             </button>
           </div>
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <span className="px-2.5 py-1 rounded-lg bg-amber-100 text-amber-800 font-medium">
-              Chờ: {weekStats.pending}
+              {text.pending}: {weekStats.pending}
             </span>
             <span className="px-2.5 py-1 rounded-lg bg-green-100 text-green-800 font-medium">
-              Đã duyệt: {weekStats.approved}
+              {text.approved}: {weekStats.approved}
             </span>
             <span className="px-2.5 py-1 rounded-lg bg-red-100 text-red-800 font-medium">
-              Từ chối: {weekStats.rejected}
+              {text.rejected}: {weekStats.rejected}
             </span>
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 mt-3 pt-3 border-t border-slate-100">
           <div className="flex flex-wrap items-center gap-3">
-            <span className="text-xs font-medium text-slate-500">Lọc:</span>
+            <span className="text-xs font-medium text-slate-500">{text.filter}:</span>
             <select
               value={departmentFilter}
               onChange={(e) => setDepartmentFilter(e.target.value)}
               className="rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white text-slate-700"
             >
-              <option value="">Tất cả bộ phận</option>
+              <option value="">{text.allDepartments}</option>
               {departmentOptions.map((d) => (
                 <option key={d} value={d}>{d}</option>
               ))}
             </select>
             <input
               type="text"
-              placeholder="Tìm theo tên..."
+              placeholder={text.searchByName}
               value={searchName}
               onChange={(e) => setSearchName(e.target.value)}
               className="rounded-xl border border-slate-200 px-3 py-2 text-sm w-44 text-slate-700 placeholder:text-slate-400"
@@ -530,12 +692,12 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
               <button
                 onClick={() => setView('admin', { adminPath: 'payroll' })}
                 className="px-4 py-2 bg-green-600 text-white rounded-xl text-xs font-bold hover:bg-green-700 transition-colors flex items-center gap-2"
-                title="Chuyển đến trang tính lương"
+                title={text.goToPayroll}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
                 </svg>
-                Tính lương
+                {text.goToPayroll}
               </button>
             )}
             <button
@@ -546,7 +708,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
               </svg>
-              Xuất CSV ({getShiftsInWeek.length})
+              {text.exportCSV} ({getShiftsInWeek.length})
             </button>
           </div>
         </div>
@@ -556,7 +718,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       {selectedUserId && selectedEmployeePendingCount > 0 && (
         <div className="flex items-center gap-3 p-3 bg-sky-50 rounded-2xl border border-sky-100">
           <span className="text-sm text-slate-700">
-            <strong>{selectedEmployeePendingCount}</strong> đăng ký chờ duyệt của nhân viên này trong tuần.
+            <strong>{selectedEmployeePendingCount}</strong> {text.pendingRequests}
           </span>
           <button
             type="button"
@@ -564,7 +726,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
             onClick={(e) => { e.stopPropagation(); handleBulkAction(selectedUserId, RequestStatus.APPROVED); }}
             className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 disabled:opacity-50 shadow-sm"
           >
-            Duyệt tất cả
+            {text.approveAll}
           </button>
           <button
             type="button"
@@ -572,7 +734,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
             onClick={(e) => { e.stopPropagation(); handleBulkAction(selectedUserId, RequestStatus.REJECTED); }}
             className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 disabled:opacity-50"
           >
-            Từ chối tất cả
+            {text.rejectAll}
           </button>
         </div>
       )}
@@ -580,7 +742,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       <div className="bg-white rounded-2xl shadow-sm border-2 border-slate-200 overflow-hidden relative">
         {loading && (
           <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10 rounded-2xl">
-            <span className="text-slate-500 font-medium">Đang tải...</span>
+            <span className="text-slate-500 font-medium">{text.loading}</span>
           </div>
         )}
         <div className="overflow-x-auto">
@@ -598,10 +760,10 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
             <thead className="bg-slate-50">
               <tr>
                 <th className="px-3 py-2 text-left text-xs font-bold text-slate-600 uppercase border-r border-b border-slate-300 first:border-l">
-                  Nhân viên
+                  {text.employee}
                 </th>
                 <th className="px-2 py-2 text-left text-xs font-bold text-slate-600 uppercase border-r border-b border-slate-300">
-                  Bộ phận
+                  {text.department}
                 </th>
                 {weekDates.map((d, i) => {
                   const holiday = getHolidayForDate(d);
@@ -628,10 +790,10 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                 {weekDates.map((_, i) => (
                   <React.Fragment key={i}>
                     <th className="px-0 py-1 text-center text-[10px] font-medium text-slate-500 border-r border-b border-slate-300">
-                      Vào
+                      {text.checkIn}
                     </th>
                     <th className="px-0 py-1 text-center text-[10px] font-medium text-slate-500 border-r border-b border-slate-300">
-                      Ra
+                      {text.checkOut}
                     </th>
                   </React.Fragment>
                 ))}
@@ -641,7 +803,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
               {gridEmployees.length === 0 ? (
                 <tr>
                   <td colSpan={2 + 7 * 2} className="px-6 py-12 text-center text-slate-400 text-sm border-r border-b border-l border-slate-200">
-                    Không có nhân viên nào.
+                    {text.noEmployees}
                   </td>
                 </tr>
               ) : (
@@ -704,10 +866,10 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                         }
                         const statusBadge =
                           reg.status === RequestStatus.PENDING
-                            ? { cls: 'text-amber-600', label: 'Chờ duyệt', icon: '⏳' }
+                            ? { cls: 'text-amber-600', label: text.pendingStatus, icon: '⏳' }
                             : reg.status === RequestStatus.APPROVED
-                              ? { cls: 'text-green-600', label: 'Đã duyệt', icon: '✓' }
-                              : { cls: 'text-red-600', label: 'Từ chối', icon: '✕' };
+                              ? { cls: 'text-green-600', label: text.approvedStatus, icon: '✓' }
+                              : { cls: 'text-red-600', label: text.rejectedStatus, icon: '✕' };
                         if (reg.shift === ShiftTime.OFF) {
                           return (
                             <React.Fragment key={toDateKey(date)}>
@@ -726,7 +888,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                                   >
                                     {statusBadge.icon}
                                   </span>
-                                  <span>{reg.offType && OFF_TYPE_LABELS[reg.offType] ? OFF_TYPE_LABELS[reg.offType] : 'Ngày off'}</span>
+                                  <span>{reg.offType && OFF_TYPE_LABELS[reg.offType] ? OFF_TYPE_LABELS[reg.offType] : text.dayOff}</span>
                                   {reg.status === RequestStatus.PENDING && (
                                     <div className="flex gap-1 mt-1">
                                       <button
@@ -734,18 +896,18 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                                         disabled={actionLoadingId === reg.id}
                                         onClick={(e) => { e.stopPropagation(); handleAction(reg.id, RequestStatus.APPROVED); }}
                                         className="px-2 py-0.5 bg-blue-600 text-white rounded-lg text-[10px] font-medium hover:bg-blue-700 disabled:opacity-50"
-                                        title="Chấp thuận"
+                                        title={text.approve}
                                       >
-                                        Duyệt
+                                        {text.approve}
                                       </button>
                                       <button
                                         type="button"
                                         disabled={actionLoadingId === reg.id}
                                         onClick={(e) => { e.stopPropagation(); handleAction(reg.id, RequestStatus.REJECTED); }}
                                         className="px-2 py-0.5 bg-white border border-slate-300 text-slate-600 rounded-lg text-[10px] font-medium hover:bg-slate-50 disabled:opacity-50"
-                                        title="Từ chối"
+                                        title={text.reject}
                                       >
-                                        Từ chối
+                                        {text.reject}
                                       </button>
                                     </div>
                                   )}
@@ -779,18 +941,18 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                                     disabled={actionLoadingId === reg.id}
                                     onClick={(e) => { e.stopPropagation(); handleAction(reg.id, RequestStatus.APPROVED); }}
                                     className="px-2 py-0.5 bg-blue-600 text-white rounded-lg text-[10px] font-medium hover:bg-blue-700 disabled:opacity-50"
-                                    title="Chấp thuận"
+                                    title={text.approve}
                                   >
-                                    Duyệt
+                                    {text.approve}
                                   </button>
                                   <button
                                     type="button"
                                     disabled={actionLoadingId === reg.id}
                                     onClick={(e) => { e.stopPropagation(); handleAction(reg.id, RequestStatus.REJECTED); }}
                                     className="px-2 py-0.5 bg-white border border-slate-300 text-slate-600 rounded-lg text-[10px] font-medium hover:bg-slate-50 disabled:opacity-50"
-                                    title="Từ chối"
+                                    title={text.reject}
                                   >
-                                    Từ chối
+                                    {text.reject}
                                   </button>
                                 </div>
                               )}
@@ -821,7 +983,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => { setCellDetail(null); exitCellEdit(); }}>
           <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-md w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-slate-800">
-              {cellEditMode === 'edit' ? 'Đổi lịch' : cellEditMode === 'add' ? 'Thêm ca' : 'Chi tiết ngày'}
+              {cellEditMode === 'edit' ? text.editSchedule : cellEditMode === 'add' ? text.addShift : text.dayDetail}
             </h3>
             {getHolidayForDate(cellDetail.date) && (() => {
               const holiday = getHolidayForDate(cellDetail.date);
@@ -832,10 +994,10 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                     <span>{holiday.name}</span>
                   </p>
                   <p className="text-xs text-yellow-700 mt-1">
-                    {holiday.type === 'NATIONAL' ? 'Ngày lễ quốc gia' :
-                      holiday.type === 'COMPANY' ? 'Ngày lễ công ty' :
-                        'Ngày lễ địa phương'}
-                    {holiday.isRecurring && ' • Lặp lại hàng năm'}
+                    {holiday.type === 'NATIONAL' ? text.nationalHoliday :
+                      holiday.type === 'COMPANY' ? text.companyHoliday :
+                        text.localHoliday}
+                    {holiday.isRecurring && ` • ${text.recurringYearly}`}
                   </p>
                   {holiday.description && (
                     <p className="text-xs text-yellow-600 mt-1 italic">{holiday.description}</p>
@@ -845,7 +1007,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
             })()}
             <div className="space-y-2 text-sm">
               <p>
-                <span className="font-medium text-slate-600">Nhân viên:</span>{' '}
+                <span className="font-medium text-slate-600">{text.employee}:</span>{' '}
                 {setView ? (
                   <button
                     onClick={() => {
@@ -860,8 +1022,8 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                   <span>{cellDetail.user.name}</span>
                 )}
               </p>
-              <p><span className="font-medium text-slate-600">Bộ phận:</span> {cellDetail.user.department || '—'}</p>
-              <p><span className="font-medium text-slate-600">Ngày:</span> {formatDateLabel(cellDetail.date)}</p>
+              <p><span className="font-medium text-slate-600">{text.department}:</span> {cellDetail.user.department || '—'}</p>
+              <p><span className="font-medium text-slate-600">{text.exportDate}:</span> {formatDateLabel(cellDetail.date)}</p>
             </div>
 
             {(cellEditMode === 'edit' || cellEditMode === 'add') ? (
@@ -873,7 +1035,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                     className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-bold transition-all ${editForm.shift === ShiftTime.CUSTOM ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
                       }`}
                   >
-                    Ca làm
+                    {text.workShift}
                   </button>
                   <button
                     type="button"
@@ -881,38 +1043,38 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                     className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-bold transition-all ${editForm.shift === ShiftTime.OFF ? 'bg-slate-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
                       }`}
                   >
-                    Ngày off
+                    {text.offDay}
                   </button>
                 </div>
                 {editForm.shift === ShiftTime.OFF ? (
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-slate-600">Loại off:</label>
+                    <label className="text-xs font-bold text-slate-600">{text.offType}:</label>
                     <CustomSelect
                       options={Object.entries(OFF_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
                       value={editForm.offType}
                       onChange={(v) => setEditForm(prev => ({ ...prev, offType: v as OffType }))}
-                      placeholder="Chọn loại off"
+                      placeholder={text.selectOffType}
                     />
                   </div>
                 ) : (
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
-                      <label className="text-xs font-bold text-slate-600 w-20">Giờ vào:</label>
+                      <label className="text-xs font-bold text-slate-600 w-20">{text.timeIn}:</label>
                       <CustomSelect
                         options={TIME_OPTIONS.map((t) => ({ value: t, label: t }))}
                         value={editForm.startTime}
                         onChange={(v) => setEditForm(prev => ({ ...prev, startTime: v }))}
-                        placeholder="Chọn giờ vào"
+                        placeholder={text.selectTimeIn}
                         className="flex-1"
                       />
                     </div>
                     <div className="flex items-center gap-2">
-                      <label className="text-xs font-bold text-slate-600 w-20">Giờ ra:</label>
+                      <label className="text-xs font-bold text-slate-600 w-20">{text.timeOut}:</label>
                       <CustomSelect
                         options={TIME_OPTIONS.map((t) => ({ value: t, label: t }))}
                         value={editForm.endTime}
                         onChange={(v) => setEditForm(prev => ({ ...prev, endTime: v }))}
-                        placeholder="Chọn giờ ra"
+                        placeholder={text.selectTimeOut}
                         className="flex-1"
                       />
                     </div>
@@ -925,7 +1087,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                     disabled={cellActionLoading || !isEditFormValid()}
                     className="flex-1 px-4 py-2 rounded-xl bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-50 text-sm"
                   >
-                    {cellActionLoading ? 'Đang lưu...' : 'Lưu'}
+                    {cellActionLoading ? text.saving : text.save}
                   </button>
                   <button
                     type="button"
@@ -933,7 +1095,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                     disabled={cellActionLoading}
                     className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium"
                   >
-                    Hủy
+                    {text.cancel}
                   </button>
                 </div>
               </div>
@@ -941,35 +1103,35 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
               <>
                 <div className="pt-2 border-t border-slate-200">
                   {!cellDetail.reg ? (
-                    <p className="text-slate-500">Chưa đăng ký ca cho ngày này.</p>
+                    <p className="text-slate-500">{text.noRegistration}</p>
                   ) : (
                     <div className="space-y-2">
                       <p>
-                        <span className="font-medium text-slate-600">Trạng thái:</span>{' '}
-                        {cellDetail.reg.status === RequestStatus.PENDING && 'Chờ duyệt'}
-                        {cellDetail.reg.status === RequestStatus.APPROVED && 'Đã duyệt'}
-                        {cellDetail.reg.status === RequestStatus.REJECTED && 'Từ chối'}
+                        <span className="font-medium text-slate-600">{text.status}:</span>{' '}
+                        {cellDetail.reg.status === RequestStatus.PENDING && text.pendingStatus}
+                        {cellDetail.reg.status === RequestStatus.APPROVED && text.approvedStatus}
+                        {cellDetail.reg.status === RequestStatus.REJECTED && text.rejectedStatus}
                       </p>
                       {cellDetail.reg.shift === ShiftTime.OFF ? (
                         <p>
-                          <span className="font-medium text-slate-600">Loại:</span>{' '}
-                          {cellDetail.reg.offType && OFF_TYPE_LABELS[cellDetail.reg.offType] ? OFF_TYPE_LABELS[cellDetail.reg.offType] : 'Ngày off'}
+                          <span className="font-medium text-slate-600">{text.type}:</span>{' '}
+                          {cellDetail.reg.offType && OFF_TYPE_LABELS[cellDetail.reg.offType] ? OFF_TYPE_LABELS[cellDetail.reg.offType] : text.dayOff}
                         </p>
                       ) : (
                         <>
-                          <p><span className="font-medium text-slate-600">Giờ vào:</span> {cellDetail.reg.startTime ?? DEFAULT_IN}</p>
-                          <p><span className="font-medium text-slate-600">Giờ ra:</span> {cellDetail.reg.endTime ?? DEFAULT_OUT}</p>
+                          <p><span className="font-medium text-slate-600">{text.timeIn}:</span> {cellDetail.reg.startTime ?? DEFAULT_IN}</p>
+                          <p><span className="font-medium text-slate-600">{text.timeOut}:</span> {cellDetail.reg.endTime ?? DEFAULT_OUT}</p>
                         </>
                       )}
                       {cellDetail.reg.reason && (
                         <p className="mt-2 pt-2 border-t border-slate-100">
-                          <span className="font-medium text-slate-600">Lý do đăng ký:</span>{' '}
+                          <span className="font-medium text-slate-600">{text.registrationReason}:</span>{' '}
                           <span className="text-slate-700 italic">{cellDetail.reg.reason}</span>
                         </p>
                       )}
                       {cellDetail.reg.status === RequestStatus.REJECTED && cellDetail.reg.rejectionReason && (
                         <p className="mt-2 pt-2 border-t border-slate-100">
-                          <span className="font-medium text-slate-600">Lý do từ chối:</span>{' '}
+                          <span className="font-medium text-slate-600">{text.rejectionReason}:</span>{' '}
                           <span className="text-red-700">{cellDetail.reg.rejectionReason}</span>
                         </p>
                       )}
@@ -983,7 +1145,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                       onClick={() => enterEditMode(cellDetail.reg!)}
                       className="flex-1 px-4 py-2 rounded-xl bg-blue-600 text-white font-medium hover:bg-blue-700 text-sm"
                     >
-                      Đổi lịch
+                      {text.editSchedule}
                     </button>
                   ) : (
                     <button
@@ -991,7 +1153,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                       onClick={enterAddMode}
                       className="flex-1 px-4 py-2 rounded-xl bg-green-600 text-white font-medium hover:bg-green-700 text-sm"
                     >
-                      Thêm ca
+                      {text.addShift}
                     </button>
                   )}
                   <button
@@ -999,7 +1161,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                     onClick={() => setCellDetail(null)}
                     className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium"
                   >
-                    Đóng
+                    {text.close}
                   </button>
                 </div>
               </>
@@ -1013,14 +1175,14 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       {rejectTarget && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setRejectTarget(null)}>
           <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-md w-full p-6 space-y-4" onClick={e => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-slate-800">Lý do từ chối</h3>
+            <h3 className="text-lg font-bold text-slate-800">{text.rejectReasonTitle}</h3>
             <p className="text-sm text-slate-500">
-              {rejectTarget.type === 'single' ? 'Nhập lý do từ chối đăng ký ca này. Nhân viên sẽ xem được lý do.' : 'Nhập lý do từ chối (áp dụng cho tất cả đăng ký đang chờ trong tuần).'}
+              {rejectTarget.type === 'single' ? text.rejectReasonDesc : text.rejectReasonBulkDesc}
             </p>
             <textarea
               value={rejectReason}
               onChange={e => setRejectReason(e.target.value)}
-              placeholder="Ví dụ: Thiếu thông tin, không đúng quy định..."
+              placeholder={text.rejectReasonPlaceholder}
               className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 min-h-[80px] resize-y"
               rows={3}
             />
@@ -1030,14 +1192,14 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                 onClick={() => { setRejectTarget(null); setRejectReason(''); }}
                 className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium"
               >
-                Hủy
+                {text.cancel}
               </button>
               <button
                 type="button"
                 onClick={handleConfirmReject}
                 className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700 text-sm font-medium"
               >
-                Xác nhận từ chối
+                {text.confirmReject}
               </button>
             </div>
           </div>

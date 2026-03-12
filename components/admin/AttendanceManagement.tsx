@@ -27,21 +27,116 @@ const isValidUrl = (url: string): boolean => {
 interface AttendanceManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
   setView?: (view: string, options?: { replace?: boolean; adminPath?: string; employeeId?: string }) => void;
+  language: 'vi' | 'en';
 }
 
-const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterReload, setView }) => {
+const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterReload, setView, language }) => {
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
   const [attendanceFilter, setAttendanceFilter] = useState<string>('ALL');
   const [selectedEmployeeForAttendance, setSelectedEmployeeForAttendance] = useState<string>('ALL');
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [viewMode, setViewMode] = useState<'table' | 'kanban'>('kanban');
   /** ID các bản ghi có ảnh không tải được (URL lỗi / bucket private / bản ghi cũ) */
   const [failedPhotoIds, setFailedPhotoIds] = useState<Set<string>>(new Set());
   /** Track images that are in viewport for lazy loading */
   const [visibleImageIds, setVisibleImageIds] = useState<Set<string>>(new Set());
   /** Track retry attempts for failed images */
   const [retryAttempts, setRetryAttempts] = useState<Map<string, number>>(new Map());
+
+  const t = {
+    vi: {
+      filters: 'Bộ lọc',
+      goToPayroll: 'Tính lương',
+      exportCSV: 'Xuất CSV',
+      filterByTime: 'Lọc theo thời gian',
+      today: 'Hôm nay',
+      week: 'Tuần',
+      month: 'Tháng',
+      all: 'Tất cả',
+      filterByEmployee: 'Lọc theo nhân viên',
+      allEmployees: 'Tất cả nhân viên',
+      loading: 'Đang tải dữ liệu...',
+      noData: 'Chưa có dữ liệu chấm công',
+      type: 'Loại',
+      employee: 'Nhân viên',
+      time: 'Thời gian',
+      location: 'Vị trí',
+      photo: 'Hình ảnh',
+      status: 'Trạng thái',
+      actions: 'Thao tác',
+      checkIn: 'Vào',
+      checkOut: 'Ra',
+      onTime: 'Đúng giờ',
+      late: 'Trễ',
+      earlyLeave: 'Về sớm',
+      overtime: 'Tăng ca',
+      delete: 'Xóa',
+      confirmDelete: 'Bạn có chắc muốn xóa bản ghi này?',
+      noDataToExport: 'Không có dữ liệu để xuất',
+      exportEmployee: 'Nhân viên',
+      exportDepartment: 'Phòng ban',
+      exportTime: 'Thời gian',
+      exportDate: 'Ngày',
+      exportType: 'Loại',
+      exportStatus: 'Trạng thái',
+      exportAddress: 'Địa chỉ',
+      exportNotes: 'Ghi chú',
+      viewTable: 'Bảng',
+      viewKanban: 'Kanban',
+      records: 'bản ghi',
+      other: 'Khác',
+      pending: 'Chờ',
+      emptyColumn: 'Không có',
+    },
+    en: {
+      filters: 'Filters',
+      goToPayroll: 'Go to Payroll',
+      exportCSV: 'Export CSV',
+      filterByTime: 'Filter by Time',
+      today: 'Today',
+      week: 'Week',
+      month: 'Month',
+      all: 'All',
+      filterByEmployee: 'Filter by Employee',
+      allEmployees: 'All Employees',
+      loading: 'Loading data...',
+      noData: 'No attendance records yet',
+      type: 'Type',
+      employee: 'Employee',
+      time: 'Time',
+      location: 'Location',
+      photo: 'Photo',
+      status: 'Status',
+      actions: 'Actions',
+      checkIn: 'In',
+      checkOut: 'Out',
+      onTime: 'On Time',
+      late: 'Late',
+      earlyLeave: 'Early Leave',
+      overtime: 'Overtime',
+      delete: 'Delete',
+      confirmDelete: 'Are you sure you want to delete this record?',
+      noDataToExport: 'No data to export',
+      exportEmployee: 'Employee',
+      exportDepartment: 'Department',
+      exportTime: 'Time',
+      exportDate: 'Date',
+      exportType: 'Type',
+      exportStatus: 'Status',
+      exportAddress: 'Address',
+      exportNotes: 'Notes',
+      viewTable: 'Table',
+      viewKanban: 'Kanban',
+      records: 'records',
+      other: 'Other',
+      pending: 'Pending',
+      emptyColumn: 'Empty',
+    }
+  };
+
+  const text = t[language];
 
   useEffect(() => {
     loadData();
@@ -136,26 +231,26 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
 
   const handleExport = () => {
     if (filteredData.length === 0) {
-      alert('Không có dữ liệu để xuất');
+      alert(text.noDataToExport);
       return;
     }
     // Format dữ liệu để export dễ đọc hơn
     const exportData = filteredData.map(record => {
       const employee = employees.find(e => e.id === record.userId);
       return {
-        'Nhân viên': employee?.name || record.userId,
-        'Phòng ban': employee?.department || '',
-        'Thời gian': new Date(record.timestamp).toLocaleString('vi-VN'),
-        'Ngày': new Date(record.timestamp).toLocaleDateString('vi-VN'),
-        'Loại': record.type === AttendanceType.CHECK_IN ? 'Vào' : 'Ra',
-        'Trạng thái': getStatusLabel(record.status).label,
-        'Địa chỉ': record.location?.address || `${record.location?.lat}, ${record.location?.lng}`,
-        'Ghi chú': record.notes || '',
+        [text.exportEmployee]: employee?.name || record.userId,
+        [text.exportDepartment]: employee?.department || '',
+        [text.exportTime]: new Date(record.timestamp).toLocaleString(language === 'vi' ? 'vi-VN' : 'en-US'),
+        [text.exportDate]: new Date(record.timestamp).toLocaleDateString(language === 'vi' ? 'vi-VN' : 'en-US'),
+        [text.exportType]: record.type === AttendanceType.CHECK_IN ? text.checkIn : text.checkOut,
+        [text.exportStatus]: getStatusLabel(record.status).label,
+        [text.exportAddress]: record.location?.address || `${record.location?.lat}, ${record.location?.lng}`,
+        [text.exportNotes]: record.notes || '',
       };
     });
-    const dateRange = attendanceFilter === 'TODAY' ? 'hom_nay' : 
-                      attendanceFilter === 'WEEK' ? 'tuan_nay' :
-                      attendanceFilter === 'MONTH' ? 'thang_nay' : 'tat_ca';
+    const dateRange = attendanceFilter === 'TODAY' ? 'today' : 
+                      attendanceFilter === 'WEEK' ? 'week' :
+                      attendanceFilter === 'MONTH' ? 'month' : 'all';
     const filename = `attendance_${dateRange}_${Date.now()}.csv`;
     exportToCSV(exportData, filename);
   };
@@ -163,16 +258,29 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
   const getStatusLabel = (status: AttendanceStatus) => {
     switch (status) {
       case AttendanceStatus.ON_TIME:
-        return { label: 'Đúng giờ', className: 'bg-green-100 text-green-600' };
+        return { label: text.onTime, className: 'bg-green-100 text-green-600' };
       case AttendanceStatus.LATE:
-        return { label: 'Trễ', className: 'bg-orange-100 text-orange-600' };
+        return { label: text.late, className: 'bg-orange-100 text-orange-600' };
       case AttendanceStatus.EARLY_LEAVE:
-        return { label: 'Về sớm', className: 'bg-yellow-100 text-yellow-600' };
+        return { label: text.earlyLeave, className: 'bg-yellow-100 text-yellow-600' };
       case AttendanceStatus.OVERTIME:
-        return { label: 'Tăng ca', className: 'bg-purple-100 text-purple-600' };
+        return { label: text.overtime, className: 'bg-purple-100 text-purple-600' };
+      case AttendanceStatus.PENDING:
+        return { label: text.pending, className: 'bg-slate-100 text-slate-600' };
       default:
-        return { label: status, className: 'bg-slate-100 text-slate-600' };
+        return { label: text.other, className: 'bg-slate-100 text-slate-600' };
     }
+  };
+
+  const KANBAN_COLUMNS: { status: AttendanceStatus; label: string; headerClass: string }[] = [
+    { status: AttendanceStatus.ON_TIME, label: text.onTime, headerClass: 'bg-emerald-50 border-emerald-200/60 text-emerald-800' },
+    { status: AttendanceStatus.LATE, label: text.late, headerClass: 'bg-amber-50 border-amber-200/60 text-amber-800' },
+    { status: AttendanceStatus.EARLY_LEAVE, label: text.earlyLeave, headerClass: 'bg-yellow-50 border-yellow-200/60 text-yellow-800' },
+    { status: AttendanceStatus.OVERTIME, label: text.overtime, headerClass: 'bg-violet-50 border-violet-200/60 text-violet-800' },
+  ];
+
+  const getRecordsByStatus = (status: AttendanceStatus) => {
+    return filteredData.filter(r => r.status === status);
   };
 
   return (
@@ -180,18 +288,18 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       {/* Filters */}
       <div className="bg-white p-4 rounded-2xl shadow-sm border border-sky-50">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-bold text-slate-700">Bộ lọc</h3>
+          <h3 className="text-sm font-bold text-slate-700">{text.filters}</h3>
           <div className="flex items-center gap-2">
             {setView && (
               <button
                 onClick={() => setView('admin', { adminPath: 'payroll' })}
                 className="px-4 py-2 bg-green-600 text-white rounded-xl text-xs font-bold hover:bg-green-700 transition-colors flex items-center gap-2"
-                title="Chuyển đến trang tính lương"
+                title={text.goToPayroll}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
                 </svg>
-                Tính lương
+                {text.goToPayroll}
               </button>
             )}
             <button
@@ -202,13 +310,13 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
               </svg>
-              Xuất CSV ({filteredData.length})
+              {text.exportCSV} ({filteredData.length})
             </button>
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-bold text-slate-500 mb-2">Lọc theo thời gian</label>
+            <label className="block text-xs font-bold text-slate-500 mb-2">{text.filterByTime}</label>
             <div className="flex space-x-2">
               {['TODAY', 'WEEK', 'MONTH', 'ALL'].map(f => (
                 <button
@@ -218,19 +326,19 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
                     attendanceFilter === f ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
                 >
-                  {f === 'TODAY' ? 'Hôm nay' : f === 'WEEK' ? 'Tuần' : f === 'MONTH' ? 'Tháng' : 'Tất cả'}
+                  {f === 'TODAY' ? text.today : f === 'WEEK' ? text.week : f === 'MONTH' ? text.month : text.all}
                 </button>
               ))}
             </div>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-500 mb-2">Lọc theo nhân viên</label>
+            <label className="block text-xs font-bold text-slate-500 mb-2">{text.filterByEmployee}</label>
             <select
               value={selectedEmployeeForAttendance}
               onChange={(e) => setSelectedEmployeeForAttendance(e.target.value)}
               className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm"
             >
-              <option value="ALL">Tất cả nhân viên</option>
+              <option value="ALL">{text.allEmployees}</option>
               {employees.filter(e => e.role !== UserRole.ADMIN).map(emp => (
                 <option key={emp.id} value={emp.id}>{emp.name} - {emp.department}</option>
               ))}
@@ -242,25 +350,117 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       {/* Loading State */}
       {isLoading ? (
         <div className="text-center py-12 bg-white rounded-2xl border border-sky-50">
-          <p className="text-slate-400 font-medium">Đang tải dữ liệu...</p>
+          <p className="text-slate-400 font-medium">{text.loading}</p>
         </div>
       ) : filteredData.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-2xl border border-sky-50">
-          <p className="text-slate-400 font-medium">Chưa có dữ liệu chấm công</p>
+          <p className="text-slate-400 font-medium">{text.noData}</p>
         </div>
       ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-sky-50 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50/50">
+            <span className="text-sm font-medium text-slate-600">{filteredData.length} {text.records}</span>
+            <div className="flex rounded-xl overflow-hidden border border-slate-200">
+              <button
+                onClick={() => setViewMode('kanban')}
+                className={`px-4 py-2 text-xs font-bold transition-colors ${
+                  viewMode === 'kanban' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {text.viewKanban}
+              </button>
+              <button
+                onClick={() => setViewMode('table')}
+                className={`px-4 py-2 text-xs font-bold transition-colors ${
+                  viewMode === 'table' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {text.viewTable}
+              </button>
+            </div>
+          </div>
           <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
+            {viewMode === 'kanban' ? (
+              <div className="p-4 flex gap-3 overflow-x-auto min-h-[60vh]">
+                {KANBAN_COLUMNS.map((col) => {
+                  const records = getRecordsByStatus(col.status);
+                  return (
+                    <div
+                      key={col.status}
+                      className="flex-shrink-0 w-56 bg-slate-50/80 rounded-xl border border-slate-200/80 flex flex-col shadow-sm"
+                    >
+                      <div className={`px-3 py-2 rounded-t-xl border-b font-semibold text-xs flex items-center justify-between ${col.headerClass}`}>
+                        <span>{col.label}</span>
+                        <span className="min-w-[1.25rem] h-5 flex items-center justify-center rounded-md bg-white/70 text-[11px] font-bold">{records.length}</span>
+                      </div>
+                      <div className="flex-1 p-2 space-y-1.5 overflow-y-auto max-h-[calc(70vh-7rem)]">
+                        {records.length === 0 ? (
+                          <p className="text-[11px] text-slate-400 py-6 text-center">{text.emptyColumn}</p>
+                        ) : (
+                          records.map((record: AttendanceRecord) => {
+                            const employee = employees.find(e => e.id === record.userId);
+                            return (
+                              <div
+                                key={record.id}
+                                className="bg-white rounded-lg p-2 border border-slate-100 hover:border-sky-200 hover:shadow-sm transition-all group"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                                    {employee && setView ? (
+                                      <button
+                                        onClick={() => setView('employee-profile', { employeeId: employee.id })}
+                                        className="text-xs font-semibold text-slate-800 hover:text-blue-600 hover:underline text-left truncate block w-full leading-tight"
+                                      >
+                                        {employee.name}
+                                      </button>
+                                    ) : (
+                                      <p className="text-xs font-semibold text-slate-800 truncate leading-tight">{employee?.name || record.userId}</p>
+                                    )}
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-[11px] text-slate-500 tabular-nums">
+                                        {new Date(record.timestamp).toLocaleTimeString(language === 'vi' ? 'vi-VN' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
+                                      </span>
+                                      <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${record.type === AttendanceType.CHECK_IN ? 'bg-blue-100 text-blue-600' : 'bg-cyan-100 text-cyan-600'}`}>
+                                        {record.type === AttendanceType.CHECK_IN ? text.checkIn : text.checkOut}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <button
+                                    onClick={async () => {
+                                      if (confirm(text.confirmDelete)) {
+                                        if (record.photoUrl) await deleteAttendancePhoto(record.photoUrl);
+                                        await deleteAttendance(record.id);
+                                        loadData();
+                                      }
+                                    }}
+                                    className="opacity-60 hover:opacity-100 text-red-500 hover:text-red-600 p-0.5 shrink-0 transition-opacity"
+                                    title={text.delete}
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
             <table className="w-full">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Loại</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Nhân viên</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Thời gian</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Vị trí</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Hình ảnh</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Trạng thái</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Thao tác</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.type}</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.employee}</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.time}</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.location}</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.photo}</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.status}</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.actions}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -273,7 +473,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
                         <span className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold ${
                           record.type === AttendanceType.CHECK_IN ? 'bg-blue-100 text-blue-600' : 'bg-cyan-100 text-cyan-600'
                         }`}>
-                          {record.type === AttendanceType.CHECK_IN ? 'Vào' : 'Ra'}
+                          {record.type === AttendanceType.CHECK_IN ? text.checkIn : text.checkOut}
                         </span>
                       </td>
                       <td className="px-6 py-4">
@@ -293,8 +493,8 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
                       </td>
                       <td className="px-6 py-4">
                         <div>
-                          <p className="text-sm text-slate-700">{new Date(record.timestamp).toLocaleDateString('vi-VN')}</p>
-                          <p className="text-xs text-slate-500">{new Date(record.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</p>
+                          <p className="text-sm text-slate-700">{new Date(record.timestamp).toLocaleDateString(language === 'vi' ? 'vi-VN' : 'en-US')}</p>
+                          <p className="text-xs text-slate-500">{new Date(record.timestamp).toLocaleTimeString(language === 'vi' ? 'vi-VN' : 'en-US', { hour: '2-digit', minute: '2-digit' })}</p>
                         </div>
                       </td>
                       <td className="px-6 py-4">
@@ -504,7 +704,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
                       <td className="px-6 py-4">
                         <button
                           onClick={async () => {
-                            if (confirm('Bạn có chắc muốn xóa bản ghi này?')) {
+                            if (confirm(text.confirmDelete)) {
                               // Xóa ảnh khỏi Storage nếu có
                               if (record.photoUrl) {
                                 await deleteAttendancePhoto(record.photoUrl);
@@ -515,7 +715,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
                           }}
                           className="text-sm text-red-600 hover:text-red-700 font-medium"
                         >
-                          Xóa
+                          {text.delete}
                         </button>
                       </td>
                     </tr>
@@ -523,6 +723,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
                 })}
               </tbody>
             </table>
+            )}
           </div>
         </div>
       )}
