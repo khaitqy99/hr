@@ -440,6 +440,14 @@ export const updateUser = async (id: string, data: Partial<User>): Promise<User>
 
 // ============ ATTENDANCE ============
 
+/** Chuẩn hoá timestamp về milliseconds (Supabase có thể lưu seconds ở một số môi trường/seed cũ). */
+function normalizeTimestampMs(ts: any): number {
+  const n = typeof ts === 'string' ? Number(ts) : ts;
+  if (!Number.isFinite(n)) return 0;
+  // < 1e12 gần như chắc chắn là Unix seconds
+  return n < 1e12 ? n * 1000 : n;
+}
+
 export const getAttendance = async (userId: string): Promise<AttendanceRecord[]> => {
   if (isSupabaseAvailable()) {
     try {
@@ -465,7 +473,7 @@ export const getAttendance = async (userId: string): Promise<AttendanceRecord[]>
         return {
           id: record.id,
           userId: record.user_id,
-          timestamp: record.timestamp,
+          timestamp: normalizeTimestampMs(record.timestamp),
           type: record.type as AttendanceType,
           location: record.location as { lat: number; lng: number; address?: string },
           status: record.status as any,
@@ -516,7 +524,7 @@ export const getAllAttendance = async (limit?: number): Promise<AttendanceRecord
         return {
           id: record.id,
           userId: record.user_id,
-          timestamp: record.timestamp,
+          timestamp: normalizeTimestampMs(record.timestamp),
           type: record.type as AttendanceType,
           location: record.location as { lat: number; lng: number; address?: string },
           status: record.status as any,

@@ -44,6 +44,7 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
   const [officeLocation, setOfficeLocation] = useState<{ lat: number; lng: number; radiusMeters: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [geoPermission, setGeoPermission] = useState<'unknown' | 'granted' | 'prompt' | 'denied'>('unknown');
   const [lastRecord, setLastRecord] = useState<AttendanceRecord | null>(null);
   const [todayCheckIn, setTodayCheckIn] = useState<AttendanceRecord | null>(null);
   const [todayCheckOut, setTodayCheckOut] = useState<AttendanceRecord | null>(null);
@@ -95,6 +96,33 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
     };
   }, [user.id, loadAttendance]);
 
+  // Theo dõi trạng thái quyền vị trí (nếu browser hỗ trợ Permissions API)
+  useEffect(() => {
+    let cancelled = false;
+    let permObj: PermissionStatus | null = null;
+
+    const sync = async () => {
+      try {
+        if (!('permissions' in navigator) || !navigator.permissions?.query) return;
+        // TS: PermissionName includes 'geolocation' in DOM lib
+        permObj = await navigator.permissions.query({ name: 'geolocation' as PermissionName });
+        if (cancelled) return;
+        setGeoPermission(permObj.state);
+        permObj.onchange = () => {
+          if (!cancelled) setGeoPermission(permObj!.state);
+        };
+      } catch {
+        // ignore - some browsers throw even if permissions exists
+      }
+    };
+
+    sync();
+    return () => {
+      cancelled = true;
+      if (permObj) permObj.onchange = null;
+    };
+  }, []);
+
   // Tính lại distance khi officeLocation thay đổi và đã có location
   useEffect(() => {
     if (location && officeLocation) {
@@ -119,6 +147,11 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
 
   const getLocation = useCallback(() => {
     setLoading(true);
+    if (!window.isSecureContext) {
+      setError('Trình duyệt chỉ cho phép xin vị trí trên HTTPS (hoặc localhost). Vui lòng mở bằng HTTPS hoặc dùng localhost để hiện prompt Location.');
+      setLoading(false);
+      return;
+    }
     if (!navigator.geolocation) { setError("Không hỗ trợ GPS"); setLoading(false); return; }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -130,9 +163,26 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
         setError(null); 
         setLoading(false);
       },
-      () => { setError("Bật GPS để chấm công"); setLoading(false); }
+      (err) => {
+        if (err?.code === 1) {
+          setError('Bạn đã từ chối quyền Vị trí. Vui lòng bật lại quyền Location trong cài đặt trình duyệt để chấm công.');
+        } else if (err?.code === 2) {
+          setError('Không lấy được vị trí. Vui lòng bật Location/GPS trên thiết bị rồi thử lại.');
+        } else if (err?.code === 3) {
+          setError('Định vị quá lâu. Vui lòng thử lại ở nơi thoáng hơn.');
+        } else {
+          setError('Không thể lấy vị trí. Vui lòng thử lại.');
+        }
+        setLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
     );
   }, [officeLocation]);
+
+  const requestLocationPermission = useCallback(() => {
+    setError(null);
+    getLocation(); // gọi từ hành động người dùng để hiện prompt xin quyền Location
+  }, [getLocation]);
 
   const handleAttendance = async (type: AttendanceType) => {
     if (!location) { setError("Cần vị trí GPS"); return; }
@@ -203,7 +253,13 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
     }
   };
 
-  const isCheckInNext = !lastRecord || lastRecord.type === AttendanceType.CHECK_OUT;
+  // Quy tắc hành động trong ngày:
+  // - Chưa có check-in -> cho check-in
+  // - Có check-in nhưng chưa check-out -> cho check-out
+  // - Có đủ cả 2 -> hoàn tất, không cho chấm thêm (tránh hiện lại "chấm công vào" sau khi checkout)
+  const nextAction: 'CHECK_IN' | 'CHECK_OUT' | 'DONE' =
+    !todayCheckIn ? 'CHECK_IN' : !todayCheckOut ? 'CHECK_OUT' : 'DONE';
+  const isCheckInNext = nextAction === 'CHECK_IN';
   const office = officeLocation || { lat: 10.040675858019696, lng: 105.78463187148355, radiusMeters: 200 };
   const isWithinRange = distance !== null && distance <= office.radiusMeters;
   const canAction = isWithinRange || !navigator.onLine;
@@ -261,18 +317,44 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
       </div>
 
       {/* Thông báo cần làm: Check-in hay Check-out */}
-      <div className={`px-4 py-3 rounded-2xl mx-2 flex items-center gap-3 ${isCheckInNext ? 'bg-blue-50 border border-blue-200' : 'bg-amber-50 border border-amber-200'}`}>
-        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${isCheckInNext ? 'bg-blue-100 text-blue-600' : 'bg-amber-100 text-amber-600'}`}>
-          {isCheckInNext ? (
+      <div className={`px-4 py-3 rounded-2xl mx-2 flex items-center gap-3 ${
+        nextAction === 'CHECK_IN'
+          ? 'bg-blue-50 border border-blue-200'
+          : nextAction === 'CHECK_OUT'
+            ? 'bg-amber-50 border border-amber-200'
+            : 'bg-emerald-50 border border-emerald-200'
+      }`}>
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
+          nextAction === 'CHECK_IN'
+            ? 'bg-blue-100 text-blue-600'
+            : nextAction === 'CHECK_OUT'
+              ? 'bg-amber-100 text-amber-600'
+              : 'bg-emerald-100 text-emerald-700'
+        }`}>
+          {nextAction === 'CHECK_IN' ? (
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" /></svg>
-          ) : (
+          ) : nextAction === 'CHECK_OUT' ? (
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9v-3m-3 3V9m3 3v3" /></svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+              <path fillRule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm13.36-1.814a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z" clipRule="evenodd" />
+            </svg>
           )}
         </div>
         <div>
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Hành động tiếp theo</p>
-          <p className={`font-bold ${isCheckInNext ? 'text-blue-700' : 'text-amber-700'}`}>
-            {isCheckInNext ? 'Bạn cần chấm công vào' : 'Bạn cần chấm công ra'}
+          <p className={`font-bold ${
+            nextAction === 'CHECK_IN'
+              ? 'text-blue-700'
+              : nextAction === 'CHECK_OUT'
+                ? 'text-amber-700'
+                : 'text-emerald-700'
+          }`}>
+            {nextAction === 'CHECK_IN'
+              ? 'Bạn cần chấm công vào'
+              : nextAction === 'CHECK_OUT'
+                ? 'Bạn cần chấm công ra'
+                : 'Bạn đã chấm công đủ hôm nay'}
           </p>
         </div>
       </div>
@@ -322,7 +404,11 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
           </div>
           <div className="text-center">
             <p className="text-white text-lg font-bold mb-2">
-              {isCheckInNext ? 'Chấm công vào' : 'Chấm công ra'}
+              {nextAction === 'CHECK_IN'
+                ? 'Chấm công vào'
+                : nextAction === 'CHECK_OUT'
+                  ? 'Chấm công ra'
+                  : 'Hoàn tất hôm nay'}
             </p>
             <p className="text-white/80 text-sm">
               {isWithinRange ? 'Bạn đang trong văn phòng' : 'Bạn đang ngoài văn phòng'}
@@ -330,10 +416,13 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
           </div>
           <button
             type="button"
-            onClick={() => handleAttendance(isCheckInNext ? AttendanceType.CHECK_IN : AttendanceType.CHECK_OUT)}
-            disabled={loading || (!canAction && navigator.onLine)}
+            onClick={() => {
+              if (nextAction === 'CHECK_IN') return handleAttendance(AttendanceType.CHECK_IN);
+              if (nextAction === 'CHECK_OUT') return handleAttendance(AttendanceType.CHECK_OUT);
+            }}
+            disabled={nextAction === 'DONE' || loading || (!canAction && navigator.onLine)}
             className={`h-14 px-10 rounded-full font-bold shadow-lg flex items-center space-x-3 transition-all active:scale-95 ${
-              loading || (!canAction && navigator.onLine)
+              nextAction === 'DONE' || loading || (!canAction && navigator.onLine)
                 ? 'bg-slate-400 text-slate-200 cursor-not-allowed'
                 : 'bg-white text-blue-600 hover:bg-blue-50'
             }`}
@@ -348,10 +437,18 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
               </>
             ) : (
               <>
-                <span>{isCheckInNext ? 'Xác nhận vào' : 'Xác nhận ra'}</span>
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                </svg>
+                <span>
+                  {nextAction === 'CHECK_IN'
+                    ? 'Xác nhận vào'
+                    : nextAction === 'CHECK_OUT'
+                      ? 'Xác nhận ra'
+                      : 'Đã hoàn tất'}
+                </span>
+                {nextAction !== 'DONE' && (
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                )}
               </>
             )}
           </button>
@@ -366,12 +463,31 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
             {loading ? 'Đang định vị...' : (distance ? `${Math.round(distance)}m đến văn phòng` : 'Chưa có vị trí')}
           </p>
         </div>
-        <button onClick={getLocation} className="flex items-center justify-center w-10 h-10 shrink-0 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className={`w-5 h-5 shrink-0 ${loading ? 'animate-spin' : ''}`}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-2">
+          {(!location || distance === null || !!error) && (
+            <button
+              type="button"
+              onClick={requestLocationPermission}
+              disabled={loading}
+              className="px-3 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-colors disabled:opacity-60"
+            >
+              Cho phép vị trí
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={getLocation}
+            disabled={loading}
+            className="flex items-center justify-center w-10 h-10 shrink-0 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors disabled:opacity-60"
+            aria-label="Lấy lại vị trí"
+            title="Lấy lại vị trí"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className={`w-5 h-5 shrink-0 ${loading ? 'animate-spin' : ''}`}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
   );
