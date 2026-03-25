@@ -1,28 +1,53 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AttendanceRecord, AttendanceType, AttendanceStatus, User, UserRole } from '../../types';
-import { getAllAttendance, deleteAttendance, getAllUsers } from '../../services/db';
-import { deleteAttendancePhoto, checkPhotoExists, testPhotoUrl, extractFilenameFromUrl } from '../../services/storage';
+import { getAllAttendance, getAllUsers } from '../../services/db';
 import { exportToCSV } from '../../utils/export';
 
-/**
- * Kiểm tra xem photoUrl có phải là base64 data URL không
- */
-const isBase64DataUrl = (url: string): boolean => {
-  return url.startsWith('data:image/');
+/** yyyy-mm-dd theo giờ local */
+const localDayKey = (timestamp: number) => {
+  const d = new Date(timestamp);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 };
 
-/**
- * Kiểm tra xem photoUrl có phải là URL hợp lệ không
- */
-const isValidUrl = (url: string): boolean => {
-  try {
-    if (isBase64DataUrl(url)) return true;
-    const parsed = new URL(url);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-  } catch {
-    return false;
+interface AttendanceDayGroup {
+  userId: string;
+  dayKey: string;
+  sortKey: number;
+  records: AttendanceRecord[];
+  checkIn?: AttendanceRecord;
+  checkOut?: AttendanceRecord;
+}
+
+function buildAttendanceDayGroups(records: AttendanceRecord[]): AttendanceDayGroup[] {
+  const map = new Map<string, AttendanceRecord[]>();
+  for (const r of records) {
+    const dk = localDayKey(r.timestamp);
+    const k = `${r.userId}\t${dk}`;
+    if (!map.has(k)) map.set(k, []);
+    map.get(k)!.push(r);
   }
-};
+  const groups: AttendanceDayGroup[] = [];
+  for (const [, recs] of map) {
+    recs.sort((a, b) => a.timestamp - b.timestamp);
+    const ins = recs.filter(x => x.type === AttendanceType.CHECK_IN);
+    const outs = recs.filter(x => x.type === AttendanceType.CHECK_OUT);
+    const userId = recs[0].userId;
+    const dayKey = localDayKey(recs[0].timestamp);
+    groups.push({
+      userId,
+      dayKey,
+      sortKey: Math.max(...recs.map(x => x.timestamp)),
+      records: recs,
+      checkIn: ins[0],
+      checkOut: outs.length ? outs[outs.length - 1] : undefined,
+    });
+  }
+  groups.sort((a, b) => b.sortKey - a.sortKey);
+  return groups;
+}
 
 interface AttendanceManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
@@ -40,16 +65,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
   const [filterType, setFilterType] = useState<'ALL' | AttendanceType>('ALL');
   const [filterStatus, setFilterStatus] = useState<'ALL' | AttendanceStatus>('ALL');
   const [filterDepartment, setFilterDepartment] = useState<string>('ALL');
-  const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<'table' | 'kanban'>('kanban');
-  /** ID các bản ghi có ảnh không tải được (URL lỗi / bucket private / bản ghi cũ) */
-  const [failedPhotoIds, setFailedPhotoIds] = useState<Set<string>>(new Set());
-  /** Track images that are in viewport for lazy loading */
-  const [visibleImageIds, setVisibleImageIds] = useState<Set<string>>(new Set());
-  /** Track retry attempts for failed images */
-  const [retryAttempts, setRetryAttempts] = useState<Map<string, number>>(new Map());
-
   const t = {
     vi: {
       filters: 'Bộ lọc',
@@ -68,17 +84,13 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       employee: 'Nhân viên',
       time: 'Thời gian',
       location: 'Vị trí',
-      photo: 'Hình ảnh',
       status: 'Trạng thái',
-      actions: 'Thao tác',
       checkIn: 'Vào',
       checkOut: 'Ra',
       onTime: 'Đúng giờ',
       late: 'Trễ',
       earlyLeave: 'Về sớm',
       overtime: 'Tăng ca',
-      delete: 'Xóa',
-      confirmDelete: 'Bạn có chắc muốn xóa bản ghi này?',
       noDataToExport: 'Không có dữ liệu để xuất',
       exportEmployee: 'Nhân viên',
       exportDepartment: 'Phòng ban',
@@ -88,12 +100,14 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       exportStatus: 'Trạng thái',
       exportAddress: 'Địa chỉ',
       exportNotes: 'Ghi chú',
-      viewTable: 'Bảng',
-      viewKanban: 'Kanban',
       records: 'bản ghi',
       other: 'Khác',
       pending: 'Chờ',
-      emptyColumn: 'Không có',
+      workSessions: 'phiên/ngày',
+      dateCol: 'Ngày',
+      checkInCol: 'Vào ca',
+      checkOutCol: 'Ra ca',
+      moreMarks: 'thêm {n} bản ghi',
       filterDateFrom: 'Từ ngày',
       filterDateTo: 'Đến ngày',
       filterByType: 'Loại chấm công',
@@ -123,17 +137,13 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       employee: 'Employee',
       time: 'Time',
       location: 'Location',
-      photo: 'Photo',
       status: 'Status',
-      actions: 'Actions',
       checkIn: 'In',
       checkOut: 'Out',
       onTime: 'On Time',
       late: 'Late',
       earlyLeave: 'Early Leave',
       overtime: 'Overtime',
-      delete: 'Delete',
-      confirmDelete: 'Are you sure you want to delete this record?',
       noDataToExport: 'No data to export',
       exportEmployee: 'Employee',
       exportDepartment: 'Department',
@@ -143,12 +153,14 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       exportStatus: 'Status',
       exportAddress: 'Address',
       exportNotes: 'Notes',
-      viewTable: 'Table',
-      viewKanban: 'Kanban',
       records: 'records',
       other: 'Other',
       pending: 'Pending',
-      emptyColumn: 'Empty',
+      workSessions: 'sessions',
+      dateCol: 'Date',
+      checkInCol: 'Check-in',
+      checkOutCol: 'Check-out',
+      moreMarks: '+{n} records',
       filterDateFrom: 'From date',
       filterDateTo: 'To date',
       filterByType: 'Check type',
@@ -175,37 +187,8 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
     }
   }, [onRegisterReload]);
 
-  // Intersection Observer for lazy loading images
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            const recordId = entry.target.getAttribute('data-record-id');
-            if (recordId) {
-              setVisibleImageIds((prev) => new Set(prev).add(recordId));
-            }
-          }
-        });
-      },
-      { rootMargin: '50px' } // Start loading 50px before image enters viewport
-    );
-
-    // Re-observe images when records change
-    const imageElements = document.querySelectorAll('[data-record-id]');
-    imageElements.forEach((el) => observer.observe(el));
-
-    return () => {
-      imageElements.forEach((el) => observer.unobserve(el));
-    };
-  }, [attendanceRecords]);
-
   const loadData = async () => {
     setIsLoading(true);
-    // Reset failed photo IDs khi load lại data để thử load lại các ảnh đã fail trước đó
-    setFailedPhotoIds(new Set());
-    setVisibleImageIds(new Set()); // Reset visible images để trigger IntersectionObserver lại
-    setRetryAttempts(new Map()); // Reset retry attempts
     try {
       // Tối ưu: Chỉ load 500 records đầu tiên để tránh lag
       // Nếu cần tất cả, có thể load thêm khi scroll hoặc filter
@@ -296,6 +279,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
   };
 
   const filteredData = getFilteredData();
+  const groupedByDay = useMemo(() => buildAttendanceDayGroups(filteredData), [filteredData]);
 
   const departmentOptions = useMemo(() => {
     const names = new Set<string>();
@@ -366,15 +350,17 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
     }
   };
 
-  const KANBAN_COLUMNS: { status: AttendanceStatus; label: string; headerClass: string }[] = [
-    { status: AttendanceStatus.ON_TIME, label: text.onTime, headerClass: 'bg-emerald-50 border-emerald-200/60 text-emerald-800' },
-    { status: AttendanceStatus.LATE, label: text.late, headerClass: 'bg-amber-50 border-amber-200/60 text-amber-800' },
-    { status: AttendanceStatus.EARLY_LEAVE, label: text.earlyLeave, headerClass: 'bg-yellow-50 border-yellow-200/60 text-yellow-800' },
-    { status: AttendanceStatus.OVERTIME, label: text.overtime, headerClass: 'bg-violet-50 border-violet-200/60 text-violet-800' },
-  ];
-
-  const getRecordsByStatus = (status: AttendanceStatus) => {
-    return filteredData.filter(r => r.status === status);
+  const formatDayLabel = (dayKey: string) => {
+    const parts = dayKey.split('-').map(Number);
+    const [y, m, d] = parts;
+    if (parts.length !== 3 || [y, m, d].some(x => Number.isNaN(x))) return dayKey;
+    const dt = new Date(y, m - 1, d);
+    return dt.toLocaleDateString(language === 'vi' ? 'vi-VN' : 'en-US', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
   };
 
   return (
@@ -524,397 +510,97 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
         </div>
       ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-sky-50 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50/50">
-            <span className="text-sm font-medium text-slate-600">{filteredData.length} {text.records}</span>
-            <div className="flex rounded-xl overflow-hidden border border-slate-200">
-              <button
-                onClick={() => setViewMode('kanban')}
-                className={`px-4 py-2 text-xs font-bold transition-colors ${
-                  viewMode === 'kanban' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                {text.viewKanban}
-              </button>
-              <button
-                onClick={() => setViewMode('table')}
-                className={`px-4 py-2 text-xs font-bold transition-colors ${
-                  viewMode === 'table' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                {text.viewTable}
-              </button>
-            </div>
+          <div className="flex items-center px-4 py-3 border-b border-slate-200 bg-slate-50/50">
+            <span className="text-sm font-medium text-slate-600">
+              {groupedByDay.length} {text.workSessions} · {filteredData.length} {text.records}
+            </span>
           </div>
           <div className="overflow-x-auto">
-            {viewMode === 'kanban' ? (
-              <div className="p-4 flex items-start gap-3 overflow-x-auto">
-                {KANBAN_COLUMNS.map((col) => {
-                  const records = getRecordsByStatus(col.status);
-                  return (
-                    <div
-                      key={col.status}
-                      className="flex-shrink-0 w-56 bg-slate-50/80 rounded-xl border border-slate-200/80 flex flex-col shadow-sm"
-                    >
-                      <div className={`px-3 py-2 rounded-t-xl border-b font-semibold text-xs flex items-center justify-between ${col.headerClass}`}>
-                        <span>{col.label}</span>
-                        <span className="min-w-[1.25rem] h-5 flex items-center justify-center rounded-md bg-white/70 text-[11px] font-bold">{records.length}</span>
-                      </div>
-                      <div className="p-2 space-y-1.5">
-                        {records.length === 0 ? (
-                          <p className="text-[11px] text-slate-400 py-6 text-center">{text.emptyColumn}</p>
-                        ) : (
-                          records.map((record: AttendanceRecord) => {
-                            const employee = employees.find(e => e.id === record.userId);
-                            return (
-                              <div
-                                key={record.id}
-                                className="bg-white rounded-lg p-2 border border-slate-100 hover:border-sky-200 hover:shadow-sm transition-all group"
-                              >
-                                <div className="flex items-center gap-2">
-                                  <div className="flex-1 min-w-0 flex flex-col gap-0.5">
-                                    {employee && setView ? (
-                                      <button
-                                        onClick={() => setView('employee-profile', { employeeId: employee.id })}
-                                        className="text-xs font-semibold text-slate-800 hover:text-blue-600 hover:underline text-left truncate block w-full leading-tight"
-                                      >
-                                        {employee.name}
-                                      </button>
-                                    ) : (
-                                      <p className="text-xs font-semibold text-slate-800 truncate leading-tight">{employee?.name || record.userId}</p>
-                                    )}
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="text-[11px] text-slate-500 tabular-nums">
-                                        {new Date(record.timestamp).toLocaleTimeString(language === 'vi' ? 'vi-VN' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
-                                      </span>
-                                      <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${record.type === AttendanceType.CHECK_IN ? 'bg-blue-100 text-blue-600' : 'bg-cyan-100 text-cyan-600'}`}>
-                                        {record.type === AttendanceType.CHECK_IN ? text.checkIn : text.checkOut}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <button
-                                    onClick={async () => {
-                                      if (confirm(text.confirmDelete)) {
-                                        if (record.photoUrl) await deleteAttendancePhoto(record.photoUrl);
-                                        await deleteAttendance(record.id);
-                                        loadData();
-                                      }
-                                    }}
-                                    className="opacity-60 hover:opacity-100 text-red-500 hover:text-red-600 p-0.5 shrink-0 transition-opacity"
-                                    title={text.delete}
-                                  >
-                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5">
-                                      <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                                    </svg>
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
             <table className="w-full">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.type}</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.employee}</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.time}</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.location}</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.photo}</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.status}</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.actions}</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.dateCol}</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.checkInCol}</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.checkOutCol}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredData.map((record: AttendanceRecord) => {
-                  const employee = employees.find(e => e.id === record.userId);
-                  const statusInfo = getStatusLabel(record.status);
+                {groupedByDay.map((group) => {
+                  const employee = employees.find(e => e.id === group.userId);
+                  const inInfo = group.checkIn ? getStatusLabel(group.checkIn.status) : null;
+                  const outInfo = group.checkOut ? getStatusLabel(group.checkOut.status) : null;
+                  const extra = group.records.filter(
+                    r => r.id !== group.checkIn?.id && r.id !== group.checkOut?.id
+                  ).length;
+                  const fmtLoc = (r?: AttendanceRecord) =>
+                    r?.location
+                      ? r.location.address || `${r.location.lat.toFixed(5)}, ${r.location.lng.toFixed(5)}`
+                      : null;
                   return (
-                    <tr key={record.id} className="hover:bg-sky-50/50 transition-colors">
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-bold ${
-                          record.type === AttendanceType.CHECK_IN ? 'bg-blue-100 text-blue-600' : 'bg-cyan-100 text-cyan-600'
-                        }`}>
-                          {record.type === AttendanceType.CHECK_IN ? text.checkIn : text.checkOut}
-                        </span>
-                      </td>
+                    <tr key={`${group.userId}-${group.dayKey}`} className="hover:bg-sky-50/50 transition-colors align-top">
                       <td className="px-6 py-4">
                         <div>
                           {employee && setView ? (
                             <button
+                              type="button"
                               onClick={() => setView('employee-profile', { employeeId: employee.id })}
                               className="text-sm font-bold text-blue-600 hover:text-blue-700 hover:underline transition-colors text-left"
                             >
                               {employee.name}
                             </button>
                           ) : (
-                            <p className="text-sm font-bold text-slate-800">{employee?.name || record.userId}</p>
+                            <p className="text-sm font-bold text-slate-800">{employee?.name || group.userId}</p>
                           )}
                           <p className="text-xs text-slate-500">{employee?.department || ''}</p>
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <div>
-                          <p className="text-sm text-slate-700">{new Date(record.timestamp).toLocaleDateString(language === 'vi' ? 'vi-VN' : 'en-US')}</p>
-                          <p className="text-xs text-slate-500">{new Date(record.timestamp).toLocaleTimeString(language === 'vi' ? 'vi-VN' : 'en-US', { hour: '2-digit', minute: '2-digit' })}</p>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        {record.location ? (
-                          <p className="text-xs text-slate-600">
-                            {record.location.address || `${record.location.lat.toFixed(6)}, ${record.location.lng.toFixed(6)}`}
-                          </p>
-                        ) : (
-                          <p className="text-xs text-slate-400">-</p>
+                        <p className="text-sm text-slate-800 font-medium">{formatDayLabel(group.dayKey)}</p>
+                        <p className="text-[11px] text-slate-400 font-mono">{group.dayKey}</p>
+                        {extra > 0 && (
+                          <p className="text-[11px] text-amber-600 mt-1">{text.moreMarks.replace('{n}', String(extra))}</p>
                         )}
                       </td>
                       <td className="px-6 py-4">
-                        {record.photoUrl ? (
-                          (() => {
-                            const photoUrl = record.photoUrl;
-                            
-                            // Debug: Log URL để kiểm tra có bị truncate không
-                            if (photoUrl.includes('supabase.co/storage') && photoUrl.length < 100) {
-                              console.warn('⚠️ URL seems truncated in render:', {
-                                recordId: record.id,
-                                photoUrl,
-                                length: photoUrl.length,
-                              });
-                            }
-                            
-                            const isBase64 = isBase64DataUrl(photoUrl);
-                            const isValid = isValidUrl(photoUrl);
-                            const hasFailed = failedPhotoIds.has(record.id);
-
-                            // Nếu URL không hợp lệ, hiển thị lỗi ngay
-                            if (!isValid) {
-                              return (
-                                <div
-                                  className="w-16 h-16 rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 flex items-center justify-center text-[10px] text-slate-400 text-center leading-tight px-1"
-                                  title="URL ảnh không hợp lệ"
-                                >
-                                  URL lỗi
-                                </div>
-                              );
-                            }
-                            
-                            // Nếu đã fail và đã retry đủ lần, hiển thị "Không tải được"
-                            // Nhưng chỉ khi đã trong viewport (đã thử load)
-                            const retryCount = retryAttempts.get(record.id) || 0;
-                            if (hasFailed && retryCount >= 2) {
-                              return (
-                                <div
-                                  className="w-16 h-16 rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 flex items-center justify-center text-[10px] text-slate-400 text-center leading-tight px-1"
-                                  title="Ảnh không tải được sau nhiều lần thử (có thể do bản ghi cũ hoặc bucket chưa public)"
-                                >
-                                  Không tải được
-                                </div>
-                              );
-                            }
-
-                            // Base64: hiển thị trực tiếp (không cần check error)
-                            if (isBase64) {
-                              return (
-                                <button
-                                  onClick={() => setSelectedPhoto(photoUrl)}
-                                  className="w-16 h-16 rounded-lg overflow-hidden border-2 border-slate-200 hover:border-blue-500 transition-colors"
-                                >
-                                  <img
-                                    src={photoUrl}
-                                    alt="Attendance photo"
-                                    className="w-full h-full object-cover"
-                                  />
-                                </button>
-                              );
-                            }
-
-                            // HTTP URL: Lazy load chỉ khi image trong viewport
-                            const shouldLoad = visibleImageIds.has(record.id);
-                            
-                            // Debug: Log URL khi render
-                            if (shouldLoad && photoUrl.includes('supabase.co/storage')) {
-                              console.log('🖼️ Loading image:', {
-                                recordId: record.id,
-                                photoUrl,
-                                urlLength: photoUrl.length,
-                                isComplete: photoUrl.includes('CHECK_IN') || photoUrl.includes('CHECK_OUT'),
-                              });
-                            }
-                            
-                            // Nếu đã fail trước đó và chưa trong viewport, không thử lại ngay
-                            // Chỉ hiển thị "Không tải được" nếu đã thử load và fail
-                            if (hasFailed && !shouldLoad) {
-                              return (
-                                <div
-                                  className="w-16 h-16 rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 flex items-center justify-center text-[10px] text-slate-400 text-center leading-tight px-1"
-                                  title="Ảnh không tải được (có thể do bản ghi cũ hoặc bucket chưa public)"
-                                >
-                                  Không tải được
-                                </div>
-                              );
-                            }
-                            
-                            return (
-                              <button
-                                onClick={() => setSelectedPhoto(photoUrl)}
-                                className="w-16 h-16 rounded-lg overflow-hidden border-2 border-slate-200 hover:border-blue-500 transition-colors bg-slate-100"
-                                data-record-id={record.id}
-                              >
-                                {shouldLoad ? (
-                                  <img
-                                    src={photoUrl}
-                                    alt="Attendance photo"
-                                    className="w-full h-full object-cover"
-                                    loading="lazy"
-                                    decoding="async"
-                                    sizes="(max-width: 768px) 100vw, 400px"
-                                    crossOrigin="anonymous"
-                                    onError={async (e) => {
-                                      const target = e.target as HTMLImageElement;
-                                      const currentAttempts = retryAttempts.get(record.id) || 0;
-                                      const maxRetries = 2; // Retry tối đa 2 lần
-                                      
-                                      // Extract error details từ event
-                                      const errorDetails: any = {
-                                        photoUrl,
-                                        recordId: record.id,
-                                        userId: record.userId,
-                                        timestamp: new Date(record.timestamp).toISOString(),
-                                        type: record.type,
-                                        urlParts: photoUrl.split('/'),
-                                        isSupabaseUrl: photoUrl.includes('supabase.co/storage'),
-                                        naturalWidth: target.naturalWidth,
-                                        naturalHeight: target.naturalHeight,
-                                        complete: target.complete,
-                                        attempt: currentAttempts + 1,
-                                      };
-                                      
-                                      // Test URL và check file existence
-                                      const filename = extractFilenameFromUrl(photoUrl);
-                                      errorDetails.extractedFilename = filename;
-                                      
-                                      // Test URL accessibility
-                                      const urlTest = await testPhotoUrl(photoUrl);
-                                      errorDetails.urlTest = urlTest;
-                                      
-                                      // Check if file exists on Storage
-                                      const fileExists = await checkPhotoExists(photoUrl);
-                                      errorDetails.fileExists = fileExists;
-                                      
-                                      console.warn(`❌ Failed to load photo for record ${record.id} (attempt ${currentAttempts + 1}/${maxRetries + 1}):`, errorDetails);
-                                      
-                                      // Nếu file không tồn tại hoặc URL không accessible, không retry
-                                      if (!fileExists || !urlTest.success) {
-                                        console.error(`❌ Photo URL invalid or file missing. Marking as failed immediately.`, {
-                                          photoUrl,
-                                          fileExists,
-                                          urlTest,
-                                        });
-                                        setFailedPhotoIds((prev) => new Set(prev).add(record.id));
-                                        return;
-                                      }
-                                      
-                                      // Retry mechanism: thử lại sau 1 giây nếu chưa đạt max retries
-                                      if (currentAttempts < maxRetries) {
-                                        setRetryAttempts((prev) => {
-                                          const next = new Map(prev);
-                                          next.set(record.id, currentAttempts + 1);
-                                          return next;
-                                        });
-                                        
-                                        // Retry sau 1 giây bằng cách force re-render img
-                                        setTimeout(() => {
-                                          setVisibleImageIds((prev) => {
-                                            const next = new Set(prev);
-                                            next.delete(record.id); // Remove để trigger lại IntersectionObserver
-                                            setTimeout(() => next.add(record.id), 100);
-                                            return next;
-                                          });
-                                        }, 1000);
-                                      } else {
-                                        // Đã retry đủ, đánh dấu là failed
-                                        console.error(`❌ Photo failed after ${maxRetries + 1} attempts. URL:`, photoUrl);
-                                        setFailedPhotoIds((prev) => new Set(prev).add(record.id));
-                                      }
-                                    }}
-                                    onLoad={() => {
-                                      // Photo loaded successfully - remove from failed list if was there
-                                      setFailedPhotoIds((prev) => {
-                                        const next = new Set(prev);
-                                        next.delete(record.id);
-                                        return next;
-                                      });
-                                    }}
-                                  />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center text-[8px] text-slate-400">
-                                    Loading...
-                                  </div>
-                                )}
-                              </button>
-                            );
-                          })()
+                        {group.checkIn ? (
+                          <div className="space-y-1">
+                            <p className="text-sm text-slate-800 tabular-nums">
+                              {new Date(group.checkIn.timestamp).toLocaleTimeString(language === 'vi' ? 'vi-VN' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                            {inInfo && (
+                              <span className={`inline-flex text-xs font-bold px-2 py-0.5 rounded-lg ${inInfo.className}`}>{inInfo.label}</span>
+                            )}
+                            {fmtLoc(group.checkIn) && (
+                              <p className="text-[11px] text-slate-500 line-clamp-2">{fmtLoc(group.checkIn)}</p>
+                            )}
+                          </div>
                         ) : (
-                          <span className="text-xs text-slate-400">-</span>
+                          <span className="text-sm text-slate-400">—</span>
                         )}
                       </td>
                       <td className="px-6 py-4">
-                        <span className={`text-xs font-bold px-2 py-1 rounded-lg ${statusInfo.className}`}>
-                          {statusInfo.label}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <button
-                          onClick={async () => {
-                            if (confirm(text.confirmDelete)) {
-                              // Xóa ảnh khỏi Storage nếu có
-                              if (record.photoUrl) {
-                                await deleteAttendancePhoto(record.photoUrl);
-                              }
-                              await deleteAttendance(record.id);
-                              loadData();
-                            }
-                          }}
-                          className="text-sm text-red-600 hover:text-red-700 font-medium"
-                        >
-                          {text.delete}
-                        </button>
+                        {group.checkOut ? (
+                          <div className="space-y-1">
+                            <p className="text-sm text-slate-800 tabular-nums">
+                              {new Date(group.checkOut.timestamp).toLocaleTimeString(language === 'vi' ? 'vi-VN' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                            {outInfo && (
+                              <span className={`inline-flex text-xs font-bold px-2 py-0.5 rounded-lg ${outInfo.className}`}>{outInfo.label}</span>
+                            )}
+                            {fmtLoc(group.checkOut) && (
+                              <p className="text-[11px] text-slate-500 line-clamp-2">{fmtLoc(group.checkOut)}</p>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-sm text-slate-400">—</span>
+                        )}
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Photo Modal */}
-      {selectedPhoto && (
-        <div
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-          onClick={() => setSelectedPhoto(null)}
-        >
-          <div className="relative max-w-4xl max-h-[90vh] bg-white rounded-2xl overflow-hidden shadow-2xl">
-            <button
-              onClick={() => setSelectedPhoto(null)}
-              className="absolute top-4 right-4 z-10 w-10 h-10 bg-white/90 hover:bg-white rounded-full flex items-center justify-center shadow-lg transition-colors"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-            <img
-              src={selectedPhoto}
-              alt="Attendance photo"
-              className="w-full h-full object-contain max-h-[90vh]"
-              onClick={(e) => e.stopPropagation()}
-            />
           </div>
         </div>
       )}

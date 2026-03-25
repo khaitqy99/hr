@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { User, UserRole, ContractType, EmployeeStatus, EMPLOYEE_STATUS_LABELS, CONTRACT_TYPE_LABELS, Department } from '../../types';
 import { getAllUsers, createUser, getDepartments } from '../../services/db';
 import { exportToCSV } from '../../utils/export';
@@ -8,6 +8,8 @@ interface UsersManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
   language: 'vi' | 'en';
 }
+
+type EmployeeStatusTab = 'UNSET' | EmployeeStatus;
 
 const defaultUserForm = {
   email: '',
@@ -19,7 +21,7 @@ const defaultUserForm = {
 const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegisterReload, language }) => {
   const [employees, setEmployees] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [selectedStatus, setSelectedStatus] = useState<'ALL' | EmployeeStatus>('ALL');
+  const [selectedStatusTab, setSelectedStatusTab] = useState<EmployeeStatusTab>(EmployeeStatus.ACTIVE);
   const [showUserForm, setShowUserForm] = useState(false);
   const [userForm, setUserForm] = useState(defaultUserForm);
   const [userFormError, setUserFormError] = useState('');
@@ -78,8 +80,8 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
       exportGrossSalary: 'Lương cơ bản',
       exportSocialInsurance: 'Lương BHXH',
       exportTraineeSalary: 'Lương học việc',
-      filterByStatus: 'Lọc theo trạng thái',
-      allStatuses: 'Tất cả trạng thái',
+      statusSubtabs: 'Trạng thái nhân viên',
+      unsetStatusTab: 'Chưa gán',
       noFilteredEmployees: 'Không có nhân viên phù hợp trạng thái đã chọn',
     },
     en: {
@@ -124,8 +126,8 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
       exportGrossSalary: 'Gross Salary',
       exportSocialInsurance: 'Social Insurance Salary',
       exportTraineeSalary: 'Trainee Salary',
-      filterByStatus: 'Filter by status',
-      allStatuses: 'All statuses',
+      statusSubtabs: 'Employee status',
+      unsetStatusTab: 'Unset',
       noFilteredEmployees: 'No employees match the selected status',
     }
   };
@@ -200,10 +202,41 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
     return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
   };
 
+  const statusTabCounts = useMemo(() => {
+    let active = 0;
+    let left = 0;
+    let unset = 0;
+    for (const e of employees) {
+      if (!e.status) unset += 1;
+      else if (e.status === EmployeeStatus.ACTIVE) active += 1;
+      else if (e.status === EmployeeStatus.LEFT) left += 1;
+    }
+    return { active, left, unset };
+  }, [employees]);
+
   const filteredEmployees = employees.filter(emp => {
-    if (selectedStatus === 'ALL') return true;
-    return emp.status === selectedStatus;
+    if (selectedStatusTab === 'UNSET') return !emp.status;
+    return emp.status === selectedStatusTab;
   });
+
+  const statusTabs: { id: EmployeeStatusTab; label: string }[] = [
+    { id: EmployeeStatus.ACTIVE, label: EMPLOYEE_STATUS_LABELS[EmployeeStatus.ACTIVE] },
+    { id: EmployeeStatus.LEFT, label: EMPLOYEE_STATUS_LABELS[EmployeeStatus.LEFT] },
+    { id: 'UNSET', label: text.unsetStatusTab },
+  ];
+
+  const countForStatusTab = (id: EmployeeStatusTab) => {
+    switch (id) {
+      case 'UNSET':
+        return statusTabCounts.unset;
+      case EmployeeStatus.ACTIVE:
+        return statusTabCounts.active;
+      case EmployeeStatus.LEFT:
+        return statusTabCounts.left;
+      default:
+        return 0;
+    }
+  };
 
   const handleExport = () => {
     if (filteredEmployees.length === 0) {
@@ -228,18 +261,42 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex flex-wrap items-center gap-3 min-w-0">
-          <label className="text-xs font-bold text-slate-500 uppercase shrink-0">{text.filterByStatus}</label>
-          <select
-            value={selectedStatus}
-            onChange={e => setSelectedStatus(e.target.value as 'ALL' | EmployeeStatus)}
-            className="rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white min-w-[12rem] max-w-full"
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">{text.statusSubtabs}</p>
+          <div
+            className="inline-flex flex-wrap rounded-xl border border-slate-200 bg-slate-50/90 p-1 gap-1"
+            role="tablist"
+            aria-label={text.statusSubtabs}
           >
-            <option value="ALL">{text.allStatuses}</option>
-            <option value={EmployeeStatus.ACTIVE}>{EMPLOYEE_STATUS_LABELS[EmployeeStatus.ACTIVE]}</option>
-            <option value={EmployeeStatus.LEFT}>{EMPLOYEE_STATUS_LABELS[EmployeeStatus.LEFT]}</option>
-          </select>
+            {statusTabs.map(tab => {
+              const selected = selectedStatusTab === tab.id;
+              const n = countForStatusTab(tab.id);
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  onClick={() => setSelectedStatusTab(tab.id)}
+                  className={`px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                    selected
+                      ? 'bg-white text-blue-700 shadow-sm ring-1 ring-slate-200/80'
+                      : 'text-slate-600 hover:bg-white/70 hover:text-slate-800'
+                  }`}
+                >
+                  <span>{tab.label}</span>
+                  <span
+                    className={`tabular-nums min-w-[1.25rem] h-5 flex items-center justify-center rounded-md text-[10px] font-bold ${
+                      selected ? 'bg-blue-100 text-blue-700' : 'bg-slate-200/80 text-slate-600'
+                    }`}
+                  >
+                    {n}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-3 shrink-0">
           <button
@@ -420,9 +477,13 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
                       )}
                     </td>
                     <td className="px-6 py-4">
-                      {emp.status && (
+                      {emp.status ? (
                         <span className={`text-xs font-bold px-2 py-1 rounded ${emp.status === EmployeeStatus.ACTIVE ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-500'}`}>
                           {EMPLOYEE_STATUS_LABELS[emp.status]}
+                        </span>
+                      ) : (
+                        <span className="text-xs font-bold px-2 py-1 rounded bg-amber-50 text-amber-700 border border-amber-100">
+                          {text.unsetStatusTab}
                         </span>
                       )}
                     </td>
