@@ -903,7 +903,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                           return null;
                         })()}
                       </div>
-                      <div className="max-h-[600px] overflow-y-auto">
+                      <div className="overflow-x-auto">
                         <table className="w-full">
                           <thead className="bg-slate-50 sticky top-0">
                             <tr>
@@ -1252,7 +1252,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
         </div>
       ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-sky-50 overflow-hidden">
-          <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
+          <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>

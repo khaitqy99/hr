@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { AttendanceRecord, AttendanceType, AttendanceStatus, User, UserRole } from '../../types';
 import { getAllAttendance, deleteAttendance, getAllUsers } from '../../services/db';
 import { deleteAttendancePhoto, checkPhotoExists, testPhotoUrl, extractFilenameFromUrl } from '../../services/storage';
@@ -35,6 +35,11 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
   const [employees, setEmployees] = useState<User[]>([]);
   const [attendanceFilter, setAttendanceFilter] = useState<string>('ALL');
   const [selectedEmployeeForAttendance, setSelectedEmployeeForAttendance] = useState<string>('ALL');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [filterType, setFilterType] = useState<'ALL' | AttendanceType>('ALL');
+  const [filterStatus, setFilterStatus] = useState<'ALL' | AttendanceStatus>('ALL');
+  const [filterDepartment, setFilterDepartment] = useState<string>('ALL');
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [viewMode, setViewMode] = useState<'table' | 'kanban'>('kanban');
@@ -89,6 +94,17 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       other: 'Khác',
       pending: 'Chờ',
       emptyColumn: 'Không có',
+      filterDateFrom: 'Từ ngày',
+      filterDateTo: 'Đến ngày',
+      filterByType: 'Loại chấm công',
+      filterByStatus: 'Trạng thái',
+      filterByDepartment: 'Phòng ban',
+      allTypes: 'Tất cả loại',
+      allStatuses: 'Tất cả trạng thái',
+      allDepartments: 'Tất cả phòng ban',
+      customRangeHint: 'Để trống hai ô ngày để dùng lọc nhanh (Hôm nay / Tuần / Tháng / Tất cả).',
+      clearDetailFilters: 'Xóa lọc chi tiết',
+      usingCustomRangeNotice: 'Đang lọc theo khoảng ngày — các nút Hôm nay / Tuần / Tháng không áp dụng cho mốc thời gian.',
     },
     en: {
       filters: 'Filters',
@@ -133,6 +149,17 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       other: 'Other',
       pending: 'Pending',
       emptyColumn: 'Empty',
+      filterDateFrom: 'From date',
+      filterDateTo: 'To date',
+      filterByType: 'Check type',
+      filterByStatus: 'Status',
+      filterByDepartment: 'Department',
+      allTypes: 'All types',
+      allStatuses: 'All statuses',
+      allDepartments: 'All departments',
+      customRangeHint: 'Leave both dates empty to use quick filters (Today / Week / Month / All).',
+      clearDetailFilters: 'Clear detail filters',
+      usingCustomRangeNotice: 'Date range is active — quick time presets do not apply to the time window.',
     }
   };
 
@@ -205,6 +232,16 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
     }
   };
 
+  const parseLocalDayStartMs = (yyyyMmDd: string) => {
+    const [y, m, d] = yyyyMmDd.split('-').map(Number);
+    return new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
+  };
+
+  const parseLocalDayEndMs = (yyyyMmDd: string) => {
+    const [y, m, d] = yyyyMmDd.split('-').map(Number);
+    return new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
+  };
+
   const getFilteredData = () => {
     let filtered = attendanceRecords;
 
@@ -212,22 +249,73 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       filtered = filtered.filter(r => r.userId === selectedEmployeeForAttendance);
     }
 
-    const now = Date.now();
-    if (attendanceFilter === 'TODAY') {
-      const todayStart = new Date().setHours(0, 0, 0, 0);
-      filtered = filtered.filter(r => r.timestamp >= todayStart);
-    } else if (attendanceFilter === 'WEEK') {
-      const weekAgo = now - (7 * 24 * 60 * 60 * 1000);
-      filtered = filtered.filter(r => r.timestamp >= weekAgo);
-    } else if (attendanceFilter === 'MONTH') {
-      const monthAgo = now - (30 * 24 * 60 * 60 * 1000);
-      filtered = filtered.filter(r => r.timestamp >= monthAgo);
+    if (filterDepartment !== 'ALL') {
+      filtered = filtered.filter(r => {
+        const emp = employees.find(e => e.id === r.userId);
+        return emp?.department === filterDepartment;
+      });
+    }
+
+    if (filterType !== 'ALL') {
+      filtered = filtered.filter(r => r.type === filterType);
+    }
+
+    if (filterStatus !== 'ALL') {
+      filtered = filtered.filter(r => r.status === filterStatus);
+    }
+
+    const hasCustomRange = Boolean(dateFrom.trim() || dateTo.trim());
+    if (hasCustomRange) {
+      let rangeStart = Number.MIN_SAFE_INTEGER;
+      let rangeEnd = Number.MAX_SAFE_INTEGER;
+      if (dateFrom.trim()) {
+        rangeStart = parseLocalDayStartMs(dateFrom.trim());
+      }
+      if (dateTo.trim()) {
+        rangeEnd = parseLocalDayEndMs(dateTo.trim());
+      }
+      if (rangeStart > rangeEnd) {
+        [rangeStart, rangeEnd] = [rangeEnd, rangeStart];
+      }
+      filtered = filtered.filter(r => r.timestamp >= rangeStart && r.timestamp <= rangeEnd);
+    } else {
+      const now = Date.now();
+      if (attendanceFilter === 'TODAY') {
+        const todayStart = new Date().setHours(0, 0, 0, 0);
+        filtered = filtered.filter(r => r.timestamp >= todayStart);
+      } else if (attendanceFilter === 'WEEK') {
+        const weekAgo = now - (7 * 24 * 60 * 60 * 1000);
+        filtered = filtered.filter(r => r.timestamp >= weekAgo);
+      } else if (attendanceFilter === 'MONTH') {
+        const monthAgo = now - (30 * 24 * 60 * 60 * 1000);
+        filtered = filtered.filter(r => r.timestamp >= monthAgo);
+      }
     }
 
     return filtered;
   };
 
   const filteredData = getFilteredData();
+
+  const departmentOptions = useMemo(() => {
+    const names = new Set<string>();
+    employees.forEach(e => {
+      if (e.role !== UserRole.ADMIN && e.department?.trim()) {
+        names.add(e.department.trim());
+      }
+    });
+    return Array.from(names).sort((a, b) => a.localeCompare(b, language === 'vi' ? 'vi' : 'en'));
+  }, [employees, language]);
+
+  const hasCustomDateRange = Boolean(dateFrom.trim() || dateTo.trim());
+
+  const clearDetailFilters = () => {
+    setDateFrom('');
+    setDateTo('');
+    setFilterType('ALL');
+    setFilterStatus('ALL');
+    setFilterDepartment('ALL');
+  };
 
   const handleExport = () => {
     if (filteredData.length === 0) {
@@ -248,9 +336,15 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
         [text.exportNotes]: record.notes || '',
       };
     });
-    const dateRange = attendanceFilter === 'TODAY' ? 'today' : 
-                      attendanceFilter === 'WEEK' ? 'week' :
-                      attendanceFilter === 'MONTH' ? 'month' : 'all';
+    const dateRange = hasCustomDateRange
+      ? `range_${dateFrom.trim() || 'start'}_${dateTo.trim() || 'end'}`
+      : attendanceFilter === 'TODAY'
+        ? 'today'
+        : attendanceFilter === 'WEEK'
+          ? 'week'
+          : attendanceFilter === 'MONTH'
+            ? 'month'
+            : 'all';
     const filename = `attendance_${dateRange}_${Date.now()}.csv`;
     exportToCSV(exportData, filename);
   };
@@ -287,9 +381,9 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
     <div className="space-y-6">
       {/* Filters */}
       <div className="bg-white p-4 rounded-2xl shadow-sm border border-sky-50">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <h3 className="text-sm font-bold text-slate-700">{text.filters}</h3>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {setView && (
               <button
                 onClick={() => setView('admin', { adminPath: 'payroll' })}
@@ -312,15 +406,23 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
               </svg>
               {text.exportCSV} ({filteredData.length})
             </button>
+            <button
+              type="button"
+              onClick={clearDetailFilters}
+              className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-200 transition-colors"
+            >
+              {text.clearDetailFilters}
+            </button>
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-2">{text.filterByTime}</label>
-            <div className="flex space-x-2">
+            <div className={`flex flex-wrap gap-2 ${hasCustomDateRange ? 'opacity-50 pointer-events-none' : ''}`}>
               {['TODAY', 'WEEK', 'MONTH', 'ALL'].map(f => (
                 <button
                   key={f}
+                  type="button"
                   onClick={() => setAttendanceFilter(f)}
                   className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
                     attendanceFilter === f ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -330,7 +432,31 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
                 </button>
               ))}
             </div>
+            {hasCustomDateRange && (
+              <p className="text-[11px] text-amber-700 mt-2 leading-snug">{text.usingCustomRangeNotice}</p>
+            )}
           </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-2">{text.filterDateFrom}</label>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={e => setDateFrom(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-2">{text.filterDateTo}</label>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={e => setDateTo(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm"
+            />
+          </div>
+        </div>
+        <p className="text-[11px] text-slate-500 mt-2">{text.customRangeHint}</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-2">{text.filterByEmployee}</label>
             <select
@@ -340,8 +466,48 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
             >
               <option value="ALL">{text.allEmployees}</option>
               {employees.filter(e => e.role !== UserRole.ADMIN).map(emp => (
-                <option key={emp.id} value={emp.id}>{emp.name} - {emp.department}</option>
+                <option key={emp.id} value={emp.id}>{emp.name} — {emp.department}</option>
               ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-2">{text.filterByDepartment}</label>
+            <select
+              value={filterDepartment}
+              onChange={e => setFilterDepartment(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm"
+            >
+              <option value="ALL">{text.allDepartments}</option>
+              {departmentOptions.map(dept => (
+                <option key={dept} value={dept}>{dept}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-2">{text.filterByType}</label>
+            <select
+              value={filterType}
+              onChange={e => setFilterType(e.target.value as 'ALL' | AttendanceType)}
+              className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm"
+            >
+              <option value="ALL">{text.allTypes}</option>
+              <option value={AttendanceType.CHECK_IN}>{text.checkIn}</option>
+              <option value={AttendanceType.CHECK_OUT}>{text.checkOut}</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-2">{text.filterByStatus}</label>
+            <select
+              value={filterStatus}
+              onChange={e => setFilterStatus(e.target.value as 'ALL' | AttendanceStatus)}
+              className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm"
+            >
+              <option value="ALL">{text.allStatuses}</option>
+              <option value={AttendanceStatus.ON_TIME}>{text.onTime}</option>
+              <option value={AttendanceStatus.LATE}>{text.late}</option>
+              <option value={AttendanceStatus.EARLY_LEAVE}>{text.earlyLeave}</option>
+              <option value={AttendanceStatus.OVERTIME}>{text.overtime}</option>
+              <option value={AttendanceStatus.PENDING}>{text.pending}</option>
             </select>
           </div>
         </div>
@@ -379,9 +545,9 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
               </button>
             </div>
           </div>
-          <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
+          <div className="overflow-x-auto">
             {viewMode === 'kanban' ? (
-              <div className="p-4 flex gap-3 overflow-x-auto min-h-[60vh]">
+              <div className="p-4 flex items-start gap-3 overflow-x-auto">
                 {KANBAN_COLUMNS.map((col) => {
                   const records = getRecordsByStatus(col.status);
                   return (
@@ -393,7 +559,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
                         <span>{col.label}</span>
                         <span className="min-w-[1.25rem] h-5 flex items-center justify-center rounded-md bg-white/70 text-[11px] font-bold">{records.length}</span>
                       </div>
-                      <div className="flex-1 p-2 space-y-1.5 overflow-y-auto max-h-[calc(70vh-7rem)]">
+                      <div className="p-2 space-y-1.5">
                         {records.length === 0 ? (
                           <p className="text-[11px] text-slate-400 py-6 text-center">{text.emptyColumn}</p>
                         ) : (

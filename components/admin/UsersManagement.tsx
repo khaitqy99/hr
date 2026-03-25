@@ -19,6 +19,7 @@ const defaultUserForm = {
 const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegisterReload, language }) => {
   const [employees, setEmployees] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [selectedStatus, setSelectedStatus] = useState<'ALL' | EmployeeStatus>('ALL');
   const [showUserForm, setShowUserForm] = useState(false);
   const [userForm, setUserForm] = useState(defaultUserForm);
   const [userFormError, setUserFormError] = useState('');
@@ -77,6 +78,9 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
       exportGrossSalary: 'Lương cơ bản',
       exportSocialInsurance: 'Lương BHXH',
       exportTraineeSalary: 'Lương học việc',
+      filterByStatus: 'Lọc theo trạng thái',
+      allStatuses: 'Tất cả trạng thái',
+      noFilteredEmployees: 'Không có nhân viên phù hợp trạng thái đã chọn',
     },
     en: {
       addEmployee: '+ Add Employee',
@@ -120,6 +124,9 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
       exportGrossSalary: 'Gross Salary',
       exportSocialInsurance: 'Social Insurance Salary',
       exportTraineeSalary: 'Trainee Salary',
+      filterByStatus: 'Filter by status',
+      allStatuses: 'All statuses',
+      noFilteredEmployees: 'No employees match the selected status',
     }
   };
 
@@ -193,12 +200,17 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
     return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
   };
 
+  const filteredEmployees = employees.filter(emp => {
+    if (selectedStatus === 'ALL') return true;
+    return emp.status === selectedStatus;
+  });
+
   const handleExport = () => {
-    if (employees.length === 0) {
+    if (filteredEmployees.length === 0) {
       alert(text.noDataToExport);
       return;
     }
-    const exportData = employees.map(emp => ({
+    const exportData = filteredEmployees.map(emp => ({
       [text.exportFullName]: emp.name,
       [text.email]: emp.email,
       [text.exportDepartment]: emp.department,
@@ -216,29 +228,43 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <button
-          type="button"
-          onClick={() => { 
-            setShowUserForm(!showUserForm); 
-            setUserFormError(''); 
-            setFieldErrors({});
-            setUserForm(defaultUserForm); 
-          }}
-          className="px-6 py-3 rounded-xl text-sm font-bold bg-blue-600 text-white shadow-lg hover:bg-blue-700 transition-colors"
-        >
-          {showUserForm ? text.closeForm : text.addEmployee}
-        </button>
-        <button
-          onClick={handleExport}
-          disabled={employees.length === 0}
-          className="px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-          </svg>
-          {text.exportCSV}
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center gap-3 min-w-0">
+          <label className="text-xs font-bold text-slate-500 uppercase shrink-0">{text.filterByStatus}</label>
+          <select
+            value={selectedStatus}
+            onChange={e => setSelectedStatus(e.target.value as 'ALL' | EmployeeStatus)}
+            className="rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white min-w-[12rem] max-w-full"
+          >
+            <option value="ALL">{text.allStatuses}</option>
+            <option value={EmployeeStatus.ACTIVE}>{EMPLOYEE_STATUS_LABELS[EmployeeStatus.ACTIVE]}</option>
+            <option value={EmployeeStatus.LEFT}>{EMPLOYEE_STATUS_LABELS[EmployeeStatus.LEFT]}</option>
+          </select>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={() => { 
+              setShowUserForm(!showUserForm); 
+              setUserFormError(''); 
+              setFieldErrors({});
+              setUserForm(defaultUserForm); 
+            }}
+            className="px-6 py-3 rounded-xl text-sm font-bold bg-blue-600 text-white shadow-lg hover:bg-blue-700 transition-colors"
+          >
+            {showUserForm ? text.closeForm : text.addEmployee}
+          </button>
+          <button
+            onClick={handleExport}
+            disabled={filteredEmployees.length === 0}
+            className="px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+            {text.exportCSV}
+          </button>
+        </div>
       </div>
 
       {showUserForm && (
@@ -319,9 +345,13 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
         <div className="text-center py-12 bg-white rounded-2xl border border-sky-50">
           <p className="text-slate-400 font-medium">{text.noEmployees}</p>
         </div>
+      ) : filteredEmployees.length === 0 ? (
+        <div className="text-center py-12 bg-white rounded-2xl border border-sky-50">
+          <p className="text-slate-400 font-medium">{text.noFilteredEmployees}</p>
+        </div>
       ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-sky-50 overflow-hidden">
-          <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
+          <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
@@ -336,7 +366,7 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {employees.map((emp: User) => (
+                {filteredEmployees.map((emp: User) => (
                   <tr key={emp.id} className="hover:bg-sky-50/50 transition-colors">
                     <td className="px-6 py-4">
                       <div className="flex items-center space-x-3">
