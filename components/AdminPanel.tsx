@@ -50,10 +50,31 @@ const PATH_TO_TAB: Record<string, Tab> = Object.fromEntries(
 
 const DEFAULT_TAB: Tab = 'USERS';
 
+/** Lưu ngôn ngữ admin: khi rời admin (tab NV, hồ sơ, reload) AdminPanel unmount — không persist thì quay lại mặc định EN */
+const ADMIN_PANEL_LANGUAGE_KEY = 'hr_connect_admin_language';
+
+function readStoredAdminLanguage(): 'vi' | 'en' {
+  try {
+    const v = localStorage.getItem(ADMIN_PANEL_LANGUAGE_KEY);
+    if (v === 'vi' || v === 'en') return v;
+  } catch {
+    /* ignore */
+  }
+  return 'en';
+}
+
 const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmployeeId, onLogout, initialTab, onTabChange }) => {
   const tabFromUrl = (initialTab && PATH_TO_TAB[initialTab]) ? PATH_TO_TAB[initialTab] : DEFAULT_TAB;
   const [activeTab, setActiveTab] = useState<Tab>(tabFromUrl);
-  const [language, setLanguage] = useState<'vi' | 'en'>('en');
+  const [language, setLanguage] = useState<'vi' | 'en'>(readStoredAdminLanguage);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ADMIN_PANEL_LANGUAGE_KEY, language);
+    } catch {
+      /* ignore */
+    }
+  }, [language]);
 
   // Đồng bộ tab khi URL thay đổi (back/forward)
   React.useEffect(() => {

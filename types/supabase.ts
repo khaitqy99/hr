@@ -192,6 +192,7 @@ export interface Database {
           deductions: number
           net_salary: number
           status: string
+          no_lunch_break_dates: number[]
           created_at: string
           updated_at: string
         }
@@ -209,6 +210,7 @@ export interface Database {
           deductions: number
           net_salary: number
           status?: string
+          no_lunch_break_dates?: number[]
           created_at?: string
           updated_at?: string
         }
@@ -226,6 +228,7 @@ export interface Database {
           deductions?: number
           net_salary?: number
           status?: string
+          no_lunch_break_dates?: number[]
           created_at?: string
           updated_at?: string
         }

@@ -153,6 +153,8 @@ export interface PayrollRecord {
   deductions: number; // BHXH, Tax, Fine
   netSalary: number; // Thực nhận
   status: 'PAID' | 'PENDING';
+  /** Timestamp (shift.date) các ngày không trừ 1h nghỉ trưa khi tính giờ ca CUSTOM */
+  noLunchBreakDates?: number[];
 }
 
 export interface Notification {

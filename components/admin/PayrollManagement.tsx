@@ -1,24 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { PayrollRecord, User, UserRole, AttendanceRecord, AttendanceType, ShiftRegistration, OffType, Holiday, ContractType } from '../../types';
-import { getAllPayrolls, getAllUsers, calculatePayroll, createOrUpdatePayroll, getShiftRegistrations, getAllAttendance, getHolidays, getConfigNumber, updateShiftRegistration } from '../../services/db';
+import { getAllPayrolls, getAllUsers, calculatePayroll, createOrUpdatePayroll, getShiftRegistrations, getAllAttendance, getHolidays, getConfigNumber, updateShiftRegistration, setPayrollNoLunchBreakDates } from '../../services/db';
 import { exportMultipleTablesToCSV } from '../../utils/export';
+import {
+  calculateRegularAndOTHoursWithNoLunchBreak,
+  calculateTotalWorkedHoursWithNoLunchBreak,
+  payrollNoLunchKey,
+} from '../../utils/payrollHours';
 
-// Helper function để tính tổng giờ thực tế từ shifts
-const calculateTotalHoursFromShifts = (shifts: ShiftRegistration[], workHoursPerDay: number): number => {
-  let totalHours = 0;
-  shifts.forEach(shift => {
-    let hours = workHoursPerDay;
-    if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
-      const [startHour, startMin] = shift.startTime.split(':').map(Number);
-      const [endHour, endMin] = shift.endTime.split(':').map(Number);
-      hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
-      if (hours >= 6) hours = hours - 1; // Trừ 1h nghỉ trưa
-    } else if (shift.shift === 'OFF' && shift.offType !== OffType.OFF_PN && shift.offType !== OffType.LE) {
-      hours = 0;
-    }
-    if (hours > 0) totalHours += Math.min(hours, workHoursPerDay);
+/** Cùng quy tắc lọc tháng với modal chi tiết lương (calendar month, local). */
+const filterShiftsByCalendarMonth = (shifts: ShiftRegistration[], month: string): ShiftRegistration[] => {
+  const [monthStr, yearStr] = month.split('-');
+  const targetMonth = parseInt(monthStr, 10);
+  const targetYear = parseInt(yearStr, 10);
+  return shifts.filter(shift => {
+    const shiftDate = new Date(shift.date);
+    return shiftDate.getMonth() + 1 === targetMonth && shiftDate.getFullYear() === targetYear;
   });
-  return totalHours;
 };
 
 interface PayrollManagementProps {
@@ -39,7 +37,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
   const [detailLoading, setDetailLoading] = useState(false);
   const [shiftDetails, setShiftDetails] = useState<ShiftRegistration[]>([]);
   const [allShiftsInMonth, setAllShiftsInMonth] = useState<ShiftRegistration[]>([]);
-  const [noLunchBreakDates, setNoLunchBreakDates] = useState<Set<number>>(new Set());
+  /** Mỗi khóa `tháng::userId` → danh sách shift.date được đánh dấu “không nghỉ trưa”. */
+  const [noLunchBreakByKey, setNoLunchBreakByKey] = useState<Record<string, number[]>>({});
   const [isRecalculatingDetail, setIsRecalculatingDetail] = useState(false);
   const [editingNoteShiftId, setEditingNoteShiftId] = useState<string | null>(null);
   const [noteInputValue, setNoteInputValue] = useState<string>('');
@@ -181,6 +180,14 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
 
   const text = t[language];
 
+  const detailNoLunchDates = useMemo(
+    () =>
+      selectedPayrollDetail
+        ? new Set(noLunchBreakByKey[payrollNoLunchKey(selectedMonth, selectedPayrollDetail.employee.id)] ?? [])
+        : new Set<number>(),
+    [noLunchBreakByKey, selectedMonth, selectedPayrollDetail]
+  );
+
   useEffect(() => {
     const initData = async () => {
       try {
@@ -229,22 +236,21 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
         getShiftRegistrations(undefined, UserRole.ADMIN)
       ]);
       setPayrollRecords(records);
+
+      const lunchMap: Record<string, number[]> = {};
+      records.forEach(r => {
+        lunchMap[payrollNoLunchKey(month, r.userId)] = r.noLunchBreakDates ?? [];
+      });
+      setNoLunchBreakByKey(lunchMap);
       
       // Lọc shifts theo tháng
-      const [monthStr, yearStr] = month.split('-');
-      const targetMonth = parseInt(monthStr);
-      const targetYear = parseInt(yearStr);
-      const monthStart = new Date(targetYear, targetMonth - 1, 1).getTime();
-      const monthEnd = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999).getTime();
-      
-      const shiftsInMonth = allShifts.filter(shift => {
-        return shift.date >= monthStart && shift.date <= monthEnd && shift.status === 'APPROVED';
-      });
+      const shiftsInMonth = filterShiftsByCalendarMonth(allShifts, month);
       setAllShiftsInMonth(shiftsInMonth);
     } catch (err: any) {
       setError(text.loadPayrollError.replace('{error}', err?.message || 'Vui lòng thử lại'));
       console.error('Error loading payroll data:', err);
       setPayrollRecords([]);
+      setNoLunchBreakByKey({});
       setAllShiftsInMonth([]);
       throw err; // Re-throw để caller có thể handle
     }
@@ -298,9 +304,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
         return record.timestamp >= monthStart && record.timestamp <= monthEnd;
       });
 
-      const shiftsInMonth = allShifts.filter(shift => {
-        return shift.date >= monthStart && shift.date <= monthEnd;
-      });
+      const shiftsInMonth = filterShiftsByCalendarMonth(allShifts, selectedMonth);
 
       // Tạo danh sách các ngày trong tháng
       const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
@@ -389,22 +393,25 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
         const baseSalary = payroll.baseSalary;
         
         // Tính tổng giờ thực tế từ shifts
-        const totalActualHours = calculateTotalHoursFromShifts(empShifts, workHoursPerDay);
-        
-        // Tính lương theo giờ thực tế
+        const exportNoLunch = new Set(noLunchBreakByKey[payrollNoLunchKey(selectedMonth, payroll.userId)] ?? []);
+        const { regularHours: regH, otHours: shiftOtH } = calculateRegularAndOTHoursWithNoLunchBreak(
+          empShifts,
+          workHoursPerDay,
+          exportNoLunch
+        );
+        const totalWorkedHours = regH + shiftOtH;
+
         const dailyRate = baseSalary / standardWorkDays;
         const hourlyRate = dailyRate / workHoursPerDay;
-        const workDaySalary = hourlyRate * totalActualHours;
-        
-        // Sử dụng OT hours và OT pay từ payroll (đã được tính trong hệ thống)
-        const mandatoryOTHours = payroll.otHours || 0;
-        const mandatoryOTSalary = payroll.otPay || 0;
+        const workDaySalary = hourlyRate * regH;
+        const shiftOtPayCalc = hourlyRate * 1.5 * shiftOtH;
 
-        // Tính tổng lương trước BHXH
-        const totalBeforeDeduction = Math.round(workDaySalary) + Math.round(mandatoryOTSalary) + payroll.allowance + payroll.bonus;
-        
-        // Tính thực lãnh sau BHXH (giống như trên UI)
-        const netSalaryCalculated = totalBeforeDeduction - payroll.deductions;
+        const mandatoryOTHours = shiftOtH;
+        const mandatoryOTSalary = shiftOtPayCalc;
+
+        const totalIncome = workDaySalary + shiftOtPayCalc + payroll.allowance + payroll.bonus;
+        const totalBeforeDeduction = Math.round(totalIncome);
+        const netSalaryCalculated = Math.round(totalIncome - payroll.deductions);
 
         // Helper function để format số tiền với dấu phẩy ngăn cách
         const formatNumber = (num: number): string => {
@@ -416,8 +423,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
           employee.name,
           employee.department || '',
           formatNumber(baseSalary), // Format với dấu phẩy: 5,000,000
-          totalActualHours.toFixed(1) + 'h',
-          (totalActualHours / workHoursPerDay).toFixed(2),
+          totalWorkedHours.toFixed(1) + 'h',
+          (totalWorkedHours / workHoursPerDay).toFixed(2),
           formatNumber(Math.round(workDaySalary)), // Format với dấu phẩy
           mandatoryOTHours.toFixed(1),
           formatNumber(Math.round(mandatoryOTSalary)), // Format với dấu phẩy
@@ -573,6 +580,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
             payroll.allowance = existingPayroll.allowance;
             payroll.bonus = existingPayroll.bonus;
             payroll.status = existingPayroll.status; // Giữ nguyên trạng thái thanh toán
+            payroll.noLunchBreakDates = [
+              ...(existingPayroll.noLunchBreakDates ?? payroll.noLunchBreakDates ?? []),
+            ];
           }
 
           await createOrUpdatePayroll(payroll);
@@ -602,20 +612,10 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
   const handleViewPayrollDetail = async (payroll: PayrollRecord, employee: User) => {
     setSelectedPayrollDetail({ payroll, employee });
     setDetailLoading(true);
-    setNoLunchBreakDates(new Set()); // Reset khi mở dialog mới
     try {
       // Load shift details for the month
       const shifts = await getShiftRegistrations(employee.id);
-      const [monthStr, yearStr] = selectedMonth.split('-');
-      const targetMonth = parseInt(monthStr);
-      const targetYear = parseInt(yearStr);
-      
-      const monthShifts = shifts.filter(shift => {
-        const shiftDate = new Date(shift.date);
-        return shiftDate.getMonth() + 1 === targetMonth && 
-               shiftDate.getFullYear() === targetYear;
-      });
-      
+      const monthShifts = filterShiftsByCalendarMonth(shifts, selectedMonth);
       setShiftDetails(monthShifts);
     } catch (err) {
       console.error('Error loading shift details:', err);
@@ -625,36 +625,33 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
     }
   };
 
-  const toggleNoLunchBreak = (shiftDate: number) => {
-    setNoLunchBreakDates(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(shiftDate)) {
-        newSet.delete(shiftDate);
-      } else {
-        newSet.add(shiftDate);
-      }
-      return newSet;
-    });
-  };
-
-  const calculateTotalHoursWithNoLunchBreak = (shifts: ShiftRegistration[], noLunchDates: Set<number>): number => {
-    let totalHours = 0;
-    shifts.forEach(shift => {
-      let hours = workHoursPerDay;
-      if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
-        const [startHour, startMin] = shift.startTime.split(':').map(Number);
-        const [endHour, endMin] = shift.endTime.split(':').map(Number);
-        hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
-        // Chỉ trừ 1h nghỉ trưa nếu ca >= 6 giờ VÀ ngày này KHÔNG được đánh dấu "không nghỉ trưa"
-        if (hours >= 6 && !noLunchDates.has(shift.date)) {
-          hours = hours - 1;
-        }
-      } else if (shift.shift === 'OFF' && shift.offType !== OffType.OFF_PN && shift.offType !== OffType.LE) {
-        hours = 0;
-      }
-      if (hours > 0) totalHours += Math.min(hours, workHoursPerDay);
-    });
-    return totalHours;
+  const toggleNoLunchBreak = async (shiftDate: number) => {
+    if (!selectedPayrollDetail) return;
+    const userId = selectedPayrollDetail.employee.id;
+    const key = payrollNoLunchKey(selectedMonth, userId);
+    const prevArr =
+      noLunchBreakByKey[key] ?? selectedPayrollDetail.payroll.noLunchBreakDates ?? [];
+    const has = prevArr.includes(shiftDate);
+    const nextArr = has ? prevArr.filter(d => d !== shiftDate) : [...prevArr, shiftDate];
+    try {
+      await setPayrollNoLunchBreakDates(userId, selectedMonth, nextArr);
+      setNoLunchBreakByKey(prev => ({ ...prev, [key]: nextArr }));
+      setSelectedPayrollDetail(prev =>
+        prev ? { ...prev, payroll: { ...prev.payroll, noLunchBreakDates: nextArr } } : null
+      );
+      setPayrollRecords(prev =>
+        prev.map(p =>
+          p.userId === userId && p.month === selectedMonth ? { ...p, noLunchBreakDates: nextArr } : p
+        )
+      );
+    } catch (e: any) {
+      const msg = e?.message || '';
+      alert(
+        language === 'vi'
+          ? `Không lưu được cài đặt nghỉ trưa: ${msg}`
+          : `Could not save lunch-break setting: ${msg}`
+      );
+    }
   };
 
   const handleUpdatePayrollStatus = async (status: 'PAID' | 'PENDING') => {
@@ -732,7 +729,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       {/* Payroll Detail Modal */}
       {selectedPayrollDetail && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] min-h-0 overflow-hidden flex flex-col">
             {/* Modal Header */}
             <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 flex items-center justify-between">
               <div>
@@ -749,27 +746,39 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
               </button>
             </div>
 
-            {/* Modal Content */}
-            <div className="flex-1 overflow-y-auto p-6">
+            {/* Modal Content: mobile cuộn cả khối; lg+ giới hạn chiều cao, chỉ vùng chi tiết ca cuộn (cột trái cố định trong viewport) */}
+            <div className="flex-1 min-h-0 overflow-y-auto lg:overflow-hidden p-6 flex flex-col">
               {detailLoading ? (
                 <div className="text-center py-12">
                   <p className="text-slate-400">{text.loading}</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="flex flex-col gap-6 lg:flex-1 lg:min-h-0 lg:flex-row lg:overflow-hidden lg:gap-6">
                   {/* LEFT COLUMN - Summary & Breakdown */}
-                  <div className="space-y-6">
+                  <div className="space-y-6 lg:w-1/2 lg:shrink-0 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
                     {(() => {
-                      // Tính tổng giờ thực tế từ các ca - có tính đến noLunchBreakDates
-                      const totalActualHours = calculateTotalHoursWithNoLunchBreak(shiftDetails, noLunchBreakDates);
-                      
-                      // Tính lương cơ bản từ tổng giờ thực tế
+                      const { regularHours: regH, otHours: shiftOtH } = calculateRegularAndOTHoursWithNoLunchBreak(
+                        shiftDetails,
+                        workHoursPerDay,
+                        detailNoLunchDates
+                      );
+                      const totalWorkedHours = calculateTotalWorkedHoursWithNoLunchBreak(
+                        shiftDetails,
+                        workHoursPerDay,
+                        detailNoLunchDates
+                      );
+                      const totalActualHours = regH;
+
                       const dailyRate = selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays;
                       const hourlyRate = dailyRate / workHoursPerDay;
-                      const basicSalary = hourlyRate * totalActualHours;
-                      
-                      // Tính tổng thực nhận
-                      const totalIncome = basicSalary + selectedPayrollDetail.payroll.otPay + selectedPayrollDetail.payroll.allowance + selectedPayrollDetail.payroll.bonus;
+                      const basicSalary = hourlyRate * regH;
+                      const shiftOtPay = hourlyRate * 1.5 * shiftOtH;
+
+                      const totalIncome =
+                        basicSalary +
+                        shiftOtPay +
+                        selectedPayrollDetail.payroll.allowance +
+                        selectedPayrollDetail.payroll.bonus;
                       const calculatedNetSalary = Math.round(totalIncome - selectedPayrollDetail.payroll.deductions);
                       
                       return (
@@ -782,13 +791,15 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                       </div>
                       <div className="bg-green-50 rounded-xl p-4">
                         <p className="text-xs font-bold text-green-600 mb-1">{text.workDays}</p>
-                        <p className="text-lg font-bold text-green-700">{totalActualHours.toFixed(1)}h</p>
-                        <p className="text-xs text-green-600">{(totalActualHours / workHoursPerDay).toFixed(2)} {language === 'vi' ? 'công' : 'days'}</p>
+                        <p className="text-lg font-bold text-green-700">{totalWorkedHours.toFixed(1)}h</p>
+                        <p className="text-xs text-green-600">
+                          {(totalWorkedHours / workHoursPerDay).toFixed(2)} {language === 'vi' ? 'công (gồm OT)' : 'days (incl. OT)'}
+                        </p>
                       </div>
                       <div className="bg-purple-50 rounded-xl p-4">
-                        <p className="text-xs font-bold text-purple-600 mb-1">{language === 'vi' ? 'Giờ OT' : 'OT Hours'}</p>
-                        <p className="text-lg font-bold text-purple-700">{selectedPayrollDetail.payroll.otHours}h</p>
-                        <p className="text-xs text-purple-600">+{formatCurrency(selectedPayrollDetail.payroll.otPay)}</p>
+                        <p className="text-xs font-bold text-purple-600 mb-1">{language === 'vi' ? 'Giờ OT (theo ca)' : 'OT hrs (shifts)'}</p>
+                        <p className="text-lg font-bold text-purple-700">{shiftOtH.toFixed(1)}h</p>
+                        <p className="text-xs text-purple-600">+{formatCurrency(Math.round(shiftOtPay))}</p>
                       </div>
                       <div className="bg-orange-50 rounded-xl p-4">
                         <p className="text-xs font-bold text-orange-600 mb-1">{text.netSalary}</p>
@@ -809,25 +820,29 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                             
                             <div className="flex justify-between items-center py-2 border-b border-slate-200">
                               <span className="text-sm text-slate-600">
-                                Tính từ {shiftDetails.length} ca ({totalActualHours.toFixed(1)}h = {(totalActualHours / workHoursPerDay).toFixed(2)} công)
+                                {language === 'vi'
+                                  ? `Tính từ ${shiftDetails.length} ca: ${regH.toFixed(1)}h thường + ${shiftOtH.toFixed(1)}h OT = ${totalWorkedHours.toFixed(1)}h`
+                                  : `From ${shiftDetails.length} shifts: ${regH.toFixed(1)}h reg + ${shiftOtH.toFixed(1)}h OT = ${totalWorkedHours.toFixed(1)}h`}
                               </span>
                               <span className="text-xs text-slate-500">
                                 = {formatCurrency(Math.round(hourlyRate))}/{language === 'vi' ? 'giờ' : 'hour'}
                               </span>
                             </div>
 
-                    {selectedPayrollDetail.payroll.otHours > 0 && (
+                    {shiftOtH > 0 && (
                       <>
                         <div className="flex justify-between items-center py-2 border-b border-slate-200">
-                          <span className="text-sm text-slate-600">{text.overtimeSalary.replace('{hours}', String(selectedPayrollDetail.payroll.otHours))}</span>
-                          <span className="text-sm font-bold text-green-600">+{formatCurrency(selectedPayrollDetail.payroll.otPay)}</span>
+                          <span className="text-sm text-slate-600">{text.overtimeSalary.replace('{hours}', shiftOtH.toFixed(1))}</span>
+                          <span className="text-sm font-bold text-green-600">+{formatCurrency(Math.round(shiftOtPay))}</span>
                         </div>
                         <div className="flex justify-between items-center py-2 border-b border-slate-200">
                           <span className="text-sm text-slate-600">
-                            {language === 'vi' ? `Công thức: (LCB / ${selectedPayrollDetail.payroll.standardWorkDays} / ${workHoursPerDay}) × 1.5 × ${selectedPayrollDetail.payroll.otHours}` : `Formula: (Base / ${selectedPayrollDetail.payroll.standardWorkDays} / ${workHoursPerDay}) × 1.5 × ${selectedPayrollDetail.payroll.otHours}`}
+                            {language === 'vi'
+                              ? `Công thức: (LCB / ${selectedPayrollDetail.payroll.standardWorkDays} / ${workHoursPerDay}) × 1.5 × ${shiftOtH.toFixed(1)}`
+                              : `Formula: (Base / ${selectedPayrollDetail.payroll.standardWorkDays} / ${workHoursPerDay}) × 1.5 × ${shiftOtH.toFixed(1)}`}
                           </span>
                           <span className="text-xs text-slate-500">
-                            = {formatCurrency(selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays / workHoursPerDay)} × 1.5 × {selectedPayrollDetail.payroll.otHours}
+                            = {formatCurrency(selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays / workHoursPerDay)} × 1.5 × {shiftOtH.toFixed(1)}
                           </span>
                         </div>
                       </>
@@ -865,16 +880,12 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                 </div>
 
                 {/* RIGHT COLUMN - Shift Details */}
-                <div>
+                <div className="min-h-0 flex flex-col lg:w-1/2 lg:flex-1 lg:overflow-hidden">
                   {shiftDetails.length > 0 && (
-                    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden h-full">
-                      <div className="bg-slate-50 px-6 py-3 border-b border-slate-200">
+                    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden flex flex-col flex-1 min-h-0 lg:min-h-0 lg:max-h-full">
+                      <div className="shrink-0 bg-slate-50 px-6 py-3 border-b border-slate-200">
                         <h4 className="text-sm font-bold text-slate-700">
-                          {text.shiftDetails} ({(() => {
-                            // Tính tổng giờ từ shiftDetails với xét đến noLunchBreakDates
-                            const totalHours = calculateTotalHoursWithNoLunchBreak(shiftDetails, noLunchBreakDates);
-                            return totalHours.toFixed(1);
-                          })()}h)
+                          {text.shiftDetails} ({calculateTotalWorkedHoursWithNoLunchBreak(shiftDetails, workHoursPerDay, detailNoLunchDates).toFixed(1)}h)
                         </h4>
                         {(() => {
                           // Đếm số ngày có OT
@@ -884,7 +895,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                               const [startHour, startMin] = shift.startTime.split(':').map(Number);
                               const [endHour, endMin] = shift.endTime.split(':').map(Number);
                               let hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
-                              if (hours >= 6 && !noLunchBreakDates.has(shift.date)) {
+                              if (hours >= 6 && !detailNoLunchDates.has(shift.date)) {
                                 hours = hours - 1;
                               }
                               if (hours > workHoursPerDay) {
@@ -903,9 +914,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                           return null;
                         })()}
                       </div>
-                      <div className="overflow-x-auto">
+                      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto">
                         <table className="w-full">
-                          <thead className="bg-slate-50 sticky top-0">
+                          <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
                             <tr>
                               <th className="px-4 py-2 text-left text-xs font-bold text-slate-600 w-1/2 border-r border-slate-200">{language === 'vi' ? 'Ngày / Ca / Loại' : 'Date / Shift / Type'}</th>
                               <th className="px-4 py-2 text-right text-xs font-bold text-slate-600 w-1/2">{language === 'vi' ? 'Giờ / Tiền' : 'Hours / Amount'}</th>
@@ -944,7 +955,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                     const [endHour, endMin] = shift.endTime.split(':').map(Number);
                                     hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
                                     // Tự động trừ 1 giờ nghỉ trưa nếu ca >= 6 giờ VÀ không được đánh dấu "không nghỉ trưa"
-                                    if (hours >= 6 && !noLunchBreakDates.has(shift.date)) {
+                                    if (hours >= 6 && !detailNoLunchDates.has(shift.date)) {
                                       hours = hours - 1;
                                     }
                                     
@@ -1020,8 +1031,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                               <label className="flex items-center gap-2 cursor-pointer">
                                                 <input
                                                   type="checkbox"
-                                                  checked={noLunchBreakDates.has(shift.date)}
-                                                  onChange={() => toggleNoLunchBreak(shift.date)}
+                                                  checked={detailNoLunchDates.has(shift.date)}
+                                                  onChange={() => void toggleNoLunchBreak(shift.date)}
                                                   className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
                                                 />
                                                 <span className="text-xs text-slate-600">{language === 'vi' ? 'Không nghỉ trưa' : 'No lunch break'}</span>
@@ -1078,18 +1089,22 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                       <td className="px-4 py-3 text-right">
                                         <div className="space-y-1">
                                           <p className="text-sm font-bold text-slate-800">
-                                            {hours > 0 ? `${Math.min(hours, workHoursPerDay).toFixed(1)}h` : '-'}
+                                            {hours > 0 ? `${hours.toFixed(1)}h` : '-'}
                                           </p>
                                           <p className="text-base font-bold text-blue-600">
-                                            {money > 0 ? formatCurrency(Math.round(money)) : '-'}
+                                            {money + otMoney > 0
+                                              ? formatCurrency(Math.round(money + otMoney))
+                                              : '-'}
                                           </p>
                                           {otHours > 0 && (
                                             <>
-                                              <p className="text-xs font-bold text-purple-600 mt-1">
-                                                OT: {otHours.toFixed(1)}h
+                                              <p className="text-xs text-slate-500">
+                                                {language === 'vi'
+                                                  ? `${Math.min(hours, workHoursPerDay).toFixed(1)}h thường + ${otHours.toFixed(1)}h OT`
+                                                  : `${Math.min(hours, workHoursPerDay).toFixed(1)}h reg + ${otHours.toFixed(1)}h OT`}
                                               </p>
-                                              <p className="text-sm font-bold text-purple-600">
-                                                +{formatCurrency(Math.round(otMoney))}
+                                              <p className="text-xs font-bold text-purple-600">
+                                                OT ×1.5: +{formatCurrency(Math.round(otMoney))}
                                               </p>
                                             </>
                                           )}
@@ -1099,39 +1114,31 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                   );
                                 });
 
-                              // Tính lại tổng tiền dựa trên tổng giờ thực tế
-                              const totalMoneyFromHours = hourlyRate * totalActualHours;
+                              const totalWorkedInTable = totalActualHours + totalOTHours;
+                              const totalMoneyFromHours = Math.round(hourlyRate * totalActualHours + totalOTMoney);
                               
-                              // Add total row - sử dụng totalMoneyFromHours tính từ giờ thực tế
                               rows.push(
                                 <tr key="total" className="bg-gradient-to-r from-blue-50 to-blue-100 font-bold border-t-2 border-blue-200">
                                   <td className="px-4 py-3 border-r border-blue-200">
                                     <div className="space-y-1">
                                       <p className="text-sm text-blue-700">{language === 'vi' ? 'Tổng cộng' : 'Total'}</p>
-                                      <p className="text-xs text-blue-600">{(totalActualHours / workHoursPerDay).toFixed(2)} {language === 'vi' ? 'công' : 'days'}</p>
+                                      <p className="text-xs text-blue-600">
+                                        {(totalWorkedInTable / workHoursPerDay).toFixed(2)}{' '}
+                                        {language === 'vi' ? 'công' : 'days'}
+                                      </p>
                                       {totalOTHours > 0 && (
-                                        <p className="text-xs text-purple-600">+ {totalOTHours.toFixed(1)}h OT</p>
+                                        <p className="text-xs text-purple-600">
+                                          {totalActualHours.toFixed(1)}h {language === 'vi' ? 'thường' : 'reg'} + {totalOTHours.toFixed(1)}h OT
+                                        </p>
                                       )}
                                     </div>
                                   </td>
                                   <td className="px-4 py-3 text-right">
                                     <div className="space-y-1">
-                                      <p className="text-sm text-blue-700">
-                                        {totalActualHours.toFixed(1)}h
-                                      </p>
+                                      <p className="text-sm text-blue-700">{totalWorkedInTable.toFixed(1)}h</p>
                                       <p className="text-lg text-blue-700">
-                                        {formatCurrency(Math.round(totalMoneyFromHours))}
+                                        {formatCurrency(totalMoneyFromHours)}
                                       </p>
-                                      {totalOTHours > 0 && (
-                                        <>
-                                          <p className="text-xs text-purple-600 mt-1">
-                                            OT: {totalOTHours.toFixed(1)}h
-                                          </p>
-                                          <p className="text-base text-purple-700">
-                                            +{formatCurrency(Math.round(totalOTMoney))}
-                                          </p>
-                                        </>
-                                      )}
                                     </div>
                                   </td>
                                 </tr>
@@ -1278,12 +1285,19 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                   
                   // Tính tổng giờ thực tế từ shifts của nhân viên này
                   const userShifts = allShiftsInMonth.filter(s => s.userId === item.userId);
-                  const totalActualHours = calculateTotalHoursFromShifts(userShifts, workHoursPerDay);
-                  
-                  // Tính lương cơ bản từ tổng giờ thực tế
+                  const rowNoLunchDates = new Set(noLunchBreakByKey[payrollNoLunchKey(selectedMonth, item.userId)] ?? []);
+                  const { regularHours: regH, otHours: shiftOtH } = calculateRegularAndOTHoursWithNoLunchBreak(
+                    userShifts,
+                    workHoursPerDay,
+                    rowNoLunchDates
+                  );
+                  const totalWorkedHours = regH + shiftOtH;
+
                   const dailyRate = item.baseSalary / item.standardWorkDays;
                   const hourlyRate = dailyRate / workHoursPerDay;
-                  const basicSalaryFromHours = hourlyRate * totalActualHours;
+                  const basicSalary = hourlyRate * regH;
+                  const shiftOtPay = hourlyRate * 1.5 * shiftOtH;
+                  const totalIncome = basicSalary + shiftOtPay + item.allowance + item.bonus;
                   
                   return (
                     <tr key={item.id} className="hover:bg-sky-50/50 transition-colors">
@@ -1306,26 +1320,23 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                         <p className="text-sm text-slate-700">{formatCurrency(item.baseSalary)}</p>
                       </td>
                       <td className="px-6 py-4">
-                        <p className="text-sm text-slate-700">{totalActualHours.toFixed(1)}h</p>
-                        <p className="text-xs text-slate-500">({(totalActualHours / workHoursPerDay).toFixed(2)} {language === 'vi' ? 'công' : 'days'})</p>
+                        <p className="text-sm text-slate-700">{totalWorkedHours.toFixed(1)}h</p>
+                        <p className="text-xs text-slate-500">
+                          ({(totalWorkedHours / workHoursPerDay).toFixed(2)} {language === 'vi' ? 'công' : 'days'})
+                        </p>
                       </td>
                       <td className="px-6 py-4">
                         <p className="text-sm text-slate-700">{item.actualWorkDays.toFixed(2)}/{item.standardWorkDays}</p>
                       </td>
                       <td className="px-6 py-4">
-                        <p className="text-sm text-slate-700">{item.otHours}h</p>
-                        {item.otPay > 0 && (
-                          <p className="text-xs text-green-600">+{formatCurrency(item.otPay)}</p>
+                        <p className="text-sm text-slate-700">{shiftOtH.toFixed(1)}h</p>
+                        {shiftOtPay > 0 && (
+                          <p className="text-xs text-green-600">+{formatCurrency(Math.round(shiftOtPay))}</p>
                         )}
                       </td>
                       <td className="px-6 py-4">
                         <p className="text-sm font-bold text-slate-700">
-                          {formatCurrency(
-                            Math.round(basicSalaryFromHours) + 
-                            Math.round(item.otPay) + 
-                            item.allowance + 
-                            item.bonus
-                          )}
+                          {formatCurrency(Math.round(totalIncome))}
                         </p>
                       </td>
                       <td className="px-6 py-4">
@@ -1333,13 +1344,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                       </td>
                       <td className="px-6 py-4">
                         <p className="text-sm font-bold text-blue-600">
-                          {formatCurrency(
-                            Math.round(basicSalaryFromHours) + 
-                            Math.round(item.otPay) + 
-                            item.allowance + 
-                            item.bonus - 
-                            item.deductions
-                          )}
+                          {formatCurrency(Math.round(totalIncome - item.deductions))}
                         </p>
                       </td>
                       <td className="px-6 py-4">
