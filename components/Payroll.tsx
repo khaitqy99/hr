@@ -68,22 +68,18 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
           const targetMonth = parseInt(monthStr);
           const targetYear = parseInt(yearStr);
           
-          const monthShifts = shifts.filter(shift => {
-            const shiftDate = new Date(shift.date);
-            return shiftDate.getMonth() + 1 === targetMonth && 
-                   shiftDate.getFullYear() === targetYear;
-          });
+          const cycleStart = new Date(targetYear, targetMonth - 1, 1).getTime();
+          const cycleEndExclusive = new Date(targetYear, targetMonth, 2).getTime();
+          const monthShifts = shifts.filter(shift => shift.date >= cycleStart && shift.date < cycleEndExclusive);
           
           setShiftDetails(monthShifts);
           
           // Chi tiết tính lương: nghỉ phép + số ca đăng ký (ngày công lấy từ đăng ký ca)
           try {
             const leaveDays = await calculateLeaveDays(user.id, selectedMonth);
-            const monthStart = new Date(targetYear, targetMonth - 1, 1).getTime();
-            const monthEnd = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999).getTime();
             const shiftDays = new Set<string>();
             shifts
-              .filter(shift => shift.status === 'APPROVED' && shift.date >= monthStart && shift.date <= monthEnd && shift.shift !== 'OFF')
+              .filter(shift => shift.status === 'APPROVED' && shift.date >= cycleStart && shift.date < cycleEndExclusive && shift.shift !== 'OFF')
               .forEach(shift => {
                 const date = new Date(shift.date);
                 const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;

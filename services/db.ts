@@ -569,13 +569,13 @@ export const deleteAttendance = async (id: string): Promise<void> => {
   await emitAttendanceEvent('deleted', id);
 };
 
-// Helper: Kỳ lương [01/MM, 01/MM+1) theo local time
+// Helper: Kỳ lương [01/MM, 02/MM+1) theo local time
+// (bao gồm trọn ngày 01 của tháng kế tiếp)
 const getPayrollCycleRange = (month: string): { start: number; endExclusive: number } => {
-  const [monthStr, yearStr] = month.split('-');
-  const targetMonth = parseInt(monthStr, 10);
+  const [, yearStr] = month.split('-');
   const targetYear = parseInt(yearStr, 10);
   const start = new Date(targetYear, targetMonth - 1, 1).getTime();
-  const endExclusive = new Date(targetYear, targetMonth, 1).getTime();
+  const endExclusive = new Date(targetYear, targetMonth, 2).getTime();
   return { start, endExclusive };
 };
 
@@ -714,11 +714,15 @@ const calculateTotalWorkHours = async (
       const holidayDate = new Date(holiday.date);
       
       if (holiday.isRecurring) {
-        // Ngày lễ hàng năm (chỉ cộng nếu rơi trong kỳ lương)
-        if (holidayDate.getMonth() + 1 === targetMonth) {
-          const dateKey = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(holidayDate.getDate()).padStart(2, '0')}`;
-          const recurringHolidayTs = new Date(targetYear, targetMonth - 1, holidayDate.getDate()).getTime();
-          if (!isTimestampInPayrollCycle(recurringHolidayTs, month)) return;
+        // Ngày lễ hàng năm: kiểm tra cả năm hiện tại và năm kế tiếp để không lọt ngày 01 tháng sau.
+        const recurringCandidates = [
+          new Date(targetYear, holidayDate.getMonth(), holidayDate.getDate()).getTime(),
+          new Date(targetYear + 1, holidayDate.getMonth(), holidayDate.getDate()).getTime(),
+        ];
+        const recurringHolidayTs = recurringCandidates.find(ts => isTimestampInPayrollCycle(ts, month));
+        if (recurringHolidayTs !== undefined) {
+          const recurringDate = new Date(recurringHolidayTs);
+          const dateKey = `${recurringDate.getFullYear()}-${String(recurringDate.getMonth() + 1).padStart(2, '0')}-${String(recurringDate.getDate()).padStart(2, '0')}`;
           
           // Kiểm tra xem ngày này có shift OFF không lương không
           const hasUnpaidOff = shiftRegistrations.some(shift => {
@@ -739,7 +743,7 @@ const calculateTotalWorkHours = async (
       } else {
         // Ngày lễ cố định
         if (isTimestampInPayrollCycle(holiday.date, month)) {
-          const dateKey = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(holidayDate.getDate()).padStart(2, '0')}`;
+          const dateKey = `${holidayDate.getFullYear()}-${String(holidayDate.getMonth() + 1).padStart(2, '0')}-${String(holidayDate.getDate()).padStart(2, '0')}`;
           
           const hasUnpaidOff = shiftRegistrations.some(shift => {
             const shiftDate = new Date(shift.date);
@@ -825,7 +829,7 @@ export const calculateShiftOTHours = async (userId: string, month: string): Prom
 export const calculateAttendanceStats = async (userId: string, month: string): Promise<{ actualWorkDays: number; otHours: number }> => {
   const records = await getAttendance(userId);
 
-  // Filter records for payroll cycle [01/MM, 01/MM+1)
+  // Filter records for payroll cycle [01/MM, 02/MM+1)
   const monthRecords = records.filter(record => {
     return isTimestampInPayrollCycle(record.timestamp, month);
   });
