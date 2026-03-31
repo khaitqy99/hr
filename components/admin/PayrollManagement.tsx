@@ -64,6 +64,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
   const [isRecalculatingDetail, setIsRecalculatingDetail] = useState(false);
   const [editingNoteShiftId, setEditingNoteShiftId] = useState<string | null>(null);
   const [noteInputValue, setNoteInputValue] = useState<string>('');
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [selectedUpgradePlan, setSelectedUpgradePlan] = useState<'STARTER' | 'PRO' | 'ULTRA' | null>(null);
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
   const t = {
     vi: {
@@ -572,7 +575,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
     }
   };
 
-  const handleRecalculateAll = async () => {
+  const handleRecalculateAllInternal = async () => {
     if (!selectedMonth) {
       alert(text.selectMonth);
       return;
@@ -637,6 +640,32 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       console.error('Error recalculating payroll:', err);
     } finally {
       setIsRecalculating(false);
+    }
+  };
+
+  const handleRecalculateAll = () => {
+    setSelectedUpgradePlan('PRO');
+    setShowUpgradeModal(true);
+  };
+
+  const handleUpgradePayment = async () => {
+    if (!selectedUpgradePlan) {
+      alert(language === 'vi' ? 'Vui lòng chọn gói nâng cấp trước khi thanh toán' : 'Please choose a plan before payment');
+      return;
+    }
+
+    setIsProcessingPayment(true);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      alert(
+        language === 'vi'
+          ? `Thanh toán gói ${selectedUpgradePlan} thành công! Bắt đầu tính lại lương...`
+          : `Payment for ${selectedUpgradePlan} successful! Starting payroll recalculation...`
+      );
+      setShowUpgradeModal(false);
+      await handleRecalculateAllInternal();
+    } finally {
+      setIsProcessingPayment(false);
     }
   };
 
@@ -757,6 +786,155 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
 
   return (
     <div className="space-y-6">
+      {/* Upgrade troll modal before recalculation */}
+      {showUpgradeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-[0_24px_80px_rgba(15,23,42,0.35)] ring-1 ring-slate-900/10">
+            {/* Header */}
+            <div className="border-b border-slate-100 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-6 py-4 sm:px-8">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                    Y99 HR · Payroll Suite
+                  </p>
+                  <h3 className="mt-1 text-base font-semibold text-white sm:text-lg">
+                    {language === 'vi'
+                      ? 'Nâng cấp gói để kích hoạt Tính lại lương'
+                      : 'Upgrade plan to enable Recalculate Payroll'}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowUpgradeModal(false)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-600/60 bg-slate-900/40 text-slate-300 transition hover:border-slate-400 hover:text-white"
+                >
+                  <span className="sr-only">Close</span>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={1.8}
+                    className="h-4 w-4"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="px-6 py-5 sm:px-8 sm:py-6">
+              <div className="grid gap-4 sm:grid-cols-3">
+                <button
+                  type="button"
+                  onClick={() => setSelectedUpgradePlan('STARTER')}
+                  className={`group flex flex-col justify-between rounded-xl border px-4 py-4 text-left shadow-sm transition 
+                    ${
+                      selectedUpgradePlan === 'STARTER'
+                        ? 'border-sky-500 bg-sky-50/70 shadow-sky-100'
+                        : 'border-slate-200 bg-slate-50/40 hover:border-sky-400 hover:bg-sky-50/80'
+                    }`}
+                >
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Starter</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-900">49.000đ / tháng</p>
+                    <p className="mt-2 text-[11px] text-slate-600">
+                      {language === 'vi'
+                        ? 'Tính lại lương thủ công, nhưng có cảm giác như đang dùng bản trả phí.'
+                        : 'Manual recalculation with the emotional benefits of a paid plan.'}
+                    </p>
+                  </div>
+                  <p className="mt-3 text-[11px] font-medium text-slate-500">
+                    {language === 'vi' ? 'Phù hợp cho team nhỏ.' : 'Suitable for small teams.'}
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedUpgradePlan('PRO')}
+                  className={`group flex flex-col justify-between rounded-xl border px-4 py-4 text-left shadow-sm ring-1 transition 
+                    ${
+                      selectedUpgradePlan === 'PRO'
+                        ? 'border-indigo-500 bg-indigo-50 ring-indigo-200 shadow-indigo-100'
+                        : 'border-slate-200 bg-white hover:border-indigo-400 hover:ring-indigo-100'
+                    }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-600">Pro · Recommended</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-900">199.000đ / tháng</p>
+                    </div>
+                    <span className="rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-semibold text-white">
+                      Most picked
+                    </span>
+                  </div>
+                  <p className="mt-2 text-[11px] text-slate-600">
+                    {language === 'vi'
+                      ? 'Hiệu ứng AI, thanh tiến trình, và thông báo “tối ưu bảng lương bằng machine learning”.'
+                      : 'AI loading effects, progress bars and “optimizing payroll with machine learning” banners.'}
+                  </p>
+                  <p className="mt-3 text-[11px] font-medium text-slate-500">
+                    {language === 'vi' ? 'Phù hợp cho chi nhánh đang mở rộng.' : 'Ideal for growing branches.'}
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedUpgradePlan('ULTRA')}
+                  className={`group flex flex-col justify-between rounded-xl border px-4 py-4 text-left shadow-sm transition 
+                    ${
+                      selectedUpgradePlan === 'ULTRA'
+                        ? 'border-amber-500 bg-amber-50 shadow-amber-100'
+                        : 'border-slate-200 bg-slate-50/60 hover:border-amber-400 hover:bg-amber-50/80'
+                    }`}
+                >
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-600">Ultra</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-900">999.000đ / tháng</p>
+                    <p className="mt-2 text-[11px] text-slate-600">
+                      {language === 'vi'
+                        ? 'Dashboard riêng cho sếp xem, có biểu đồ lung linh để hỏi: “Nâng gói này bao giờ?”.'
+                        : 'Dedicated C-level dashboard with shiny charts asking: “When do we upgrade this plan?”.'}
+                    </p>
+                  </div>
+                  <p className="mt-3 text-[11px] font-medium text-slate-500">
+                    {language === 'vi' ? 'Phù hợp cho công ty thích sang.' : 'Perfect for “premium-feel” companies.'}
+                  </p>
+                </button>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex flex-col gap-3 border-t border-slate-100 bg-slate-50/80 px-6 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-8">
+              <div className="flex-1" />
+              <div className="flex items-center gap-2 justify-end">
+                <button
+                  onClick={() => setShowUpgradeModal(false)}
+                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900"
+                >
+                  {language === 'vi' ? 'Để sau' : 'Maybe later'}
+                </button>
+                <button
+                  onClick={handleUpgradePayment}
+                  disabled={isProcessingPayment}
+                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {isProcessingPayment && (
+                    <span className="inline-flex h-3 w-3 animate-spin rounded-full border-2 border-emerald-200 border-t-transparent" />
+                  )}
+                  <span>
+                    {isProcessingPayment
+                      ? (language === 'vi' ? 'Đang xác thực thanh toán...' : 'Verifying payment...')
+                      : (language === 'vi' ? 'Thanh toán & tính lại lương' : 'Pay & Recalculate')}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Payroll Detail Modal */}
       {selectedPayrollDetail && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
