@@ -572,7 +572,8 @@ export const deleteAttendance = async (id: string): Promise<void> => {
 // Helper: Kỳ lương [01/MM, 02/MM+1) theo local time
 // (bao gồm trọn ngày 01 của tháng kế tiếp)
 const getPayrollCycleRange = (month: string): { start: number; endExclusive: number } => {
-  const [, yearStr] = month.split('-');
+  const [monthStr, yearStr] = month.split('-');
+  const targetMonth = parseInt(monthStr, 10);
   const targetYear = parseInt(yearStr, 10);
   const start = new Date(targetYear, targetMonth - 1, 1).getTime();
   const endExclusive = new Date(targetYear, targetMonth, 2).getTime();
