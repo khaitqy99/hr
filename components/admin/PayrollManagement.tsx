@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { PayrollRecord, User, UserRole, AttendanceRecord, AttendanceType, ShiftRegistration, OffType, Holiday, ContractType } from '../../types';
-import { getAllPayrolls, getAllUsers, calculatePayroll, createOrUpdatePayroll, getShiftRegistrations, getAllAttendance, getHolidays, getConfigNumber, updateShiftRegistration, setPayrollNoLunchBreakDates } from '../../services/db';
+import { PayrollRecord, User, UserRole, AttendanceRecord, AttendanceType, ShiftRegistration, OffType, Holiday, ContractType, Branch } from '../../types';
+import { getAllPayrolls, getAllUsers, calculatePayroll, createOrUpdatePayroll, getShiftRegistrations, getAllAttendance, getHolidays, getConfigNumber, updateShiftRegistration, setPayrollNoLunchBreakDates, getBranches } from '../../services/db';
 import { exportMultipleTablesToCSV } from '../../utils/export';
 import {
   calculateRegularAndOTHoursWithNoLunchBreak,
@@ -8,15 +8,32 @@ import {
   payrollNoLunchKey,
 } from '../../utils/payrollHours';
 
-/** Cùng quy tắc lọc tháng với modal chi tiết lương (calendar month, local). */
-const filterShiftsByCalendarMonth = (shifts: ShiftRegistration[], month: string): ShiftRegistration[] => {
+/** Kỳ lương: [01/MM, 01/MM+1) theo local time. */
+const getPayrollCycleRange = (month: string): { start: number; endExclusive: number } => {
   const [monthStr, yearStr] = month.split('-');
   const targetMonth = parseInt(monthStr, 10);
   const targetYear = parseInt(yearStr, 10);
-  return shifts.filter(shift => {
-    const shiftDate = new Date(shift.date);
-    return shiftDate.getMonth() + 1 === targetMonth && shiftDate.getFullYear() === targetYear;
-  });
+  const start = new Date(targetYear, targetMonth - 1, 1).getTime();
+  const endExclusive = new Date(targetYear, targetMonth, 1).getTime();
+  return { start, endExclusive };
+};
+
+const isInPayrollCycle = (timestamp: number, month: string): boolean => {
+  const { start, endExclusive } = getPayrollCycleRange(month);
+  return timestamp >= start && timestamp < endExclusive;
+};
+
+const formatPayrollCycleLabel = (month: string): string => {
+  const { start, endExclusive } = getPayrollCycleRange(month);
+  const startDate = new Date(start);
+  const endDate = new Date(endExclusive);
+  const ddmmyyyy = (d: Date) =>
+    `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+  return `${ddmmyyyy(startDate)} - ${ddmmyyyy(endDate)}`;
+};
+
+const filterShiftsByPayrollCycle = (shifts: ShiftRegistration[], month: string): ShiftRegistration[] => {
+  return shifts.filter(shift => isInPayrollCycle(shift.date, month));
 };
 
 interface PayrollManagementProps {
@@ -28,7 +45,9 @@ interface PayrollManagementProps {
 const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload, setView, language }) => {
   const [payrollRecords, setPayrollRecords] = useState<PayrollRecord[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedMonth, setSelectedMonth] = useState('');
+  const [filterBranch, setFilterBranch] = useState<string>('ALL');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isRecalculating, setIsRecalculating] = useState(false);
@@ -45,11 +64,13 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
 
   const t = {
     vi: {
-      month: 'Tháng',
+      month: 'Kỳ lương',
       recalculate: 'Tính lại lương',
       exportCSV: 'Xuất CSV',
       employee: 'Nhân viên',
       department: 'Phòng ban',
+      branch: 'Chi nhánh',
+      allBranches: 'Tất cả chi nhánh',
       baseSalary: 'Lương cơ bản',
       workDays: 'Ngày công',
       overtime: 'Tăng ca',
@@ -63,7 +84,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       loading: 'Đang tải...',
       recalculating: 'Đang tính lại...',
       selectMonth: 'Vui lòng chọn tháng',
-      confirmRecalculate: 'Bạn có chắc muốn tính lại lương cho tất cả nhân viên trong tháng {month}?\n\nLưu ý: Thao tác này sẽ tính lại từ đăng ký ca và nghỉ phép (không dùng chấm công).',
+      confirmRecalculate: 'Bạn có chắc muốn tính lại lương cho tất cả nhân viên trong kỳ {month}?\n\nLưu ý: Thao tác này sẽ tính lại từ đăng ký ca và nghỉ phép (không dùng chấm công).',
       recalculateSuccess: 'Tính lại lương thành công cho {count} nhân viên!',
       recalculateComplete: 'Tính lại lương hoàn tất!\n\nThành công: {success} nhân viên\nLỗi: {error} nhân viên',
       recalculateError: 'Lỗi khi tính lại lương: {error}',
@@ -72,7 +93,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       noDataToExport: 'Không có dữ liệu để xuất',
       exportSuccess: 'Đã xuất thành công file CSV bảng lương chi tiết!',
       exportError: 'Lỗi khi xuất dữ liệu: {error}',
-      payrollDetail: 'Chi tiết lương tháng {month}',
+      payrollDetail: 'Chi tiết kỳ lương {month}',
       close: 'Đóng',
       viewProfile: 'Xem hồ sơ nhân viên',
       salaryBreakdown: 'Chi tiết tính lương',
@@ -111,11 +132,13 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       noteSaveError: 'Có lỗi khi lưu ghi chú!',
     },
     en: {
-      month: 'Month',
+      month: 'Payroll Cycle',
       recalculate: 'Recalculate Payroll',
       exportCSV: 'Export CSV',
       employee: 'Employee',
       department: 'Department',
+      branch: 'Branch',
+      allBranches: 'All Branches',
       baseSalary: 'Base Salary',
       workDays: 'Work Days',
       overtime: 'Overtime',
@@ -129,7 +152,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       loading: 'Loading...',
       recalculating: 'Recalculating...',
       selectMonth: 'Please select a month',
-      confirmRecalculate: 'Are you sure you want to recalculate payroll for all employees in {month}?\n\nNote: This will recalculate based on shift registrations and leave (not attendance records).',
+      confirmRecalculate: 'Are you sure you want to recalculate payroll for all employees in cycle {month}?\n\nNote: This will recalculate based on shift registrations and leave (not attendance records).',
       recalculateSuccess: 'Successfully recalculated payroll for {count} employees!',
       recalculateComplete: 'Recalculation complete!\n\nSuccess: {success} employees\nErrors: {error} employees',
       recalculateError: 'Error recalculating payroll: {error}',
@@ -138,7 +161,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       noDataToExport: 'No data to export',
       exportSuccess: 'Successfully exported detailed payroll CSV file!',
       exportError: 'Error exporting data: {error}',
-      payrollDetail: 'Payroll details for {month}',
+      payrollDetail: 'Payroll cycle details for {month}',
       close: 'Close',
       viewProfile: 'View Employee Profile',
       salaryBreakdown: 'Salary Breakdown',
@@ -197,8 +220,12 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
         const currentMonth = `${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
         setSelectedMonth(currentMonth);
         await loadData(currentMonth);
-        const users = await getAllUsers();
+        const [users, branchesData] = await Promise.all([
+          getAllUsers(),
+          getBranches(),
+        ]);
         setEmployees(users);
+        setBranches(branchesData.filter(b => b.isActive));
         // Load work hours per day config
         const hours = await getConfigNumber('work_hours_per_day', 8);
         setWorkHoursPerDay(hours);
@@ -218,8 +245,12 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
         try {
           setError(null);
           await loadData(selectedMonth);
-          const users = await getAllUsers();
+          const [users, branchesData] = await Promise.all([
+            getAllUsers(),
+            getBranches(),
+          ]);
           setEmployees(users);
+          setBranches(branchesData.filter(b => b.isActive));
         } catch (err: any) {
           setError(text.loadError.replace('{error}', err?.message || 'Vui lòng thử lại'));
           console.error('Error reloading data:', err);
@@ -243,8 +274,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       });
       setNoLunchBreakByKey(lunchMap);
       
-      // Lọc shifts theo tháng
-      const shiftsInMonth = filterShiftsByCalendarMonth(allShifts, month);
+      // Lọc shifts theo kỳ lương [01/MM, 01/MM+1)
+      const shiftsInMonth = filterShiftsByPayrollCycle(allShifts, month);
       setAllShiftsInMonth(shiftsInMonth);
     } catch (err: any) {
       setError(text.loadPayrollError.replace('{error}', err?.message || 'Vui lòng thử lại'));
@@ -294,24 +325,21 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       ]);
 
       const [monthStr, yearStr] = selectedMonth.split('-');
-      const targetMonth = parseInt(monthStr);
-      const targetYear = parseInt(yearStr);
-      const monthStart = new Date(targetYear, targetMonth - 1, 1).getTime();
-      const monthEnd = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999).getTime();
+      const targetMonth = parseInt(monthStr, 10);
+      const targetYear = parseInt(yearStr, 10);
+      const { start: cycleStart, endExclusive: cycleEndExclusive } = getPayrollCycleRange(selectedMonth);
 
-      // Lọc dữ liệu theo tháng
+      // Lọc dữ liệu theo kỳ lương [01/MM, 01/MM+1)
       const attendanceInMonth = allAttendance.filter(record => {
-        return record.timestamp >= monthStart && record.timestamp <= monthEnd;
+        return record.timestamp >= cycleStart && record.timestamp < cycleEndExclusive;
       });
 
-      const shiftsInMonth = filterShiftsByCalendarMonth(allShifts, selectedMonth);
+      const shiftsInMonth = filterShiftsByPayrollCycle(allShifts, selectedMonth);
 
-      // Tạo danh sách các ngày trong tháng
-      const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
       const dateColumns: string[] = [];
-      for (let day = 1; day <= daysInMonth; day++) {
-        const date = new Date(targetYear, targetMonth - 1, day);
-        const dateStr = `${String(day).padStart(2, '0')}/${String(targetMonth).padStart(2, '0')}/${targetYear}`;
+      for (let ts = cycleStart; ts < cycleEndExclusive; ts += 24 * 60 * 60 * 1000) {
+        const date = new Date(ts);
+        const dateStr = `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`;
         dateColumns.push(dateStr);
       }
 
@@ -547,7 +575,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       return;
     }
 
-    if (!confirm(text.confirmRecalculate.replace('{month}', selectedMonth))) {
+    if (!confirm(text.confirmRecalculate.replace('{month}', formatPayrollCycleLabel(selectedMonth)))) {
       return;
     }
 
@@ -615,7 +643,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
     try {
       // Load shift details for the month
       const shifts = await getShiftRegistrations(employee.id);
-      const monthShifts = filterShiftsByCalendarMonth(shifts, selectedMonth);
+      const monthShifts = filterShiftsByPayrollCycle(shifts, selectedMonth);
       setShiftDetails(monthShifts);
     } catch (err) {
       console.error('Error loading shift details:', err);
@@ -734,7 +762,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
             <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 flex items-center justify-between">
               <div>
                 <h3 className="text-xl font-bold text-white">{selectedPayrollDetail.employee.name}</h3>
-                <p className="text-sm text-blue-100">{text.payrollDetail.replace('{month}', selectedMonth)}</p>
+                <p className="text-sm text-blue-100">{text.payrollDetail.replace('{month}', formatPayrollCycleLabel(selectedMonth))}</p>
               </div>
               <button
                 onClick={() => setSelectedPayrollDetail(null)}
@@ -1206,7 +1234,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       )}
 
       <div className="flex items-center justify-between">
-        <div>
+        <div className="flex items-center gap-3">
           <select
             value={selectedMonth}
             onChange={(e) => setSelectedMonth(e.target.value)}
@@ -1214,8 +1242,18 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
           >
             {getMonthOptions().map(month => (
               <option key={month} value={month}>
-                {text.month} {month.split('-')[0]}/{month.split('-')[1]}
+                {text.month} {formatPayrollCycleLabel(month)}
               </option>
+            ))}
+          </select>
+          <select
+            value={filterBranch}
+            onChange={(e) => setFilterBranch(e.target.value)}
+            className="rounded-xl border border-slate-200 px-4 py-2 text-sm"
+          >
+            <option value="ALL">{text.allBranches}</option>
+            {branches.map(branch => (
+              <option key={branch.id} value={branch.id}>{branch.name} ({branch.code})</option>
             ))}
           </select>
         </div>
@@ -1280,6 +1318,11 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                   
                   // Ẩn nhân viên đã nghỉ việc
                   if (!employee || employee.status !== 'ACTIVE') {
+                    return null;
+                  }
+                  
+                  // Lọc theo chi nhánh
+                  if (filterBranch !== 'ALL' && employee.branchId !== filterBranch) {
                     return null;
                   }
                   

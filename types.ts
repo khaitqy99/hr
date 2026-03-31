@@ -45,6 +45,7 @@ export interface User {
   grossSalary?: number;            // Lương thỏa thuận (gross)
   socialInsuranceSalary?: number;  // Lương BHXH
   traineeSalary?: number;         // Lương học việc (nếu có)
+  branchId?: string;              // Chi nhánh
 }
 
 export enum AttendanceType {
@@ -206,4 +207,30 @@ export interface SystemConfig {
   category: 'ATTENDANCE' | 'PAYROLL' | 'GENERAL' | 'NOTIFICATION';
   updatedAt: number;
   updatedBy?: string;
+}
+
+/** Chi nhánh */
+export interface Branch {
+  id: string;
+  name: string;
+  code: string;
+  address?: string;
+  phone?: string;
+  managerId?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Địa điểm cho phép check-in */
+export interface AllowedLocation {
+  id: string;
+  name: string;
+  branchId?: string;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
 }

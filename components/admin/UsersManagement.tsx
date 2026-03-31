@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { User, UserRole, ContractType, EmployeeStatus, EMPLOYEE_STATUS_LABELS, CONTRACT_TYPE_LABELS, Department } from '../../types';
-import { getAllUsers, createUser, getDepartments } from '../../services/db';
+import { User, UserRole, ContractType, EmployeeStatus, EMPLOYEE_STATUS_LABELS, CONTRACT_TYPE_LABELS, Department, Branch } from '../../types';
+import { getAllUsers, createUser, getDepartments, getBranches } from '../../services/db';
 import { exportToCSV } from '../../utils/export';
 
 interface UsersManagementProps {
@@ -16,11 +16,13 @@ const defaultUserForm = {
   name: '',
   department: '',
   employeeCode: '',
+  branchId: '',
 };
 
 const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegisterReload, language }) => {
   const [employees, setEmployees] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedStatusTab, setSelectedStatusTab] = useState<EmployeeStatusTab>(EmployeeStatus.ACTIVE);
   const [showUserForm, setShowUserForm] = useState(false);
   const [userForm, setUserForm] = useState(defaultUserForm);
@@ -46,6 +48,7 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
       fullName: 'Họ tên',
       department: 'Bộ phận',
       employeeCode: 'Mã nhân viên',
+      branch: 'Chi nhánh',
       createAccount: 'Tạo tài khoản',
       emailRequired: 'Email (đăng nhập) là bắt buộc',
       emailInvalid: 'Email không hợp lệ (ví dụ: user@example.com)',
@@ -55,10 +58,14 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
       unableToCreate: 'Không thể tạo user',
       noDataToExport: 'Không có dữ liệu để xuất',
       selectDepartment: '-- Chọn phòng ban --',
+      selectBranch: '-- Chọn chi nhánh --',
       noDepartments: '⚠️ Chưa có phòng ban nào. Vui lòng tạo phòng ban trước.',
+      noBranches: '⚠️ Chưa có chi nhánh nào. Vui lòng tạo chi nhánh trước.',
       noEmployees: 'Chưa có nhân viên nào',
       employee: 'Nhân viên',
       email: 'Email',
+      department: 'Phòng ban',
+      branch: 'Chi nhánh',
       role: 'Vai trò',
       empCode: 'Mã NV',
       salary: 'Lương',
@@ -92,6 +99,7 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
       fullName: 'Full Name',
       department: 'Department',
       employeeCode: 'Employee Code',
+      branch: 'Branch',
       createAccount: 'Create Account',
       emailRequired: 'Email (login) is required',
       emailInvalid: 'Invalid email (e.g., user@example.com)',
@@ -101,10 +109,14 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
       unableToCreate: 'Unable to create user',
       noDataToExport: 'No data to export',
       selectDepartment: '-- Select Department --',
+      selectBranch: '-- Select Branch --',
       noDepartments: '⚠️ No departments available. Please create a department first.',
+      noBranches: '⚠️ No branches available. Please create a branch first.',
       noEmployees: 'No employees yet',
       employee: 'Employee',
       email: 'Email',
+      department: 'Department',
+      branch: 'Branch',
       role: 'Role',
       empCode: 'Emp Code',
       salary: 'Salary',
@@ -135,12 +147,14 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
   const text = t[language];
 
   const loadData = async () => {
-    const [users, depts] = await Promise.all([
+    const [users, depts, branchesData] = await Promise.all([
       getAllUsers(),
-      getDepartments()
+      getDepartments(),
+      getBranches()
     ]);
     setEmployees(users);
     setDepartments(depts.filter(d => d.isActive)); // Only get active departments
+    setBranches(branchesData.filter(b => b.isActive)); // Only get active branches
   };
 
   const validateForm = (): boolean => {
@@ -186,6 +200,7 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
         role: UserRole.EMPLOYEE,
         department: userForm.department.trim(),
         employeeCode: userForm.employeeCode.trim() || undefined,
+        branchId: userForm.branchId || undefined,
         contractType: ContractType.OFFICIAL,
         status: EmployeeStatus.ACTIVE,
       });
@@ -393,6 +408,26 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
               <label className="block text-xs font-bold text-slate-500 mb-1">{text.employeeCode}</label>
               <input type="text" value={userForm.employeeCode} onChange={e => setUserForm(f => ({ ...f, employeeCode: e.target.value }))} placeholder={text.codePlaceholder} className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm" />
             </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">{text.branch}</label>
+              <select
+                value={userForm.branchId}
+                onChange={e => setUserForm(f => ({ ...f, branchId: e.target.value }))}
+                className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm"
+              >
+                <option value="">{text.selectBranch}</option>
+                {branches.map(branch => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.name} ({branch.code})
+                  </option>
+                ))}
+              </select>
+              {branches.length === 0 && (
+                <p className="text-xs text-amber-600 mt-1">
+                  {text.noBranches}
+                </p>
+              )}
+            </div>
           </div>
           <button type="submit" className="w-full py-3 rounded-xl text-sm font-bold bg-blue-600 text-white shadow-md hover:bg-blue-700 transition-colors">{text.createAccount}</button>
         </form>
@@ -415,6 +450,7 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.employee}</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.email}</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.department}</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.branch}</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.role}</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.empCode}</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.salary}</th>
@@ -457,6 +493,11 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
                     </td>
                     <td className="px-6 py-4">
                       <p className="text-sm text-slate-700">{emp.department}</p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <p className="text-sm text-slate-700">
+                        {emp.branchId && branches.find(b => b.id === emp.branchId)?.name || '-'}
+                      </p>
                     </td>
                     <td className="px-6 py-4">
                       <span className={`text-xs font-bold px-2 py-1 rounded ${

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { ShiftRegistration, RequestStatus, User, UserRole, ShiftTime, OFF_TYPE_LABELS, Holiday, Department, OffType, EmployeeStatus } from '../../types';
-import { getShiftRegistrations, updateShiftStatus, updateShiftRegistration, registerShift, getAllUsers, getHolidays, getDepartments } from '../../services/db';
+import { ShiftRegistration, RequestStatus, User, UserRole, ShiftTime, OFF_TYPE_LABELS, Holiday, Department, OffType, EmployeeStatus, Branch } from '../../types';
+import { getShiftRegistrations, updateShiftStatus, updateShiftRegistration, registerShift, getAllUsers, getHolidays, getDepartments, getBranches } from '../../services/db';
 import { exportToCSV } from '../../utils/export';
 import CustomSelect from '../CustomSelect';
 
@@ -65,9 +65,11 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
   const [employees, setEmployees] = useState<User[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [weekStart, setWeekStart] = useState<Date>(() => getWeekStart(new Date()));
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [departmentFilter, setDepartmentFilter] = useState<string>('');
+  const [branchFilter, setBranchFilter] = useState<string>('');
   const [searchName, setSearchName] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
@@ -98,6 +100,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       rejected: 'Từ chối',
       filter: 'Lọc',
       allDepartments: 'Tất cả bộ phận',
+      allBranches: 'Tất cả chi nhánh',
       searchByName: 'Tìm theo tên...',
       goToPayroll: 'Tính lương',
       exportCSV: 'Xuất CSV',
@@ -176,6 +179,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       rejected: 'Rejected',
       filter: 'Filter',
       allDepartments: 'All Departments',
+      allBranches: 'All Branches',
       searchByName: 'Search by name...',
       goToPayroll: 'Go to Payroll',
       exportCSV: 'Export CSV',
@@ -264,12 +268,14 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
     setLoading(true);
     setMessage(null);
     try {
-      const [shifts, users] = await Promise.all([
+      const [shifts, users, branchesData] = await Promise.all([
         getShiftRegistrations(undefined, UserRole.ADMIN),
         getAllUsers(),
+        getBranches(),
       ]);
       setShiftRequests(shifts);
       setEmployees(users);
+      setBranches(branchesData.filter(b => b.isActive));
     } catch (e) {
       setMessage({ type: 'error', text: text.loadFailed });
     } finally {
@@ -436,8 +442,9 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       .filter((u) => u.role === UserRole.EMPLOYEE || u.role === UserRole.MANAGER || u.role === UserRole.HR)
       .filter((u) => u.status !== EmployeeStatus.LEFT) // Lọc bỏ nhân viên đã nghỉ việc
       .filter((u) => !departmentFilter || u.department === departmentFilter)
+      .filter((u) => !branchFilter || u.branchId === branchFilter)
       .filter((u) => !searchName.trim() || u.name.toLowerCase().includes(searchName.trim().toLowerCase()));
-  }, [employees, departmentFilter, searchName]);
+  }, [employees, departmentFilter, branchFilter, searchName]);
 
   // Sử dụng departments từ bảng departments thay vì từ employees
   const departmentOptions = useMemo(
@@ -677,6 +684,16 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
               <option value="">{text.allDepartments}</option>
               {departmentOptions.map((d) => (
                 <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+            <select
+              value={branchFilter}
+              onChange={(e) => setBranchFilter(e.target.value)}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white text-slate-700"
+            >
+              <option value="">{text.allBranches}</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>{b.name} ({b.code})</option>
               ))}
             </select>
             <input

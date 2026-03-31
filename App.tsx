@@ -22,7 +22,7 @@ import { sendOTP, verifyOTP, signOut } from './services/auth';
 import { useDataEvents } from './utils/useDataEvents';
 
 // Admin sub-routes: path segment cho từng trang admin (đồng bộ với AdminPanel)
-const ADMIN_TAB_SEGMENTS = ['users', 'attendance', 'shift', 'payroll', 'reports', 'departments', 'holidays', 'config', 'export', 'notifications', 'settings'];
+const ADMIN_TAB_SEGMENTS = ['users', 'attendance', 'shift', 'payroll', 'reports', 'departments', 'branches', 'locations', 'holidays', 'config', 'export', 'notifications', 'settings'];
 const DEFAULT_ADMIN_TAB = 'users';
 
 // Employee sub-routes: path segment cho từng trang nhân viên (đồng bộ với Layout nav)

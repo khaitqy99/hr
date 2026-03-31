@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { User, UserRole, ContractType, EmployeeStatus, CONTRACT_TYPE_LABELS, EMPLOYEE_STATUS_LABELS, Department } from '../types';
-import { getAllUsers, updateUser, getDepartments } from '../services/db';
+import { User, UserRole, ContractType, EmployeeStatus, CONTRACT_TYPE_LABELS, EMPLOYEE_STATUS_LABELS, Department, Branch } from '../types';
+import { getAllUsers, updateUser, getDepartments, getBranches } from '../services/db';
 
 interface EmployeeProfileProps {
   employeeId: string;
@@ -12,10 +12,12 @@ interface EmployeeProfileProps {
 const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUser, onBack, setView }) => {
   const [employee, setEmployee] = useState<User | null>(null);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [editForm, setEditForm] = useState({
     email: '',
     name: '',
     department: '',
+    branchId: '',
     employeeCode: '',
     jobTitle: '',
     grossSalary: '' as number | '',
@@ -31,11 +33,13 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
 
   useEffect(() => {
     const loadEmployee = async () => {
-      const [employees, depts] = await Promise.all([
+      const [employees, depts, branchesData] = await Promise.all([
         getAllUsers(),
-        getDepartments()
+        getDepartments(),
+        getBranches()
       ]);
       setDepartments(depts.filter(d => d.isActive)); // Chỉ lấy phòng ban đang hoạt động
+      setBranches(branchesData.filter(b => b.isActive)); // Chỉ lấy chi nhánh đang hoạt động
       const found = employees.find((e: User) => e.id === employeeId);
       if (found) {
         setEmployee(found);
@@ -43,6 +47,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
           email: found.email,
           name: found.name,
           department: found.department,
+          branchId: found.branchId || '',
           employeeCode: found.employeeCode || '',
           jobTitle: found.jobTitle || '',
           grossSalary: found.grossSalary ?? '',
@@ -75,6 +80,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
         email: editForm.email.trim(),
         role: editForm.role,
         department: editForm.department.trim(),
+        branchId: editForm.branchId || undefined,
         employeeCode: editForm.employeeCode.trim() || undefined,
         jobTitle: editForm.jobTitle.trim() || undefined,
         contractType: editForm.contractType,
@@ -165,6 +171,14 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                   <span className="text-xs text-slate-500">Bộ phận:</span>
                   <span className="text-sm font-medium text-slate-800">{employee.department}</span>
                 </div>
+                {employee.branchId && branches.find(b => b.id === employee.branchId) && (
+                  <div className="flex justify-between">
+                    <span className="text-xs text-slate-500">Chi nhánh:</span>
+                    <span className="text-sm font-medium text-slate-800">
+                      {branches.find(b => b.id === employee.branchId)?.name}
+                    </span>
+                  </div>
+                )}
                 {employee.employeeCode && (
                   <div className="flex justify-between">
                     <span className="text-xs text-slate-500">Mã nhân viên:</span>
@@ -398,6 +412,27 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                     {departments.length === 0 && (
                       <p className="text-xs text-amber-600 mt-1">
                         ⚠️ Chưa có phòng ban nào. Vui lòng tạo phòng ban trước.
+                      </p>
+                    )}
+                  </div>
+                  
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">Chi nhánh</label>
+                    <select
+                      value={editForm.branchId}
+                      onChange={e => setEditForm(f => ({ ...f, branchId: e.target.value }))}
+                      className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm"
+                    >
+                      <option value="">-- Chọn chi nhánh --</option>
+                      {branches.map(branch => (
+                        <option key={branch.id} value={branch.id}>
+                          {branch.name} ({branch.code})
+                        </option>
+                      ))}
+                    </select>
+                    {branches.length === 0 && (
+                      <p className="text-xs text-amber-600 mt-1">
+                        ⚠️ Chưa có chi nhánh nào. Vui lòng tạo chi nhánh trước.
                       </p>
                     )}
                   </div>

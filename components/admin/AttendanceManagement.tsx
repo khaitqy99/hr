@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AttendanceRecord, AttendanceType, AttendanceStatus, User, UserRole } from '../../types';
-import { getAllAttendance, getAllUsers } from '../../services/db';
+import { AttendanceRecord, AttendanceType, AttendanceStatus, User, UserRole, Branch } from '../../types';
+import { getAllAttendance, getAllUsers, getBranches } from '../../services/db';
 import { exportToCSV } from '../../utils/export';
 
 /** yyyy-mm-dd theo giờ local */
@@ -58,6 +58,7 @@ interface AttendanceManagementProps {
 const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterReload, setView, language }) => {
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [attendanceFilter, setAttendanceFilter] = useState<string>('ALL');
   const [selectedEmployeeForAttendance, setSelectedEmployeeForAttendance] = useState<string>('ALL');
   const [dateFrom, setDateFrom] = useState('');
@@ -65,6 +66,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
   const [filterType, setFilterType] = useState<'ALL' | AttendanceType>('ALL');
   const [filterStatus, setFilterStatus] = useState<'ALL' | AttendanceStatus>('ALL');
   const [filterDepartment, setFilterDepartment] = useState<string>('ALL');
+  const [filterBranch, setFilterBranch] = useState<string>('ALL');
   const [isLoading, setIsLoading] = useState(false);
   const t = {
     vi: {
@@ -78,6 +80,8 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       all: 'Tất cả',
       filterByEmployee: 'Lọc theo nhân viên',
       allEmployees: 'Tất cả nhân viên',
+      allDepartments: 'Tất cả bộ phận',
+      allBranches: 'Tất cả chi nhánh',
       loading: 'Đang tải dữ liệu...',
       noData: 'Chưa có dữ liệu chấm công',
       type: 'Loại',
@@ -113,6 +117,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       filterByType: 'Loại chấm công',
       filterByStatus: 'Trạng thái',
       filterByDepartment: 'Phòng ban',
+      filterByBranch: 'Chi nhánh',
       allTypes: 'Tất cả loại',
       allStatuses: 'Tất cả trạng thái',
       allDepartments: 'Tất cả phòng ban',
@@ -131,6 +136,8 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       all: 'All',
       filterByEmployee: 'Filter by Employee',
       allEmployees: 'All Employees',
+      allDepartments: 'All Departments',
+      allBranches: 'All Branches',
       loading: 'Loading data...',
       noData: 'No attendance records yet',
       type: 'Type',
@@ -166,6 +173,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       filterByType: 'Check type',
       filterByStatus: 'Status',
       filterByDepartment: 'Department',
+      filterByBranch: 'Branch',
       allTypes: 'All types',
       allStatuses: 'All statuses',
       allDepartments: 'All departments',
@@ -192,8 +200,11 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
     try {
       // Tối ưu: Chỉ load 500 records đầu tiên để tránh lag
       // Nếu cần tất cả, có thể load thêm khi scroll hoặc filter
-      const records = await getAllAttendance(500);
-      const users = await getAllUsers();
+      const [records, users, branchesData] = await Promise.all([
+        getAllAttendance(500),
+        getAllUsers(),
+        getBranches(),
+      ]);
       
       // Debug: Log một vài URLs để kiểm tra
       const recordsWithPhotos = records.filter(r => r.photoUrl);
@@ -207,6 +218,8 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       }
       
       setAttendanceRecords(records);
+      setEmployees(users);
+      setBranches(branchesData.filter(b => b.isActive));
       setEmployees(users);
     } catch (error) {
       console.error('Error loading data:', error);
@@ -236,6 +249,13 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       filtered = filtered.filter(r => {
         const emp = employees.find(e => e.id === r.userId);
         return emp?.department === filterDepartment;
+      });
+    }
+
+    if (filterBranch !== 'ALL') {
+      filtered = filtered.filter(r => {
+        const emp = employees.find(e => e.id === r.userId);
+        return emp?.branchId === filterBranch;
       });
     }
 
@@ -299,6 +319,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
     setFilterType('ALL');
     setFilterStatus('ALL');
     setFilterDepartment('ALL');
+    setFilterBranch('ALL');
   };
 
   const handleExport = () => {
@@ -466,6 +487,19 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
               <option value="ALL">{text.allDepartments}</option>
               {departmentOptions.map(dept => (
                 <option key={dept} value={dept}>{dept}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-2">{text.filterByBranch}</label>
+            <select
+              value={filterBranch}
+              onChange={e => setFilterBranch(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm"
+            >
+              <option value="ALL">{text.allBranches}</option>
+              {branches.map(branch => (
+                <option key={branch.id} value={branch.id}>{branch.name} ({branch.code})</option>
               ))}
             </select>
           </div>

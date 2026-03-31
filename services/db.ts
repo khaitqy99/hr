@@ -1,4 +1,4 @@
-import { User, UserRole, AttendanceRecord, LeaveRequest, Notification, RequestStatus, LeaveType, ShiftRegistration, PayrollRecord, ContractType, EmployeeStatus, AttendanceType, Department, Holiday, SystemConfig, OffType, ShiftTime } from '../types';
+import { User, UserRole, AttendanceRecord, LeaveRequest, Notification, RequestStatus, LeaveType, ShiftRegistration, PayrollRecord, ContractType, EmployeeStatus, AttendanceType, Department, Holiday, SystemConfig, OffType, ShiftTime, Branch, AllowedLocation } from '../types';
 import { supabase } from './supabase';
 import { emitUserEvent, emitAttendanceEvent, emitShiftEvent, emitPayrollEvent, emitDepartmentEvent, emitHolidayEvent, emitConfigEvent, emitNotificationEvent } from './events';
 
@@ -163,6 +163,7 @@ export const getCurrentUser = async (email: string): Promise<User | undefined> =
         grossSalary: data.gross_salary ? Number(data.gross_salary) : undefined,
         socialInsuranceSalary: data.social_insurance_salary ? Number(data.social_insurance_salary) : undefined,
         traineeSalary: data.trainee_salary ? Number(data.trainee_salary) : undefined,
+        branchId: data.branch_id || undefined,
       };
     } catch (error) {
       console.error('Error getting user from Supabase:', error);
@@ -200,6 +201,7 @@ export const getAllUsers = async (): Promise<User[]> => {
         grossSalary: user.gross_salary ? Number(user.gross_salary) : undefined,
         socialInsuranceSalary: user.social_insurance_salary ? Number(user.social_insurance_salary) : undefined,
         traineeSalary: user.trainee_salary ? Number(user.trainee_salary) : undefined,
+        branchId: user.branch_id || undefined,
       }));
     } catch (error) {
       console.error('Error getting users from Supabase:', error);
@@ -365,6 +367,7 @@ export const updateUser = async (id: string, data: Partial<User>): Promise<User>
       if (data.grossSalary !== undefined) updateData.gross_salary = data.grossSalary || null;
       if (data.socialInsuranceSalary !== undefined) updateData.social_insurance_salary = data.socialInsuranceSalary || null;
       if (data.traineeSalary !== undefined) updateData.trainee_salary = data.traineeSalary || null;
+      if (data.branchId !== undefined) updateData.branch_id = data.branchId || null;
 
       const { data: updatedUser, error } = await supabase
         .from('users')
@@ -375,23 +378,6 @@ export const updateUser = async (id: string, data: Partial<User>): Promise<User>
 
       if (error) throw new Error(`Lỗi cập nhật user: ${error.message}`);
       if (!updatedUser) throw new Error('Không tìm thấy nhân viên');
-
-      return {
-        id: updatedUser.id,
-        name: updatedUser.name,
-        email: updatedUser.email,
-        role: updatedUser.role as UserRole,
-        department: updatedUser.department,
-        avatarUrl: updatedUser.avatar_url || undefined,
-        employeeCode: updatedUser.employee_code || undefined,
-        jobTitle: updatedUser.job_title || undefined,
-        contractType: updatedUser.contract_type as ContractType | undefined,
-        startDate: updatedUser.start_date || undefined,
-        status: updatedUser.status as EmployeeStatus | undefined,
-        grossSalary: updatedUser.gross_salary ? Number(updatedUser.gross_salary) : undefined,
-        socialInsuranceSalary: updatedUser.social_insurance_salary ? Number(updatedUser.social_insurance_salary) : undefined,
-        traineeSalary: updatedUser.trainee_salary ? Number(updatedUser.trainee_salary) : undefined,
-      };
 
       // Emit event và invalidate cache
       invalidateUsersCache();
@@ -412,6 +398,7 @@ export const updateUser = async (id: string, data: Partial<User>): Promise<User>
         grossSalary: updatedUser.gross_salary ? Number(updatedUser.gross_salary) : undefined,
         socialInsuranceSalary: updatedUser.social_insurance_salary ? Number(updatedUser.social_insurance_salary) : undefined,
         traineeSalary: updatedUser.trainee_salary ? Number(updatedUser.trainee_salary) : undefined,
+        branchId: updatedUser.branch_id || undefined,
       };
     } catch (error) {
       console.error('Error updating user in Supabase:', error);
@@ -582,7 +569,22 @@ export const deleteAttendance = async (id: string): Promise<void> => {
   await emitAttendanceEvent('deleted', id);
 };
 
-// Helper: Tính số ngày nghỉ từ leave requests trong tháng
+// Helper: Kỳ lương [01/MM, 01/MM+1) theo local time
+const getPayrollCycleRange = (month: string): { start: number; endExclusive: number } => {
+  const [monthStr, yearStr] = month.split('-');
+  const targetMonth = parseInt(monthStr, 10);
+  const targetYear = parseInt(yearStr, 10);
+  const start = new Date(targetYear, targetMonth - 1, 1).getTime();
+  const endExclusive = new Date(targetYear, targetMonth, 1).getTime();
+  return { start, endExclusive };
+};
+
+const isTimestampInPayrollCycle = (timestamp: number, month: string): boolean => {
+  const { start, endExclusive } = getPayrollCycleRange(month);
+  return timestamp >= start && timestamp < endExclusive;
+};
+
+// Helper: Tính số ngày nghỉ từ leave requests trong kỳ lương
 // Cải thiện: Loại bỏ trùng lặp với shift OFF để tránh trừ 2 lần
 export const calculateLeaveDays = async (userId: string, month: string): Promise<number> => {
   const [leaveRequests, shiftRegistrations] = await Promise.all([
@@ -590,14 +592,8 @@ export const calculateLeaveDays = async (userId: string, month: string): Promise
     getShiftRegistrations(userId)
   ]);
 
-  // Parse month format "MM-YYYY"
-  const [monthStr, yearStr] = month.split('-');
-  const targetMonth = parseInt(monthStr);
-  const targetYear = parseInt(yearStr);
-
-  // Filter approved leave requests that overlap with the target month
-  const monthStart = new Date(targetYear, targetMonth - 1, 1).getTime();
-  const monthEnd = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999).getTime();
+  const { start: cycleStart, endExclusive: cycleEndExclusive } = getPayrollCycleRange(month);
+  const cycleEndInclusive = cycleEndExclusive - 1;
 
   // Tạo Set các ngày đã có shift OFF để tránh trừ 2 lần
   // Lưu ý: Chỉ tính các ngày OFF không lương (OFF_DK, OFF_KL)
@@ -605,10 +601,8 @@ export const calculateLeaveDays = async (userId: string, month: string): Promise
   const shiftOffDays = new Set<string>();
   shiftRegistrations
     .filter(shift => {
-      const shiftDate = new Date(shift.date);
       return shift.status === RequestStatus.APPROVED &&
-             shiftDate.getMonth() + 1 === targetMonth &&
-             shiftDate.getFullYear() === targetYear &&
+             isTimestampInPayrollCycle(shift.date, month) &&
              shift.shift === 'OFF';
     })
     .forEach(shift => {
@@ -625,11 +619,11 @@ export const calculateLeaveDays = async (userId: string, month: string): Promise
       const startDate = req.startDate;
       const endDate = req.endDate;
 
-      // Check if leave request overlaps with target month
-      if (endDate >= monthStart && startDate <= monthEnd) {
+      // Check if leave request overlaps with payroll cycle
+      if (endDate >= cycleStart && startDate < cycleEndExclusive) {
         // Calculate overlap days
-        const overlapStart = Math.max(startDate, monthStart);
-        const overlapEnd = Math.min(endDate, monthEnd);
+        const overlapStart = Math.max(startDate, cycleStart);
+        const overlapEnd = Math.min(endDate, cycleEndInclusive);
 
         // Count days (inclusive) và thêm vào Set
         const days = Math.floor((overlapEnd - overlapStart) / (1000 * 60 * 60 * 24)) + 1;
@@ -672,10 +666,9 @@ const calculateTotalWorkHours = async (
   const workHoursPerDay = await getConfigNumber('work_hours_per_day', 8);
   const noLunchSet = new Set(noLunchBreakDates);
   
-  // Parse month format "MM-YYYY"
   const [monthStr, yearStr] = month.split('-');
-  const targetMonth = parseInt(monthStr);
-  const targetYear = parseInt(yearStr);
+  const targetMonth = parseInt(monthStr, 10);
+  const targetYear = parseInt(yearStr, 10);
 
   let totalHours = 0;
   const processedDates = new Set<string>(); // Tránh tính trùng ngày
@@ -683,10 +676,8 @@ const calculateTotalWorkHours = async (
   // Tính giờ từ shift registrations
   shiftRegistrations
     .filter(shift => {
-      const shiftDate = new Date(shift.date);
       return shift.status === RequestStatus.APPROVED &&
-             shiftDate.getMonth() + 1 === targetMonth &&
-             shiftDate.getFullYear() === targetYear;
+             isTimestampInPayrollCycle(shift.date, month);
     })
     .forEach(shift => {
       const date = new Date(shift.date);
@@ -723,9 +714,11 @@ const calculateTotalWorkHours = async (
       const holidayDate = new Date(holiday.date);
       
       if (holiday.isRecurring) {
-        // Ngày lễ hàng năm
+        // Ngày lễ hàng năm (chỉ cộng nếu rơi trong kỳ lương)
         if (holidayDate.getMonth() + 1 === targetMonth) {
           const dateKey = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(holidayDate.getDate()).padStart(2, '0')}`;
+          const recurringHolidayTs = new Date(targetYear, targetMonth - 1, holidayDate.getDate()).getTime();
+          if (!isTimestampInPayrollCycle(recurringHolidayTs, month)) return;
           
           // Kiểm tra xem ngày này có shift OFF không lương không
           const hasUnpaidOff = shiftRegistrations.some(shift => {
@@ -745,7 +738,7 @@ const calculateTotalWorkHours = async (
         }
       } else {
         // Ngày lễ cố định
-        if (holidayDate.getMonth() + 1 === targetMonth && holidayDate.getFullYear() === targetYear) {
+        if (isTimestampInPayrollCycle(holiday.date, month)) {
           const dateKey = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(holidayDate.getDate()).padStart(2, '0')}`;
           
           const hasUnpaidOff = shiftRegistrations.some(shift => {
@@ -801,19 +794,12 @@ export const calculateShiftWorkDays = async (userId: string, month: string): Pro
 export const calculateShiftOTHours = async (userId: string, month: string): Promise<number> => {
   const shiftRegistrations = await getShiftRegistrations(userId);
 
-  // Parse month format "MM-YYYY"
-  const [monthStr, yearStr] = month.split('-');
-  const targetMonth = parseInt(monthStr);
-  const targetYear = parseInt(yearStr);
-
   let totalOT = 0;
 
   shiftRegistrations
     .filter(shift => {
-      const shiftDate = new Date(shift.date);
       if (shift.status !== RequestStatus.APPROVED ||
-        shiftDate.getMonth() + 1 !== targetMonth ||
-        shiftDate.getFullYear() !== targetYear) {
+        !isTimestampInPayrollCycle(shift.date, month)) {
         return false;
       }
       // Chỉ tính OT cho ca CUSTOM có startTime và endTime
@@ -839,15 +825,9 @@ export const calculateShiftOTHours = async (userId: string, month: string): Prom
 export const calculateAttendanceStats = async (userId: string, month: string): Promise<{ actualWorkDays: number; otHours: number }> => {
   const records = await getAttendance(userId);
 
-  // Parse month format "MM-YYYY"
-  const [monthStr, yearStr] = month.split('-');
-  const targetMonth = parseInt(monthStr);
-  const targetYear = parseInt(yearStr);
-
-  // Filter records for the target month
+  // Filter records for payroll cycle [01/MM, 01/MM+1)
   const monthRecords = records.filter(record => {
-    const recordDate = new Date(record.timestamp);
-    return recordDate.getMonth() + 1 === targetMonth && recordDate.getFullYear() === targetYear;
+    return isTimestampInPayrollCycle(record.timestamp, month);
   });
 
   // Group records by date (YYYY-MM-DD)
@@ -915,13 +895,9 @@ export const getIncompleteAttendanceDays = async (
   month: string
 ): Promise<{ date: string; hasCheckIn: boolean; hasCheckOut: boolean }[]> => {
   const records = await getAttendance(userId);
-  const [monthStr, yearStr] = month.split('-');
-  const targetMonth = parseInt(monthStr);
-  const targetYear = parseInt(yearStr);
 
   const monthRecords = records.filter(record => {
-    const d = new Date(record.timestamp);
-    return d.getMonth() + 1 === targetMonth && d.getFullYear() === targetYear;
+    return isTimestampInPayrollCycle(record.timestamp, month);
   });
 
   const byDate: { [key: string]: { checkIn: boolean; checkOut: boolean } } = {};
@@ -1916,6 +1892,323 @@ export const deleteDepartment = async (id: string): Promise<void> => {
   const all: Department[] = JSON.parse(localStorage.getItem('hr_connect_departments') || '[]');
   const filtered = all.filter((d: Department) => d.id !== id);
   localStorage.setItem('hr_connect_departments', JSON.stringify(filtered));
+};
+
+// ============ BRANCHES ============
+
+export const getBranches = async (): Promise<Branch[]> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { data, error } = await supabase
+        .from('branches')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error || !data) return [];
+
+      return data.map(branch => ({
+        id: branch.id,
+        name: branch.name,
+        code: branch.code,
+        address: branch.address || undefined,
+        phone: branch.phone || undefined,
+        managerId: branch.manager_id || undefined,
+        isActive: branch.is_active ?? true,
+        createdAt: branch.created_at,
+        updatedAt: branch.updated_at,
+      }));
+    } catch (error) {
+      console.error('Error getting branches from Supabase:', error);
+      return [];
+    }
+  }
+
+  // Fallback to localStorage
+  return JSON.parse(localStorage.getItem('hr_connect_branches') || '[]');
+};
+
+export const createBranch = async (data: Omit<Branch, 'id' | 'createdAt' | 'updatedAt'>): Promise<Branch> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { data: newBranch, error } = await supabase
+        .from('branches')
+        .insert({
+          name: data.name,
+          code: data.code,
+          address: data.address || null,
+          phone: data.phone || null,
+          manager_id: data.managerId || null,
+          is_active: data.isActive ?? true,
+        })
+        .select()
+        .single();
+
+      if (error) throw new Error(`Lỗi tạo chi nhánh: ${error.message}`);
+      if (!newBranch) throw new Error('Không thể tạo chi nhánh');
+
+      return {
+        id: newBranch.id,
+        name: newBranch.name,
+        code: newBranch.code,
+        address: newBranch.address || undefined,
+        phone: newBranch.phone || undefined,
+        managerId: newBranch.manager_id || undefined,
+        isActive: newBranch.is_active ?? true,
+        createdAt: newBranch.created_at,
+        updatedAt: newBranch.updated_at,
+      };
+    } catch (error) {
+      console.error('Error creating branch in Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  const all: Branch[] = JSON.parse(localStorage.getItem('hr_connect_branches') || '[]');
+  const now = new Date().toISOString();
+  const newBranch: Branch = {
+    ...data,
+    id: 'branch-' + Date.now(),
+    createdAt: now,
+    updatedAt: now,
+  };
+  all.push(newBranch);
+  localStorage.setItem('hr_connect_branches', JSON.stringify(all));
+  return newBranch;
+};
+
+export const updateBranch = async (id: string, data: Partial<Branch>): Promise<Branch> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const updateData: any = {};
+      if (data.name !== undefined) updateData.name = data.name;
+      if (data.code !== undefined) updateData.code = data.code;
+      if (data.address !== undefined) updateData.address = data.address || null;
+      if (data.phone !== undefined) updateData.phone = data.phone || null;
+      if (data.managerId !== undefined) updateData.manager_id = data.managerId || null;
+      if (data.isActive !== undefined) updateData.is_active = data.isActive;
+
+      const { data: updatedBranch, error } = await supabase
+        .from('branches')
+        .update(updateData)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) throw new Error(`Lỗi cập nhật chi nhánh: ${error.message}`);
+      if (!updatedBranch) throw new Error('Không tìm thấy chi nhánh');
+
+      return {
+        id: updatedBranch.id,
+        name: updatedBranch.name,
+        code: updatedBranch.code,
+        address: updatedBranch.address || undefined,
+        phone: updatedBranch.phone || undefined,
+        managerId: updatedBranch.manager_id || undefined,
+        isActive: updatedBranch.is_active ?? true,
+        createdAt: updatedBranch.created_at,
+        updatedAt: updatedBranch.updated_at,
+      };
+    } catch (error) {
+      console.error('Error updating branch in Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  const all: Branch[] = JSON.parse(localStorage.getItem('hr_connect_branches') || '[]');
+  const idx = all.findIndex((b: Branch) => b.id === id);
+  if (idx === -1) throw new Error('Không tìm thấy chi nhánh');
+  all[idx] = { ...all[idx], ...data, updatedAt: new Date().toISOString() };
+  localStorage.setItem('hr_connect_branches', JSON.stringify(all));
+  return all[idx];
+};
+
+export const deleteBranch = async (id: string): Promise<void> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { error } = await supabase
+        .from('branches')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw new Error(`Lỗi xóa chi nhánh: ${error.message}`);
+      return;
+    } catch (error) {
+      console.error('Error deleting branch in Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  const all: Branch[] = JSON.parse(localStorage.getItem('hr_connect_branches') || '[]');
+  const filtered = all.filter((b: Branch) => b.id !== id);
+  localStorage.setItem('hr_connect_branches', JSON.stringify(filtered));
+};
+
+// ============ ALLOWED LOCATIONS ============
+
+export const getAllowedLocations = async (): Promise<AllowedLocation[]> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { data, error } = await supabase
+        .from('allowed_locations')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw new Error(`Lỗi tải địa điểm: ${error.message}`);
+
+      return (data || []).map((loc: any) => ({
+        id: loc.id,
+        name: loc.name,
+        branchId: loc.branch_id || undefined,
+        latitude: parseFloat(loc.latitude),
+        longitude: parseFloat(loc.longitude),
+        radiusMeters: loc.radius_meters,
+        isActive: loc.is_active ?? true,
+        createdAt: loc.created_at,
+        updatedAt: loc.updated_at,
+      }));
+    } catch (error) {
+      console.error('Error loading allowed locations from Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  return JSON.parse(localStorage.getItem('hr_connect_allowed_locations') || '[]');
+};
+
+export const createAllowedLocation = async (data: Omit<AllowedLocation, 'id' | 'createdAt' | 'updatedAt'>): Promise<AllowedLocation> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const insertData = {
+        name: data.name,
+        branch_id: data.branchId || null,
+        latitude: data.latitude,
+        longitude: data.longitude,
+        radius_meters: data.radiusMeters,
+        is_active: data.isActive ?? true,
+      };
+
+      const { data: newLocation, error } = await supabase
+        .from('allowed_locations')
+        .insert(insertData)
+        .select()
+        .single();
+
+      if (error) throw new Error(`Lỗi tạo địa điểm: ${error.message}`);
+      if (!newLocation) throw new Error('Không thể tạo địa điểm');
+
+      return {
+        id: newLocation.id,
+        name: newLocation.name,
+        branchId: newLocation.branch_id || undefined,
+        latitude: parseFloat(newLocation.latitude),
+        longitude: parseFloat(newLocation.longitude),
+        radiusMeters: newLocation.radius_meters,
+        isActive: newLocation.is_active ?? true,
+        createdAt: newLocation.created_at,
+        updatedAt: newLocation.updated_at,
+      };
+    } catch (error) {
+      console.error('Error creating allowed location in Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  const newLocation: AllowedLocation = {
+    id: Date.now().toString(),
+    ...data,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  const all: AllowedLocation[] = JSON.parse(localStorage.getItem('hr_connect_allowed_locations') || '[]');
+  all.push(newLocation);
+  localStorage.setItem('hr_connect_allowed_locations', JSON.stringify(all));
+  return newLocation;
+};
+
+export const updateAllowedLocation = async (id: string, data: Partial<Omit<AllowedLocation, 'id' | 'createdAt' | 'updatedAt'>>): Promise<AllowedLocation> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const updateData: any = {};
+      if (data.name !== undefined) updateData.name = data.name;
+      if (data.branchId !== undefined) updateData.branch_id = data.branchId || null;
+      if (data.latitude !== undefined) updateData.latitude = data.latitude;
+      if (data.longitude !== undefined) updateData.longitude = data.longitude;
+      if (data.radiusMeters !== undefined) updateData.radius_meters = data.radiusMeters;
+      if (data.isActive !== undefined) updateData.is_active = data.isActive;
+
+      // Update without select (RLS might block select after update)
+      const { error: updateError } = await supabase
+        .from('allowed_locations')
+        .update(updateData)
+        .eq('id', id);
+
+      if (updateError) throw new Error(`Lỗi cập nhật địa điểm: ${updateError.message}`);
+
+      // Fetch the updated location separately
+      const { data: updatedLocations, error: selectError } = await supabase
+        .from('allowed_locations')
+        .select()
+        .eq('id', id)
+        .limit(1);
+
+      console.log('Fetch after update:', { updatedLocations, selectError });
+
+      if (selectError) throw new Error(`Lỗi lấy dữ liệu: ${selectError.message}`);
+      if (!updatedLocations || updatedLocations.length === 0) throw new Error('Không tìm thấy địa điểm sau khi cập nhật');
+      
+      const updatedLocation = updatedLocations[0];
+
+      return {
+        id: updatedLocation.id,
+        name: updatedLocation.name,
+        branchId: updatedLocation.branch_id || undefined,
+        latitude: parseFloat(updatedLocation.latitude),
+        longitude: parseFloat(updatedLocation.longitude),
+        radiusMeters: updatedLocation.radius_meters,
+        isActive: updatedLocation.is_active ?? true,
+        createdAt: updatedLocation.created_at,
+        updatedAt: updatedLocation.updated_at,
+      };
+    } catch (error) {
+      console.error('Error updating allowed location in Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  const all: AllowedLocation[] = JSON.parse(localStorage.getItem('hr_connect_allowed_locations') || '[]');
+  const idx = all.findIndex((loc: AllowedLocation) => loc.id === id);
+  if (idx === -1) throw new Error('Không tìm thấy địa điểm');
+  all[idx] = { ...all[idx], ...data, updatedAt: new Date().toISOString() };
+  localStorage.setItem('hr_connect_allowed_locations', JSON.stringify(all));
+  return all[idx];
+};
+
+export const deleteAllowedLocation = async (id: string): Promise<void> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { error } = await supabase
+        .from('allowed_locations')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw new Error(`Lỗi xóa địa điểm: ${error.message}`);
+      return;
+    } catch (error) {
+      console.error('Error deleting allowed location in Supabase:', error);
+      throw error;
+    }
+  }
+
+  // Fallback to localStorage
+  const all: AllowedLocation[] = JSON.parse(localStorage.getItem('hr_connect_allowed_locations') || '[]');
+  const filtered = all.filter((loc: AllowedLocation) => loc.id !== id);
+  localStorage.setItem('hr_connect_allowed_locations', JSON.stringify(filtered));
 };
 
 // ============ HOLIDAYS ============

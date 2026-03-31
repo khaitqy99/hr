@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { User, AttendanceType, AttendanceStatus, AttendanceRecord, ShiftRegistration, ShiftTime, RequestStatus } from '../types';
-import { saveAttendance, getAttendance, getShiftRegistrations, getOfficeLocation } from '../services/db';
+import { User, AttendanceType, AttendanceStatus, AttendanceRecord, ShiftRegistration, ShiftTime, RequestStatus, AllowedLocation } from '../types';
+import { saveAttendance, getAttendance, getShiftRegistrations, getAllowedLocations } from '../services/db';
 import { vibrate, HapticPatterns } from '../utils/pwa';
 
 const CUSTOM_SHIFT_HOURS = 9; // Ca CUSTOM: nhân viên làm đủ 9 tiếng
@@ -41,7 +41,8 @@ interface CheckInProps {
 const CheckIn: React.FC<CheckInProps> = ({ user }) => {
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [distance, setDistance] = useState<number | null>(null);
-  const [officeLocation, setOfficeLocation] = useState<{ lat: number; lng: number; radiusMeters: number } | null>(null);
+  const [allowedLocations, setAllowedLocations] = useState<AllowedLocation[]>([]);
+  const [nearestLocation, setNearestLocation] = useState<AllowedLocation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [geoPermission, setGeoPermission] = useState<'unknown' | 'granted' | 'prompt' | 'denied'>('unknown');
@@ -83,12 +84,24 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
     
     loadAttendance();
 
-    // Load office location từ config
-    getOfficeLocation().then(loc => {
-      setOfficeLocation(loc);
+    // Load allowed locations
+    getAllowedLocations().then(locations => {
+      const activeLocations = locations.filter(loc => loc.isActive);
+      setAllowedLocations(activeLocations);
+      console.log('Loaded allowed locations:', activeLocations);
     }).catch(err => {
-      console.error('Error loading office location:', err);
-      setOfficeLocation({ lat: 10.040675858019696, lng: 105.78463187148355, radiusMeters: 200 });
+      console.error('Error loading allowed locations:', err);
+      // Fallback to default location if error
+      setAllowedLocations([{
+        id: 'default',
+        name: 'Văn phòng chính',
+        latitude: 10.040675858019696,
+        longitude: 105.78463187148355,
+        radiusMeters: 200,
+        isActive: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }]);
     });
 
     return () => {
@@ -123,19 +136,33 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
     };
   }, []);
 
-  // Tính lại distance khi officeLocation thay đổi và đã có location
+  // Tính lại distance khi location thay đổi - check tất cả allowed locations
   useEffect(() => {
-    if (location && officeLocation) {
-      setDistance(calculateDistance(location.lat, location.lng, officeLocation.lat, officeLocation.lng));
-    }
-  }, [location, officeLocation]);
+    if (location && allowedLocations.length > 0) {
+      // Tính khoảng cách đến tất cả locations
+      let minDistance = Infinity;
+      let nearest: AllowedLocation | null = null;
 
-  // Gọi getLocation sau khi officeLocation đã được load (chỉ một lần)
+      allowedLocations.forEach(loc => {
+        const dist = calculateDistance(location.lat, location.lng, loc.latitude, loc.longitude);
+        if (dist < minDistance) {
+          minDistance = dist;
+          nearest = loc;
+        }
+      });
+
+      setDistance(minDistance);
+      setNearestLocation(nearest);
+      console.log('Nearest location:', nearest?.name, 'Distance:', Math.round(minDistance), 'm');
+    }
+  }, [location, allowedLocations]);
+
+  // Gọi getLocation sau khi allowedLocations đã được load (chỉ một lần)
   useEffect(() => {
-    if (officeLocation && !location) {
+    if (allowedLocations.length > 0 && !location) {
       getLocation();
     }
-  }, [officeLocation]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [allowedLocations]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
     const R = 6371e3;
@@ -157,9 +184,6 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
       (pos) => {
         const { latitude, longitude } = pos.coords;
         setLocation({ lat: latitude, lng: longitude });
-        // Sử dụng office location từ state hoặc fallback
-        const office = officeLocation || { lat: 10.040675858019696, lng: 105.78463187148355, radiusMeters: 200 };
-        setDistance(calculateDistance(latitude, longitude, office.lat, office.lng));
         setError(null); 
         setLoading(false);
       },
@@ -177,7 +201,7 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
     );
-  }, [officeLocation]);
+  }, []);
 
   const requestLocationPermission = useCallback(() => {
     setError(null);
@@ -260,8 +284,7 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
   const nextAction: 'CHECK_IN' | 'CHECK_OUT' | 'DONE' =
     !todayCheckIn ? 'CHECK_IN' : !todayCheckOut ? 'CHECK_OUT' : 'DONE';
   const isCheckInNext = nextAction === 'CHECK_IN';
-  const office = officeLocation || { lat: 10.040675858019696, lng: 105.78463187148355, radiusMeters: 200 };
-  const isWithinRange = distance !== null && distance <= office.radiusMeters;
+  const isWithinRange = nearestLocation !== null && distance !== null && distance <= nearestLocation.radiusMeters;
   const canAction = isWithinRange || !navigator.onLine;
 
   return (
@@ -460,7 +483,7 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
         <div>
           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Vị trí hiện tại</p>
           <p className="text-sm font-bold text-slate-800">
-            {loading ? 'Đang định vị...' : (distance ? `${Math.round(distance)}m đến văn phòng` : 'Chưa có vị trí')}
+            {loading ? 'Đang định vị...' : (distance && nearestLocation ? `${Math.round(distance)}m đến ${nearestLocation.name}` : 'Chưa có vị trí')}
           </p>
         </div>
         <div className="flex items-center gap-2">
