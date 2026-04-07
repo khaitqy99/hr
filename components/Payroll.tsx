@@ -68,7 +68,7 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
           const targetMonth = parseInt(monthStr);
           const targetYear = parseInt(yearStr);
           
-          const cycleStart = new Date(targetYear, targetMonth - 1, 1).getTime();
+          const cycleStart = new Date(targetYear, targetMonth - 1, 2).getTime();
           const cycleEndExclusive = new Date(targetYear, targetMonth, 2).getTime();
           const monthShifts = shifts.filter(shift => shift.date >= cycleStart && shift.date < cycleEndExclusive);
           

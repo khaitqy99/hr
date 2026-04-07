@@ -8,12 +8,12 @@ import {
   payrollNoLunchKey,
 } from '../../utils/payrollHours';
 
-/** Kỳ lương: [01/MM, 02/MM+1) theo local time (bao gồm cả ngày 01 tháng sau). */
+/** Kỳ lương: [02/MM, 02/MM+1) theo local time (từ ngày 02 tháng này đến hết ngày 01 tháng sau). */
 const getPayrollCycleRange = (month: string): { start: number; endExclusive: number } => {
   const [monthStr, yearStr] = month.split('-');
   const targetMonth = parseInt(monthStr, 10);
   const targetYear = parseInt(yearStr, 10);
-  const start = new Date(targetYear, targetMonth - 1, 1).getTime();
+  const start = new Date(targetYear, targetMonth - 1, 2).getTime();
   const endExclusive = new Date(targetYear, targetMonth, 2).getTime();
   return { start, endExclusive };
 };
@@ -280,7 +280,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       });
       setNoLunchBreakByKey(lunchMap);
       
-      // Lọc shifts theo kỳ lương [01/MM, 02/MM+1)
+      // Lọc shifts theo kỳ lương [02/MM, 02/MM+1)
       const shiftsInMonth = filterShiftsByPayrollCycle(allShifts, month);
       setAllShiftsInMonth(shiftsInMonth);
     } catch (err: any) {
@@ -335,7 +335,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       const targetYear = parseInt(yearStr, 10);
       const { start: cycleStart, endExclusive: cycleEndExclusive } = getPayrollCycleRange(selectedMonth);
 
-      // Lọc dữ liệu theo kỳ lương [01/MM, 02/MM+1)
+      // Lọc dữ liệu theo kỳ lương [02/MM, 02/MM+1)
       const attendanceInMonth = allAttendance.filter(record => {
         return record.timestamp >= cycleStart && record.timestamp < cycleEndExclusive;
       });

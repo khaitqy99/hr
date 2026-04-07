@@ -569,13 +569,12 @@ export const deleteAttendance = async (id: string): Promise<void> => {
   await emitAttendanceEvent('deleted', id);
 };
 
-// Helper: Kỳ lương [01/MM, 02/MM+1) theo local time
-// (bao gồm trọn ngày 01 của tháng kế tiếp)
+// Helper: Kỳ lương [02/MM, 02/MM+1) theo local time (từ ngày 02 tháng này đến hết ngày 01 tháng sau)
 const getPayrollCycleRange = (month: string): { start: number; endExclusive: number } => {
   const [monthStr, yearStr] = month.split('-');
   const targetMonth = parseInt(monthStr, 10);
   const targetYear = parseInt(yearStr, 10);
-  const start = new Date(targetYear, targetMonth - 1, 1).getTime();
+  const start = new Date(targetYear, targetMonth - 1, 2).getTime();
   const endExclusive = new Date(targetYear, targetMonth, 2).getTime();
   return { start, endExclusive };
 };
@@ -830,7 +829,7 @@ export const calculateShiftOTHours = async (userId: string, month: string): Prom
 export const calculateAttendanceStats = async (userId: string, month: string): Promise<{ actualWorkDays: number; otHours: number }> => {
   const records = await getAttendance(userId);
 
-  // Filter records for payroll cycle [01/MM, 02/MM+1)
+  // Filter records for payroll cycle [02/MM, 02/MM+1)
   const monthRecords = records.filter(record => {
     return isTimestampInPayrollCycle(record.timestamp, month);
   });

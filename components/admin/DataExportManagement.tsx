@@ -168,10 +168,10 @@ const DataExportManagement: React.FC<DataExportManagementProps> = ({ onRegisterR
           const [monthStr, yearStr] = month.split('-');
           const targetMonth = parseInt(monthStr);
           const targetYear = parseInt(yearStr);
-          const monthStart = new Date(targetYear, targetMonth - 1, 1).getTime();
+          const monthStart = new Date(targetYear, targetMonth - 1, 2).getTime();
           const monthEndExclusive = new Date(targetYear, targetMonth, 2).getTime();
 
-          // Filter theo kỳ lương: [01/MM, 02/MM+1) => gồm cả ngày 01 tháng sau
+          // Filter theo kỳ lương: [02/MM, 02/MM+1) => đến hết ngày 01 tháng sau
           allShifts = allShifts.filter(shift => {
             return shift.date >= monthStart && shift.date < monthEndExclusive;
           });
