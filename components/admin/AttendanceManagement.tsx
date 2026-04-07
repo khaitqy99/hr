@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { AttendanceRecord, AttendanceType, AttendanceStatus, User, UserRole, Branch } from '../../types';
 import { getAllAttendance, getAllUsers, getBranches } from '../../services/db';
 import { exportToCSV } from '../../utils/export';
+import { pickDayAnchors } from '../../utils/attendanceDay';
 
 /** yyyy-mm-dd theo giờ local */
 const localDayKey = (timestamp: number) => {
@@ -19,6 +20,8 @@ interface AttendanceDayGroup {
   records: AttendanceRecord[];
   checkIn?: AttendanceRecord;
   checkOut?: AttendanceRecord;
+  lunchOut?: AttendanceRecord;
+  lunchIn?: AttendanceRecord;
 }
 
 function buildAttendanceDayGroups(records: AttendanceRecord[]): AttendanceDayGroup[] {
@@ -32,17 +35,18 @@ function buildAttendanceDayGroups(records: AttendanceRecord[]): AttendanceDayGro
   const groups: AttendanceDayGroup[] = [];
   for (const [, recs] of map) {
     recs.sort((a, b) => a.timestamp - b.timestamp);
-    const ins = recs.filter(x => x.type === AttendanceType.CHECK_IN);
-    const outs = recs.filter(x => x.type === AttendanceType.CHECK_OUT);
     const userId = recs[0].userId;
     const dayKey = localDayKey(recs[0].timestamp);
+    const anchors = pickDayAnchors(recs);
     groups.push({
       userId,
       dayKey,
       sortKey: Math.max(...recs.map(x => x.timestamp)),
       records: recs,
-      checkIn: ins[0],
-      checkOut: outs.length ? outs[outs.length - 1] : undefined,
+      checkIn: anchors.checkIn ?? undefined,
+      checkOut: anchors.checkOut ?? undefined,
+      lunchOut: anchors.lunchOut ?? undefined,
+      lunchIn: anchors.lunchIn ?? undefined,
     });
   }
   groups.sort((a, b) => b.sortKey - a.sortKey);
@@ -89,8 +93,10 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       time: 'Thời gian',
       location: 'Vị trí',
       status: 'Trạng thái',
-      checkIn: 'Vào',
-      checkOut: 'Ra',
+      checkIn: 'Vào ca',
+      checkOut: 'Ra ca',
+      lunchOut: 'Bắt đầu nghỉ trưa',
+      lunchIn: 'Kết thúc nghỉ trưa',
       onTime: 'Đúng giờ',
       late: 'Trễ',
       earlyLeave: 'Về sớm',
@@ -110,6 +116,8 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       workSessions: 'phiên/ngày',
       dateCol: 'Ngày',
       checkInCol: 'Vào ca',
+      lunchOutCol: 'Bắt đầu nghỉ trưa',
+      lunchInCol: 'Kết thúc nghỉ trưa',
       checkOutCol: 'Ra ca',
       moreMarks: 'thêm {n} bản ghi',
       filterDateFrom: 'Từ ngày',
@@ -144,8 +152,10 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       time: 'Time',
       location: 'Location',
       status: 'Status',
-      checkIn: 'In',
-      checkOut: 'Out',
+      checkIn: 'Check-in',
+      checkOut: 'Check-out',
+      lunchOut: 'Lunch start',
+      lunchIn: 'Lunch end',
       onTime: 'On Time',
       late: 'Late',
       earlyLeave: 'Early Leave',
@@ -165,6 +175,8 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       workSessions: 'sessions',
       dateCol: 'Date',
       checkInCol: 'Check-in',
+      lunchOutCol: 'Lunch start',
+      lunchInCol: 'Lunch end',
       checkOutCol: 'Check-out',
       moreMarks: '+{n} records',
       filterDateFrom: 'From date',
@@ -211,7 +223,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
           recordId: r.id,
           photoUrl: r.photoUrl,
           urlLength: r.photoUrl?.length,
-          isComplete: r.photoUrl?.includes('CHECK_IN') || r.photoUrl?.includes('CHECK_OUT'),
+          isComplete: ['CHECK_IN', 'CHECK_OUT', 'LUNCH_OUT', 'LUNCH_IN'].some(t => r.photoUrl?.includes(t)),
         })));
       }
       
@@ -333,7 +345,10 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
         [text.exportDepartment]: employee?.department || '',
         [text.exportTime]: new Date(record.timestamp).toLocaleString(language === 'vi' ? 'vi-VN' : 'en-US'),
         [text.exportDate]: new Date(record.timestamp).toLocaleDateString(language === 'vi' ? 'vi-VN' : 'en-US'),
-        [text.exportType]: record.type === AttendanceType.CHECK_IN ? text.checkIn : text.checkOut,
+        [text.exportType]: record.type === AttendanceType.CHECK_IN ? text.checkIn
+          : record.type === AttendanceType.CHECK_OUT ? text.checkOut
+          : record.type === AttendanceType.LUNCH_OUT ? text.lunchOut
+          : text.lunchIn,
         [text.exportStatus]: getStatusLabel(record.status).label,
         [text.exportAddress]: record.location?.address || `${record.location?.lat}, ${record.location?.lng}`,
         [text.exportNotes]: record.notes || '',
@@ -510,6 +525,8 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
             >
               <option value="ALL">{text.allTypes}</option>
               <option value={AttendanceType.CHECK_IN}>{text.checkIn}</option>
+              <option value={AttendanceType.LUNCH_OUT}>{text.lunchOut}</option>
+              <option value={AttendanceType.LUNCH_IN}>{text.lunchIn}</option>
               <option value={AttendanceType.CHECK_OUT}>{text.checkOut}</option>
             </select>
           </div>
@@ -554,6 +571,8 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.employee}</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.dateCol}</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.checkInCol}</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.lunchOutCol}</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.lunchInCol}</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.checkOutCol}</th>
                 </tr>
               </thead>
@@ -562,9 +581,12 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
                   const employee = employees.find(e => e.id === group.userId);
                   const inInfo = group.checkIn ? getStatusLabel(group.checkIn.status) : null;
                   const outInfo = group.checkOut ? getStatusLabel(group.checkOut.status) : null;
-                  const extra = group.records.filter(
-                    r => r.id !== group.checkIn?.id && r.id !== group.checkOut?.id
-                  ).length;
+                  const lunchOutInfo = group.lunchOut ? getStatusLabel(group.lunchOut.status) : null;
+                  const lunchInInfo = group.lunchIn ? getStatusLabel(group.lunchIn.status) : null;
+                  const anchored = new Set(
+                    [group.checkIn?.id, group.lunchOut?.id, group.lunchIn?.id, group.checkOut?.id].filter(Boolean) as string[]
+                  );
+                  const extra = group.records.filter(r => !anchored.has(r.id)).length;
                   const fmtLoc = (r?: AttendanceRecord) =>
                     r?.location
                       ? r.location.address || `${r.location.lat.toFixed(5)}, ${r.location.lng.toFixed(5)}`
@@ -605,6 +627,40 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
                             )}
                             {fmtLoc(group.checkIn) && (
                               <p className="text-[11px] text-slate-500 line-clamp-2">{fmtLoc(group.checkIn)}</p>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-sm text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                        {group.lunchOut ? (
+                          <div className="space-y-1">
+                            <p className="text-sm text-slate-800 tabular-nums">
+                              {new Date(group.lunchOut.timestamp).toLocaleTimeString(language === 'vi' ? 'vi-VN' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                            {lunchOutInfo && (
+                              <span className={`inline-flex text-xs font-bold px-2 py-0.5 rounded-lg ${lunchOutInfo.className}`}>{lunchOutInfo.label}</span>
+                            )}
+                            {fmtLoc(group.lunchOut) && (
+                              <p className="text-[11px] text-slate-500 line-clamp-2">{fmtLoc(group.lunchOut)}</p>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-sm text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                        {group.lunchIn ? (
+                          <div className="space-y-1">
+                            <p className="text-sm text-slate-800 tabular-nums">
+                              {new Date(group.lunchIn.timestamp).toLocaleTimeString(language === 'vi' ? 'vi-VN' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                            {lunchInInfo && (
+                              <span className={`inline-flex text-xs font-bold px-2 py-0.5 rounded-lg ${lunchInInfo.className}`}>{lunchInInfo.label}</span>
+                            )}
+                            {fmtLoc(group.lunchIn) && (
+                              <p className="text-[11px] text-slate-500 line-clamp-2">{fmtLoc(group.lunchIn)}</p>
                             )}
                           </div>
                         ) : (

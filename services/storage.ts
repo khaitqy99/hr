@@ -82,14 +82,14 @@ const getExtensionFromMimeType = (mimeType: string): string => {
  * @param photo Blob ảnh từ canvas hoặc base64 data URL (fallback)
  * @param userId ID của user
  * @param timestamp Timestamp của lần chấm công
- * @param type Loại chấm công (CHECK_IN hoặc CHECK_OUT)
+ * @param type Loại chấm công (CHECK_IN, CHECK_OUT, LUNCH_OUT, LUNCH_IN)
  * @returns Public URL của ảnh đã upload
  */
 export const uploadAttendancePhoto = async (
   photo: Blob | string,
   userId: string,
   timestamp: number,
-  type: 'CHECK_IN' | 'CHECK_OUT'
+  type: 'CHECK_IN' | 'CHECK_OUT' | 'LUNCH_OUT' | 'LUNCH_IN'
 ): Promise<string> => {
   const blobToDataUrl = (b: Blob): Promise<string> =>
     new Promise((resolve) => {

@@ -2,8 +2,19 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { User, AttendanceType, AttendanceStatus, AttendanceRecord, ShiftRegistration, ShiftTime, RequestStatus, AllowedLocation } from '../types';
 import { saveAttendance, getAttendance, getShiftRegistrations, getAllowedLocations } from '../services/db';
 import { vibrate, HapticPatterns } from '../utils/pwa';
+import { sortAttendanceAsc, pickDayAnchors } from '../utils/attendanceDay';
 
 const CUSTOM_SHIFT_HOURS = 9; // Ca CUSTOM: nhân viên làm đủ 9 tiếng
+
+/** Nghỉ trưa quy định 1 tiếng; cho phép lệch nhỏ khi chấm (phút). */
+const LUNCH_BREAK_STANDARD_MIN = 60;
+const LUNCH_BREAK_TOLERANCE_MIN = 5;
+
+function isLunchBreakDurationOk(breakMinutes: number): boolean {
+  const lo = LUNCH_BREAK_STANDARD_MIN - LUNCH_BREAK_TOLERANCE_MIN;
+  const hi = LUNCH_BREAK_STANDARD_MIN + LUNCH_BREAK_TOLERANCE_MIN;
+  return breakMinutes >= lo && breakMinutes <= hi;
+}
 
 /** Trả về giờ vào/ra theo phút từ nửa đêm (0–1439). Chỉ ca CUSTOM (9 tiếng) và OFF. */
 function getExpectedShiftMinutes(shift: ShiftRegistration | null): { startMinutes: number; endMinutes: number } | null {
@@ -49,6 +60,8 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
   const [lastRecord, setLastRecord] = useState<AttendanceRecord | null>(null);
   const [todayCheckIn, setTodayCheckIn] = useState<AttendanceRecord | null>(null);
   const [todayCheckOut, setTodayCheckOut] = useState<AttendanceRecord | null>(null);
+  const [todayLunchOut, setTodayLunchOut] = useState<AttendanceRecord | null>(null);
+  const [todayLunchIn, setTodayLunchIn] = useState<AttendanceRecord | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -58,14 +71,14 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
     const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
     const todayRecords = records.filter(r => r.timestamp >= todayStart && r.timestamp <= todayEnd);
-    
-    // Chỉ set lastRecord nếu có bản ghi hôm nay, nếu không thì set null
-    // Điều này đảm bảo khi sang ngày mới, nút sẽ reset về "Chấm công vào"
-    const lastTodayRecord = todayRecords.length > 0 ? todayRecords[0] : null;
-    setLastRecord(lastTodayRecord);
-    
-    setTodayCheckIn(todayRecords.find(r => r.type === AttendanceType.CHECK_IN) ?? null);
-    setTodayCheckOut(todayRecords.find(r => r.type === AttendanceType.CHECK_OUT) ?? null);
+    const asc = sortAttendanceAsc(todayRecords);
+    setLastRecord(asc.length ? asc[asc.length - 1]! : null);
+
+    const anchors = pickDayAnchors(asc);
+    setTodayCheckIn(anchors.checkIn);
+    setTodayCheckOut(anchors.checkOut);
+    setTodayLunchOut(anchors.lunchOut);
+    setTodayLunchIn(anchors.lunchIn);
   }, [user.id]);
 
   useEffect(() => {
@@ -231,9 +244,16 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
         } else if (type === AttendanceType.CHECK_OUT) {
           if (currentMinutes < expected.endMinutes) status = AttendanceStatus.EARLY_LEAVE;
           else if (currentMinutes > expected.endMinutes) status = AttendanceStatus.OVERTIME;
+        } else if (type === AttendanceType.LUNCH_IN && todayLunchOut) {
+          const breakMin = (timestamp - todayLunchOut.timestamp) / (1000 * 60);
+          if (!isLunchBreakDurationOk(breakMin)) status = AttendanceStatus.LATE;
         }
+        // LUNCH_OUT: không chặn giờ (trước 11h / sau 13h30 vẫn ON_TIME)
+      } else if (type === AttendanceType.LUNCH_IN && todayLunchOut) {
+        const breakMin = (timestamp - todayLunchOut.timestamp) / (1000 * 60);
+        if (!isLunchBreakDurationOk(breakMin)) status = AttendanceStatus.LATE;
       }
-      // Nếu không có ca đăng ký hoặc ca OFF → giữ ON_TIME
+      // Không ca đăng ký / ca OFF: giữ ON_TIME; chỉ LUNCH_IN kiểm tra đủ 1 tiếng (± dung sai)
 
       const record: AttendanceRecord = {
         id: timestamp.toString(),
@@ -249,16 +269,27 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
       setLastRecord(record);
       if (record.type === AttendanceType.CHECK_IN) setTodayCheckIn(record);
       if (record.type === AttendanceType.CHECK_OUT) setTodayCheckOut(record);
+      if (record.type === AttendanceType.LUNCH_OUT) setTodayLunchOut(record);
+      if (record.type === AttendanceType.LUNCH_IN) setTodayLunchIn(record);
       
       // Hiển thị thông báo thành công
       const timeStr = currentTime.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-      const statusText = status === AttendanceStatus.LATE ? ' (Muộn)' : 
-                        status === AttendanceStatus.EARLY_LEAVE ? ' (Về sớm)' :
+      const statusText = status === AttendanceStatus.LATE ? ' (Cần lưu ý giờ)' : 
+                        status === AttendanceStatus.EARLY_LEAVE ? ' (Cần lưu ý)' :
                         status === AttendanceStatus.OVERTIME ? ' (Tăng ca)' : '';
+      const lunchOutMsg = `✅ Bắt đầu nghỉ trưa thành công lúc ${timeStr}${statusText}`;
+      const lunchInMsg = `✅ Kết thúc nghỉ trưa thành công lúc ${timeStr}${statusText}`;
       setSuccessMessage(
         type === AttendanceType.CHECK_IN 
-          ? `✅ Chấm công vào thành công lúc ${timeStr}${statusText}`
-          : `✅ Chấm công ra thành công lúc ${timeStr}${statusText}`
+          ? `✅ Chấm công vào thành công lúc ${timeStr}${status === AttendanceStatus.LATE ? ' (Muộn)' : ''}`
+          : type === AttendanceType.CHECK_OUT
+            ? `✅ Chấm công ra thành công lúc ${timeStr}${
+                status === AttendanceStatus.EARLY_LEAVE ? ' (Về sớm)' :
+                status === AttendanceStatus.OVERTIME ? ' (Tăng ca)' : ''
+              }`
+            : type === AttendanceType.LUNCH_OUT
+              ? lunchOutMsg
+              : lunchInMsg
       );
       
       // Tự động ẩn thông báo sau 4 giây
@@ -277,15 +308,52 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
     }
   };
 
-  // Quy tắc hành động trong ngày:
-  // - Chưa có check-in -> cho check-in
-  // - Có check-in nhưng chưa check-out -> cho check-out
-  // - Có đủ cả 2 -> hoàn tất, không cho chấm thêm (tránh hiện lại "chấm công vào" sau khi checkout)
-  const nextAction: 'CHECK_IN' | 'CHECK_OUT' | 'DONE' =
-    !todayCheckIn ? 'CHECK_IN' : !todayCheckOut ? 'CHECK_OUT' : 'DONE';
-  const isCheckInNext = nextAction === 'CHECK_IN';
+  // Thứ tự trong ngày: vào ca → bắt đầu nghỉ trưa → kết thúc nghỉ trưa → ra ca
+  const nextAction: 'CHECK_IN' | 'LUNCH_OUT' | 'LUNCH_IN' | 'CHECK_OUT' | 'DONE' =
+    !todayCheckIn ? 'CHECK_IN'
+    : !todayLunchOut ? 'LUNCH_OUT'
+    : !todayLunchIn ? 'LUNCH_IN'
+    : !todayCheckOut ? 'CHECK_OUT'
+    : 'DONE';
   const isWithinRange = nearestLocation !== null && distance !== null && distance <= nearestLocation.radiusMeters;
   const canAction = isWithinRange || !navigator.onLine;
+
+  const actionBannerClass =
+    nextAction === 'CHECK_IN' ? 'bg-blue-50 border border-blue-200'
+    : nextAction === 'LUNCH_OUT' ? 'bg-orange-50 border border-orange-200'
+    : nextAction === 'LUNCH_IN' ? 'bg-teal-50 border border-teal-200'
+    : nextAction === 'CHECK_OUT' ? 'bg-amber-50 border border-amber-200'
+    : 'bg-emerald-50 border border-emerald-200';
+  const actionIconBoxClass =
+    nextAction === 'CHECK_IN' ? 'bg-blue-100 text-blue-600'
+    : nextAction === 'LUNCH_OUT' ? 'bg-orange-100 text-orange-600'
+    : nextAction === 'LUNCH_IN' ? 'bg-teal-100 text-teal-700'
+    : nextAction === 'CHECK_OUT' ? 'bg-amber-100 text-amber-600'
+    : 'bg-emerald-100 text-emerald-700';
+  const actionTitleClass =
+    nextAction === 'CHECK_IN' ? 'text-blue-700'
+    : nextAction === 'LUNCH_OUT' ? 'text-orange-700'
+    : nextAction === 'LUNCH_IN' ? 'text-teal-700'
+    : nextAction === 'CHECK_OUT' ? 'text-amber-700'
+    : 'text-emerald-700';
+  const actionHintText =
+    nextAction === 'CHECK_IN' ? 'Bạn cần chấm công vào'
+    : nextAction === 'LUNCH_OUT' ? 'Bạn cần chấm bắt đầu nghỉ trưa'
+    : nextAction === 'LUNCH_IN' ? 'Bạn cần chấm kết thúc nghỉ trưa'
+    : nextAction === 'CHECK_OUT' ? 'Bạn cần chấm công ra ca'
+    : 'Bạn đã chấm công đủ hôm nay';
+  const mainButtonTitle =
+    nextAction === 'CHECK_IN' ? 'Chấm công vào'
+    : nextAction === 'LUNCH_OUT' ? 'Bắt đầu nghỉ trưa'
+    : nextAction === 'LUNCH_IN' ? 'Kết thúc nghỉ trưa'
+    : nextAction === 'CHECK_OUT' ? 'Chấm công ra'
+    : 'Hoàn tất hôm nay';
+  const mainButtonLabel =
+    nextAction === 'CHECK_IN' ? 'Xác nhận vào'
+    : nextAction === 'LUNCH_OUT' ? 'Xác nhận bắt đầu nghỉ trưa'
+    : nextAction === 'LUNCH_IN' ? 'Xác nhận kết thúc nghỉ trưa'
+    : nextAction === 'CHECK_OUT' ? 'Xác nhận ra ca'
+    : 'Đã hoàn tất';
 
   return (
     <div className="flex flex-col h-full pt-4 pb-2 fade-up space-y-4">
@@ -339,25 +407,17 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
         </div>
       </div>
 
-      {/* Thông báo cần làm: Check-in hay Check-out */}
-      <div className={`px-4 py-3 rounded-2xl mx-2 flex items-center gap-3 ${
-        nextAction === 'CHECK_IN'
-          ? 'bg-blue-50 border border-blue-200'
-          : nextAction === 'CHECK_OUT'
-            ? 'bg-amber-50 border border-amber-200'
-            : 'bg-emerald-50 border border-emerald-200'
-      }`}>
-        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-          nextAction === 'CHECK_IN'
-            ? 'bg-blue-100 text-blue-600'
-            : nextAction === 'CHECK_OUT'
-              ? 'bg-amber-100 text-amber-600'
-              : 'bg-emerald-100 text-emerald-700'
-        }`}>
+      {/* Hành động tiếp theo */}
+      <div className={`px-4 py-3 rounded-2xl mx-2 flex items-center gap-3 ${actionBannerClass}`}>
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${actionIconBoxClass}`}>
           {nextAction === 'CHECK_IN' ? (
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" /></svg>
           ) : nextAction === 'CHECK_OUT' ? (
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9v-3m-3 3V9m3 3v3" /></svg>
+          ) : nextAction === 'LUNCH_OUT' ? (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" /></svg>
+          ) : nextAction === 'LUNCH_IN' ? (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg>
           ) : (
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
               <path fillRule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm13.36-1.814a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z" clipRule="evenodd" />
@@ -366,41 +426,51 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
         </div>
         <div>
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Hành động tiếp theo</p>
-          <p className={`font-bold ${
-            nextAction === 'CHECK_IN'
-              ? 'text-blue-700'
-              : nextAction === 'CHECK_OUT'
-                ? 'text-amber-700'
-                : 'text-emerald-700'
-          }`}>
-            {nextAction === 'CHECK_IN'
-              ? 'Bạn cần chấm công vào'
-              : nextAction === 'CHECK_OUT'
-                ? 'Bạn cần chấm công ra'
-                : 'Bạn đã chấm công đủ hôm nay'}
-          </p>
+          <p className={`font-bold ${actionTitleClass}`}>{actionHintText}</p>
         </div>
       </div>
 
-      {/* Hôm nay: Giờ vào / Giờ ra */}
-      <div className="flex gap-3 px-2">
-        <div className="flex-1 bg-white rounded-2xl p-3 shadow-sm border border-sky-50 flex items-center gap-2">
+      {/* Hôm nay: vào ca / bắt đầu–kết thúc nghỉ trưa / ra ca */}
+      <div className="grid grid-cols-2 gap-3 px-2">
+        <div className="bg-white rounded-2xl p-3 shadow-sm border border-sky-50 flex items-center gap-2">
           <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v6m3-3H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           </div>
           <div className="min-w-0">
-            <p className="text-[10px] text-slate-400 font-bold uppercase">Vào</p>
+            <p className="text-[10px] text-slate-400 font-bold uppercase">Vào ca</p>
             <p className="text-sm font-bold text-slate-800 truncate">
               {todayCheckIn ? new Date(todayCheckIn.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '--:--'}
             </p>
           </div>
         </div>
-        <div className="flex-1 bg-white rounded-2xl p-3 shadow-sm border border-sky-50 flex items-center gap-2">
+        <div className="bg-white rounded-2xl p-3 shadow-sm border border-sky-50 flex items-center gap-2">
+          <div className="w-9 h-9 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center flex-shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" /></svg>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] text-slate-400 font-bold uppercase leading-tight">Bắt đầu nghỉ trưa</p>
+            <p className="text-sm font-bold text-slate-800 truncate">
+              {todayLunchOut ? new Date(todayLunchOut.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+            </p>
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl p-3 shadow-sm border border-sky-50 flex items-center gap-2">
+          <div className="w-9 h-9 rounded-xl bg-teal-100 text-teal-600 flex items-center justify-center flex-shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] text-slate-400 font-bold uppercase leading-tight">Kết thúc nghỉ trưa</p>
+            <p className="text-sm font-bold text-slate-800 truncate">
+              {todayLunchIn ? new Date(todayLunchIn.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+            </p>
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl p-3 shadow-sm border border-sky-50 flex items-center gap-2">
           <div className="w-9 h-9 rounded-xl bg-cyan-100 text-cyan-600 flex items-center justify-center flex-shrink-0">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" /></svg>
           </div>
           <div className="min-w-0">
-            <p className="text-[10px] text-slate-400 font-bold uppercase">Ra</p>
+            <p className="text-[10px] text-slate-400 font-bold uppercase">Ra ca</p>
             <p className="text-sm font-bold text-slate-800 truncate">
               {todayCheckOut ? new Date(todayCheckOut.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '--:--'}
             </p>
@@ -418,20 +488,18 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
         <div className="flex flex-col items-center gap-6">
           <div className="w-32 h-32 rounded-full border-4 border-white bg-white/20 backdrop-blur-md flex items-center justify-center shadow-2xl">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-16 h-16 text-white">
-              {isCheckInNext ? (
+              {nextAction === 'CHECK_IN' || nextAction === 'LUNCH_IN' ? (
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
-              ) : (
+              ) : nextAction === 'CHECK_OUT' || nextAction === 'LUNCH_OUT' ? (
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9v-3m-3 3V9m3 3v3" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               )}
             </svg>
           </div>
           <div className="text-center">
             <p className="text-white text-lg font-bold mb-2">
-              {nextAction === 'CHECK_IN'
-                ? 'Chấm công vào'
-                : nextAction === 'CHECK_OUT'
-                  ? 'Chấm công ra'
-                  : 'Hoàn tất hôm nay'}
+              {mainButtonTitle}
             </p>
             <p className="text-white/80 text-sm">
               {isWithinRange ? 'Bạn đang trong văn phòng' : 'Bạn đang ngoài văn phòng'}
@@ -441,6 +509,8 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
             type="button"
             onClick={() => {
               if (nextAction === 'CHECK_IN') return handleAttendance(AttendanceType.CHECK_IN);
+              if (nextAction === 'LUNCH_OUT') return handleAttendance(AttendanceType.LUNCH_OUT);
+              if (nextAction === 'LUNCH_IN') return handleAttendance(AttendanceType.LUNCH_IN);
               if (nextAction === 'CHECK_OUT') return handleAttendance(AttendanceType.CHECK_OUT);
             }}
             disabled={nextAction === 'DONE' || loading || (!canAction && navigator.onLine)}
@@ -460,13 +530,7 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
               </>
             ) : (
               <>
-                <span>
-                  {nextAction === 'CHECK_IN'
-                    ? 'Xác nhận vào'
-                    : nextAction === 'CHECK_OUT'
-                      ? 'Xác nhận ra'
-                      : 'Đã hoàn tất'}
-                </span>
+                <span>{mainButtonLabel}</span>
                 {nextAction !== 'DONE' && (
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />

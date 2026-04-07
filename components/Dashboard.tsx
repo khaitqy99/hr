@@ -7,6 +7,7 @@ import PullToRefresh from './PullToRefresh';
 import SkeletonLoader from './SkeletonLoader';
 import { vibrate, HapticPatterns } from '../utils/pwa';
 import { isSlowNetwork } from '../utils/mobile';
+import { dayWorkedHoursGrossMinusLunch, pickDayAnchors, sortAttendanceAsc } from '../utils/attendanceDay';
 
 // Lazy load Recharts - giảm ~100KB+ từ initial bundle, cải thiện FCP trên mobile
 const DashboardChart = lazy(() => import('./DashboardChart'));
@@ -116,13 +117,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
       const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999).getTime();
       
       const dayRecords = attendance.filter(r => r.timestamp >= dayStart && r.timestamp <= dayEnd);
-      const checkIn = dayRecords.find(r => r.type === AttendanceType.CHECK_IN);
-      const checkOut = dayRecords.find(r => r.type === AttendanceType.CHECK_OUT);
-      
-      let hours = 0;
-      if (checkIn && checkOut) {
-        hours = (checkOut.timestamp - checkIn.timestamp) / (1000 * 60 * 60);
-      }
+      const hours = dayWorkedHoursGrossMinusLunch(dayRecords);
 
       return { name: dayStr, hours: parseFloat(hours.toFixed(1)) };
     });
@@ -160,12 +155,9 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
         r.timestamp >= dayStart.getTime() && r.timestamp <= dayEnd.getTime()
       );
       
-      const checkIn = dayRecords.find(r => r.type === AttendanceType.CHECK_IN);
-      const checkOut = dayRecords.find(r => r.type === AttendanceType.CHECK_OUT);
-      
+      const { checkIn, checkOut } = pickDayAnchors(sortAttendanceAsc(dayRecords));
       if (checkIn && checkOut) {
-        const hours = (checkOut.timestamp - checkIn.timestamp) / (1000 * 60 * 60);
-        totalHours += hours;
+        totalHours += dayWorkedHoursGrossMinusLunch(dayRecords);
         processedDays.add(dateStr);
       }
     });
@@ -220,21 +212,17 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
     const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
     
-    const todayCheckIn = attendance.find(r =>
-      r.timestamp >= todayStart &&
-      r.timestamp <= todayEnd &&
-      r.type === AttendanceType.CHECK_IN
-    );
-    
-    const todayCheckOut = attendance.find(r =>
-      r.timestamp >= todayStart &&
-      r.timestamp <= todayEnd &&
-      r.type === AttendanceType.CHECK_OUT
-    );
+    const todayRecs = attendance.filter(r => r.timestamp >= todayStart && r.timestamp <= todayEnd);
+    const { checkIn: ti, checkOut: to, lunchOut: lo, lunchIn: li } = pickDayAnchors(sortAttendanceAsc(todayRecs));
+
+    const fmt = (t: number | undefined) =>
+      t != null ? new Date(t).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '--:--';
 
     return {
-      checkIn: todayCheckIn ? new Date(todayCheckIn.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '--:--',
-      checkOut: todayCheckOut ? new Date(todayCheckOut.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '--:--'
+      checkIn: fmt(ti?.timestamp),
+      lunchOut: fmt(lo?.timestamp),
+      lunchIn: fmt(li?.timestamp),
+      checkOut: fmt(to?.timestamp)
     };
   }, [attendance]);
 
@@ -330,29 +318,35 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
               </div>
             )}
             
-            <div className="flex space-x-2 mt-2">
-                <div className="flex-1 bg-black/10 rounded-2xl p-3 min-w-0">
-                    <p className="text-xs text-blue-100 mb-1">Giờ vào</p>
-                    <p className="text-base sm:text-lg font-bold truncate">
-                      {todayCheckInOut.checkIn}
-                    </p>
+            <div className="flex flex-col gap-2 mt-2">
+              <div className="flex flex-wrap gap-2">
+                <div className="flex-1 min-w-[5.5rem] bg-black/10 rounded-2xl p-3">
+                  <p className="text-xs text-blue-100 mb-1">Giờ vào</p>
+                  <p className="text-base sm:text-lg font-bold truncate">{todayCheckInOut.checkIn}</p>
                 </div>
-                <div className="flex-1 bg-black/10 rounded-2xl p-3 min-w-0">
-                    <p className="text-xs text-blue-100 mb-1">Giờ ra</p>
-                    <p className="text-base sm:text-lg font-bold truncate">
-                      {todayCheckInOut.checkOut}
-                    </p>
+                <div className="flex-1 min-w-[5.5rem] bg-black/10 rounded-2xl p-3">
+                  <p className="text-xs text-blue-100 mb-1">Bắt đầu nghỉ trưa</p>
+                  <p className="text-base sm:text-lg font-bold truncate">{todayCheckInOut.lunchOut}</p>
                 </div>
-                <div className="flex-1 bg-black/10 rounded-2xl p-3 min-w-0">
-                    <p className="text-xs text-blue-100 mb-1">Giờ làm</p>
-                    <p className="text-base sm:text-lg font-bold">{chartData[4]?.hours ?? 0}h</p>
+                <div className="flex-1 min-w-[5.5rem] bg-black/10 rounded-2xl p-3">
+                  <p className="text-xs text-blue-100 mb-1">Kết thúc nghỉ trưa</p>
+                  <p className="text-base sm:text-lg font-bold truncate">{todayCheckInOut.lunchIn}</p>
+                </div>
+                <div className="flex-1 min-w-[5.5rem] bg-black/10 rounded-2xl p-3">
+                  <p className="text-xs text-blue-100 mb-1">Giờ ra</p>
+                  <p className="text-base sm:text-lg font-bold truncate">{todayCheckInOut.checkOut}</p>
+                </div>
+                <div className="flex-1 min-w-[5.5rem] bg-black/10 rounded-2xl p-3">
+                  <p className="text-xs text-blue-100 mb-1">Giờ làm</p>
+                  <p className="text-base sm:text-lg font-bold">{chartData[4]?.hours ?? 0}h</p>
                 </div>
                 {todayOTHours > 0 && (
-                  <div className="flex-1 bg-orange-500/20 rounded-2xl p-3 min-w-0 border border-orange-300/30">
-                      <p className="text-xs text-orange-100 mb-1">OT</p>
-                      <p className="text-base sm:text-lg font-bold text-white">{todayOTHours}h</p>
+                  <div className="flex-1 min-w-[5.5rem] bg-orange-500/20 rounded-2xl p-3 border border-orange-300/30">
+                    <p className="text-xs text-orange-100 mb-1">OT</p>
+                    <p className="text-base sm:text-lg font-bold text-white">{todayOTHours}h</p>
                   </div>
                 )}
+              </div>
             </div>
           </div>
         </div>
@@ -480,20 +474,30 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
             <div className="p-8 text-center text-slate-400 text-xs">Chưa có dữ liệu hôm nay.</div>
           ) : (
             <div className="flex flex-col">
-              {attendance.slice(0, 5).map((record, idx) => (
+              {attendance.slice(0, 8).map((record, idx) => (
                 <div key={record.id} className="flex items-center p-3 hover:bg-sky-50/50 rounded-2xl transition-colors">
                   <div className={`w-10 h-10 rounded-2xl flex items-center justify-center mr-3 ${
-                      record.type === AttendanceType.CHECK_IN ? 'bg-blue-100 text-blue-600' : 'bg-cyan-100 text-cyan-600'
+                      record.type === AttendanceType.CHECK_IN ? 'bg-blue-100 text-blue-600'
+                      : record.type === AttendanceType.LUNCH_OUT ? 'bg-orange-100 text-orange-600'
+                      : record.type === AttendanceType.LUNCH_IN ? 'bg-teal-100 text-teal-600'
+                      : 'bg-cyan-100 text-cyan-600'
                   }`}>
                       {record.type === AttendanceType.CHECK_IN ? (
                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v6m3-3H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                      ) : record.type === AttendanceType.LUNCH_OUT ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" /></svg>
+                      ) : record.type === AttendanceType.LUNCH_IN ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg>
                       ) : (
                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" /></svg>
                       )}
                   </div>
                   <div className="flex-1">
                     <p className="text-sm font-bold text-slate-700">
-                        {record.type === AttendanceType.CHECK_IN ? 'Vào ca' : 'Tan ca'}
+                        {record.type === AttendanceType.CHECK_IN ? 'Vào ca'
+                          : record.type === AttendanceType.LUNCH_OUT ? 'Bắt đầu nghỉ trưa'
+                          : record.type === AttendanceType.LUNCH_IN ? 'Kết thúc nghỉ trưa'
+                          : 'Tan ca'}
                     </p>
                     <p className="text-xs text-slate-400 font-medium">
                         {new Date(record.timestamp).toLocaleDateString('vi-VN')}

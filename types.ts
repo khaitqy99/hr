@@ -50,7 +50,11 @@ export interface User {
 
 export enum AttendanceType {
   CHECK_IN = 'CHECK_IN',
-  CHECK_OUT = 'CHECK_OUT'
+  CHECK_OUT = 'CHECK_OUT',
+  /** Bắt đầu nghỉ trưa */
+  LUNCH_OUT = 'LUNCH_OUT',
+  /** Kết thúc nghỉ trưa */
+  LUNCH_IN = 'LUNCH_IN'
 }
 
 export enum AttendanceStatus {
