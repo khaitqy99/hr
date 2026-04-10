@@ -31,9 +31,27 @@ function startTimePlus9Hours(startTime: string): string {
   return `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
 }
 
+type BulkShiftDraft = {
+  shift: ShiftTime;
+  startTime: string;
+  endTime: string;
+  offType: OffType | '';
+  reason: string;
+};
+
+const defaultBulkDraft = (): BulkShiftDraft => ({
+  shift: ShiftTime.CUSTOM,
+  startTime: '',
+  endTime: '',
+  offType: '',
+  reason: '',
+});
+
 const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
   const [shifts, setShifts] = useState<ShiftRegistration[]>([]);
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
+  const [multiSelectMode, setMultiSelectMode] = useState(false);
+  const [bulkDraft, setBulkDraft] = useState<BulkShiftDraft>(() => defaultBulkDraft());
   const [dateShifts, setDateShifts] = useState<Record<string, ShiftTime | null>>({});
   const [dateCustomTimes, setDateCustomTimes] = useState<Record<string, { startTime: string; endTime: string }>>({});
   const [dateOffTypes, setDateOffTypes] = useState<Record<string, OffType>>({});
@@ -43,6 +61,8 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [editingShiftId, setEditingShiftId] = useState<string | null>(null);
   const weekDaysRef = useRef<HTMLDivElement>(null);
+  const selectedDatesRef = useRef<string[]>([]);
+  const bulkDraftRef = useRef<BulkShiftDraft>(defaultBulkDraft());
   const [currentMonth, setCurrentMonth] = useState<Date>(() => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
@@ -79,6 +99,91 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
       };
     }
   }, [expandedDate]);
+
+  selectedDatesRef.current = selectedDates;
+  bulkDraftRef.current = bulkDraft;
+
+  const mergeBulkDraft = (prev: BulkShiftDraft, patch: Partial<BulkShiftDraft>): BulkShiftDraft => {
+    const next = { ...prev, ...patch };
+    if (patch.shift === ShiftTime.OFF) {
+      next.startTime = '';
+      next.endTime = '';
+    } else if (patch.startTime !== undefined && next.shift === ShiftTime.CUSTOM) {
+      next.endTime =
+        patch.endTime !== undefined ? patch.endTime : startTimePlus9Hours(patch.startTime);
+    }
+    return next;
+  };
+
+  /** Ghi bulk draft xuống từng ngày (dùng cho đăng ký hàng loạt cùng khung giờ). */
+  const flushBulkToDates = (draft: BulkShiftDraft, dates: string[]) => {
+    if (dates.length === 0) return;
+    setDateShifts(prev => {
+      const next = { ...prev };
+      for (const d of dates) next[d] = draft.shift;
+      return next;
+    });
+    setDateCustomTimes(prev => {
+      const next = { ...prev };
+      for (const d of dates) {
+        if (draft.shift === ShiftTime.OFF) delete next[d];
+        else
+          next[d] = {
+            startTime: draft.startTime,
+            endTime:
+              draft.endTime ||
+              (draft.startTime ? startTimePlus9Hours(draft.startTime) : ''),
+          };
+      }
+      return next;
+    });
+    setDateOffTypes(prev => {
+      const next = { ...prev };
+      for (const d of dates) {
+        if (draft.shift === ShiftTime.OFF) {
+          if (draft.offType) next[d] = draft.offType;
+        } else delete next[d];
+      }
+      return next;
+    });
+    setDateReasons(prev => {
+      const next = { ...prev };
+      for (const d of dates) next[d] = draft.reason;
+      return next;
+    });
+  };
+
+  const patchBulkDraft = (patch: Partial<BulkShiftDraft>) => {
+    const next = mergeBulkDraft(bulkDraftRef.current, patch);
+    bulkDraftRef.current = next;
+    setBulkDraft(next);
+    if (multiSelectMode && selectedDatesRef.current.length > 0) {
+      flushBulkToDates(next, selectedDatesRef.current);
+    }
+  };
+
+  const handleMultiModeChange = (enabled: boolean) => {
+    setMultiSelectMode(enabled);
+    setExpandedDate(null);
+    if (!enabled) return;
+    if (selectedDatesRef.current.length > 0) {
+      const first = selectedDatesRef.current[0];
+      const nextBulk: BulkShiftDraft = {
+        shift: dateShifts[first] ?? ShiftTime.CUSTOM,
+        startTime: dateCustomTimes[first]?.startTime ?? '',
+        endTime: dateCustomTimes[first]?.endTime ?? '',
+        offType: (dateOffTypes[first] as OffType | undefined) ?? '',
+        reason: dateReasons[first] ?? '',
+      };
+      bulkDraftRef.current = nextBulk;
+      setBulkDraft(nextBulk);
+      flushBulkToDates(nextBulk, selectedDatesRef.current);
+    } else {
+      const empty = defaultBulkDraft();
+      bulkDraftRef.current = empty;
+      setBulkDraft(empty);
+    }
+  };
 
   const loadShifts = async () => {
     const allShifts = await getShiftRegistrations(user.id);
@@ -149,6 +254,29 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
     const dateStr = toLocalDateStr(date);
     const registered = getRegisteredShift(date);
     const holiday = getHolidayForDate(date);
+
+    /** Chế độ chọn nhiều ngày: bấm để gạch/bỏ gạch, cùng khung giờ qua form bên dưới */
+    if (multiSelectMode && !registered) {
+      if (selectedDates.includes(dateStr)) {
+        removeDate(dateStr);
+        return;
+      }
+      const nextSel = [...selectedDates, dateStr].sort();
+      setSelectedDates(nextSel);
+      if (holiday) {
+        setDateShifts(prev => ({ ...prev, [dateStr]: ShiftTime.OFF }));
+        setDateOffTypes(prev => ({ ...prev, [dateStr]: OffType.LE }));
+        setDateCustomTimes(prev => {
+          const n = { ...prev };
+          delete n[dateStr];
+          return n;
+        });
+        setDateReasons(prev => ({ ...prev, [dateStr]: bulkDraftRef.current.reason }));
+      } else {
+        flushBulkToDates(bulkDraftRef.current, nextSel);
+      }
+      return;
+    }
 
     // Click vào ngày đã đăng ký → mở/đóng popup chi tiết
     if (registered) {
@@ -578,6 +706,9 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
         setDateOffTypes({});
         setDateReasons({});
         setExpandedDate(null);
+        const cleared = defaultBulkDraft();
+        bulkDraftRef.current = cleared;
+        setBulkDraft(cleared);
       }
     } catch (error: any) {
       console.error('Error registering shifts:', error);
@@ -591,8 +722,45 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
   return (
     <div className="space-y-6 fade-up">
       {/* Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-cyan-500 rounded-3xl p-6 text-white shadow-lg shadow-blue-200">
-        <h2 className="text-xl font-bold">Đăng ký ca làm</h2>
+      <div className="bg-gradient-to-r from-blue-600 to-cyan-500 rounded-3xl p-5 sm:p-6 text-white shadow-lg shadow-blue-200">
+        <div className="flex flex-row items-center gap-2 sm:gap-3 min-w-0">
+          <h2 className="text-xl font-bold min-w-0 flex-1 truncate">Đăng ký ca làm</h2>
+          <div
+            className="flex items-center gap-2 px-2 py-1 rounded-xl bg-white/15 border border-white/25 shrink-0"
+            title="Một: chọn từng ngày như cũ. Nhiều: gạch nhiều ô, một khung giờ chung ở form bên dưới."
+          >
+            <div
+              className="flex rounded-lg p-0.5 bg-black/20 ring-1 ring-inset ring-white/10"
+              role="group"
+              aria-label="Kiểu chọn ngày đăng ký ca"
+            >
+              <button
+                type="button"
+                aria-pressed={!multiSelectMode}
+                onClick={() => handleMultiModeChange(false)}
+                className={`px-2.5 py-1 rounded-md text-[10px] font-bold leading-none transition-colors min-h-0 min-w-0 ${
+                  !multiSelectMode
+                    ? 'bg-white text-blue-700 shadow-sm'
+                    : 'text-white/90 hover:bg-white/10 active:bg-white/15'
+                }`}
+              >
+                Một
+              </button>
+              <button
+                type="button"
+                aria-pressed={multiSelectMode}
+                onClick={() => handleMultiModeChange(true)}
+                className={`px-2.5 py-1 rounded-md text-[10px] font-bold leading-none transition-colors min-h-0 min-w-0 ${
+                  multiSelectMode
+                    ? 'bg-white text-blue-700 shadow-sm'
+                    : 'text-white/90 hover:bg-white/10 active:bg-white/15'
+                }`}
+              >
+                Nhiều
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Registration Form */}
@@ -643,6 +811,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                     const registeredShift = getRegisteredShift(date);
                     const isExpanded = expandedDate === dateStr;
                     const isRegistered = registeredShift !== null;
+                    const showDayPopup = isExpanded && !(multiSelectMode && !isRegistered);
                     const holiday = getHolidayForDate(date);
                     
                     // Kiểm tra xem ngày có thuộc tháng hiện tại không
@@ -742,7 +911,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                                 )}
                             </button>
                             
-                            {isExpanded && (
+                            {showDayPopup && (
                                 <div className={`absolute top-full ${getMenuPosition()} mt-2 z-50 bg-white rounded-2xl shadow-lg shadow-blue-200/30 border border-sky-100 p-4 w-[260px]`}>
                                     <div className="space-y-3">
                                         {isRegistered && registeredShift ? (
@@ -1038,6 +1207,83 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                     );
                 })}
             </div>
+
+            {multiSelectMode && selectedDates.length > 0 && (
+              <div className="mt-3 rounded-2xl border border-blue-200 bg-gradient-to-b from-blue-50/90 to-white p-4 space-y-3 shadow-sm">
+                <p className="text-xs font-bold text-blue-900">
+                  Ca chung cho {selectedDates.length} ngày đã chọn
+                </p>
+                <div className="flex gap-1 p-0.5 rounded-lg bg-sky-50 border border-sky-100">
+                  <button
+                    type="button"
+                    onClick={() => patchBulkDraft({ shift: ShiftTime.CUSTOM })}
+                    className={`flex-1 py-1.5 rounded-md text-[9px] font-bold transition-all ${
+                      bulkDraft.shift === ShiftTime.CUSTOM
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'text-slate-600 hover:bg-white/80'
+                    }`}
+                  >
+                    Ca làm
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => patchBulkDraft({ shift: ShiftTime.OFF })}
+                    className={`flex-1 py-1.5 rounded-md text-[9px] font-bold transition-all ${
+                      bulkDraft.shift === ShiftTime.OFF
+                        ? 'bg-slate-600 text-white shadow-sm'
+                        : 'text-slate-600 hover:bg-white/80'
+                    }`}
+                  >
+                    Ngày off
+                  </button>
+                </div>
+                {bulkDraft.shift === ShiftTime.OFF ? (
+                  <div>
+                    <p className="text-[11px] text-slate-600 font-medium mb-1.5">Loại off</p>
+                    <CustomSelect
+                      options={Object.entries(OFF_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
+                      value={bulkDraft.offType || ''}
+                      onChange={(v) => patchBulkDraft({ offType: v as OffType })}
+                      placeholder="Chọn loại off"
+                    />
+                  </div>
+                ) : (
+                  <div className="flex items-end gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] text-slate-600 font-medium mb-1.5">Giờ vào</p>
+                      <CustomSelect
+                        options={TIME_OPTIONS.map((t) => ({ value: t, label: t }))}
+                        value={bulkDraft.startTime}
+                        onChange={(v) => patchBulkDraft({ startTime: v })}
+                        placeholder="Chọn giờ"
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] text-slate-600 font-medium mb-1.5">Giờ ra</p>
+                      <CustomSelect
+                        options={TIME_OPTIONS.map((t) => ({ value: t, label: t }))}
+                        value={
+                          bulkDraft.endTime ||
+                          (bulkDraft.startTime ? startTimePlus9Hours(bulkDraft.startTime) : '')
+                        }
+                        onChange={(v) => patchBulkDraft({ endTime: v })}
+                        placeholder="Chọn giờ"
+                      />
+                    </div>
+                  </div>
+                )}
+                <div>
+                  <p className="text-[11px] text-slate-600 font-medium mb-1.5">Lý do (tùy chọn, áp dụng mọi ngày đã chọn)</p>
+                  <textarea
+                    value={bulkDraft.reason}
+                    onChange={(e) => patchBulkDraft({ reason: e.target.value })}
+                    placeholder="Ví dụ: Làm cùng khung giờ cả tuần..."
+                    className="w-full rounded-lg border border-slate-200 px-2.5 py-2 text-[11px] text-slate-700 placeholder:text-slate-400 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    rows={2}
+                  />
+                </div>
+              </div>
+            )}
             
             {selectedDates.length > 0 && (
                 <div className="mt-2 pt-3 border-t border-slate-100">

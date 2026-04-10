@@ -111,7 +111,7 @@ const CustomSelect: React.FC<CustomSelectProps> = ({
             width: position.width,
             zIndex: 9999, // Ensure it sits on top of modals
           }}
-          className={`max-h-48 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg py-1 ${listClassName}`}
+          className={`max-h-72 sm:max-h-80 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg py-1 ${listClassName}`}
           role="listbox"
         >
           {options.map((opt) => (
@@ -124,7 +124,7 @@ const CustomSelect: React.FC<CustomSelectProps> = ({
                 onChange(opt.value);
                 setIsOpen(false);
               }}
-              className={`w-full px-3 py-2.5 text-left text-xs font-medium transition-colors ${opt.value === value
+              className={`w-full px-3 py-3 text-left text-xs font-medium transition-colors ${opt.value === value
                   ? 'bg-blue-50 text-blue-700'
                   : 'text-slate-700 hover:bg-slate-50'
                 }`}
