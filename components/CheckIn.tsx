@@ -49,6 +49,30 @@ interface CheckInProps {
   user: User;
 }
 
+type CheckStep = 'CHECK_IN' | 'LUNCH_OUT' | 'LUNCH_IN' | 'CHECK_OUT';
+
+function attendanceTypeForStep(step: CheckStep): AttendanceType {
+  switch (step) {
+    case 'CHECK_IN': return AttendanceType.CHECK_IN;
+    case 'LUNCH_OUT': return AttendanceType.LUNCH_OUT;
+    case 'LUNCH_IN': return AttendanceType.LUNCH_IN;
+    case 'CHECK_OUT': return AttendanceType.CHECK_OUT;
+  }
+}
+
+function canPerformStep(
+  step: CheckStep,
+  checkIn: AttendanceRecord | null,
+  lunchOut: AttendanceRecord | null,
+  lunchIn: AttendanceRecord | null,
+  checkOut: AttendanceRecord | null,
+): boolean {
+  if (step === 'CHECK_IN') return !checkIn;
+  if (step === 'LUNCH_OUT') return !!checkIn && !lunchOut;
+  if (step === 'LUNCH_IN') return !!lunchOut && !lunchIn;
+  return !!lunchIn && !checkOut;
+}
+
 const CheckIn: React.FC<CheckInProps> = ({ user }) => {
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [distance, setDistance] = useState<number | null>(null);
@@ -64,6 +88,7 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
   const [todayLunchIn, setTodayLunchIn] = useState<AttendanceRecord | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [selectedStep, setSelectedStep] = useState<CheckStep>('CHECK_IN');
 
   const loadAttendance = useCallback(async () => {
     const records = await getAttendance(user.id);
@@ -309,12 +334,25 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
   };
 
   // Thứ tự trong ngày: vào ca → bắt đầu nghỉ trưa → kết thúc nghỉ trưa → ra ca
-  const nextAction: 'CHECK_IN' | 'LUNCH_OUT' | 'LUNCH_IN' | 'CHECK_OUT' | 'DONE' =
+  const nextAction: CheckStep | 'DONE' =
     !todayCheckIn ? 'CHECK_IN'
     : !todayLunchOut ? 'LUNCH_OUT'
     : !todayLunchIn ? 'LUNCH_IN'
     : !todayCheckOut ? 'CHECK_OUT'
     : 'DONE';
+
+  useEffect(() => {
+    if (nextAction !== 'DONE') setSelectedStep(nextAction);
+  }, [nextAction]);
+
+  const canPerformSelected = canPerformStep(
+    selectedStep,
+    todayCheckIn,
+    todayLunchOut,
+    todayLunchIn,
+    todayCheckOut,
+  );
+
   const isWithinRange = nearestLocation !== null && distance !== null && distance <= nearestLocation.radiusMeters;
   const canAction = isWithinRange || !navigator.onLine;
 
@@ -342,18 +380,19 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
     : nextAction === 'LUNCH_IN' ? 'Bạn cần chấm kết thúc nghỉ trưa'
     : nextAction === 'CHECK_OUT' ? 'Bạn cần chấm công ra ca'
     : 'Bạn đã chấm công đủ hôm nay';
-  const mainButtonTitle =
-    nextAction === 'CHECK_IN' ? 'Chấm công vào'
-    : nextAction === 'LUNCH_OUT' ? 'Bắt đầu nghỉ trưa'
-    : nextAction === 'LUNCH_IN' ? 'Kết thúc nghỉ trưa'
-    : nextAction === 'CHECK_OUT' ? 'Chấm công ra'
-    : 'Hoàn tất hôm nay';
-  const mainButtonLabel =
-    nextAction === 'CHECK_IN' ? 'Xác nhận vào'
-    : nextAction === 'LUNCH_OUT' ? 'Xác nhận bắt đầu nghỉ trưa'
-    : nextAction === 'LUNCH_IN' ? 'Xác nhận kết thúc nghỉ trưa'
-    : nextAction === 'CHECK_OUT' ? 'Xác nhận ra ca'
-    : 'Đã hoàn tất';
+  const doneForDay = nextAction === 'DONE';
+  const mainButtonTitle = doneForDay
+    ? 'Đã hoàn tất hôm nay'
+    : selectedStep === 'CHECK_IN' ? 'Chấm công vào'
+    : selectedStep === 'LUNCH_OUT' ? 'Bắt đầu nghỉ trưa'
+    : selectedStep === 'LUNCH_IN' ? 'Kết thúc nghỉ trưa'
+    : 'Chấm công ra';
+  const mainButtonLabel = doneForDay
+    ? 'Đã hoàn tất'
+    : selectedStep === 'CHECK_IN' ? 'Xác nhận vào'
+    : selectedStep === 'LUNCH_OUT' ? 'Xác nhận bắt đầu nghỉ trưa'
+    : selectedStep === 'LUNCH_IN' ? 'Xác nhận kết thúc nghỉ trưa'
+    : 'Xác nhận ra ca';
 
   return (
     <div className="flex flex-col h-full pt-4 pb-2 fade-up space-y-4">
@@ -427,12 +466,22 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
         <div>
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Hành động tiếp theo</p>
           <p className={`font-bold ${actionTitleClass}`}>{actionHintText}</p>
+          {nextAction !== 'DONE' && !canPerformSelected && (
+            <p className="text-xs text-slate-500 mt-1">Chọn đúng ô đang đến lượt (theo thứ tự) để xác nhận bên dưới.</p>
+          )}
         </div>
       </div>
 
-      {/* Hôm nay: vào ca / bắt đầu–kết thúc nghỉ trưa / ra ca */}
-      <div className="grid grid-cols-2 gap-3 px-2">
-        <div className="bg-white rounded-2xl p-3 shadow-sm border border-sky-50 flex items-center gap-2">
+      {/* Hôm nay: chọn ô → nút lớn chấm đúng loại đã chọn */}
+      <div className="grid grid-cols-2 gap-3 px-2" role="group" aria-label="Chọn loại chấm công">
+        <button
+          type="button"
+          onClick={() => setSelectedStep('CHECK_IN')}
+          aria-pressed={selectedStep === 'CHECK_IN'}
+          className={`text-left bg-white rounded-2xl p-3 shadow-sm border flex items-center gap-2 transition-all active:scale-[0.98] ${
+            selectedStep === 'CHECK_IN' ? 'ring-2 ring-blue-500 border-blue-200 shadow-md' : 'border-sky-50 hover:border-sky-200'
+          }`}
+        >
           <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v6m3-3H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           </div>
@@ -442,8 +491,15 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
               {todayCheckIn ? new Date(todayCheckIn.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '--:--'}
             </p>
           </div>
-        </div>
-        <div className="bg-white rounded-2xl p-3 shadow-sm border border-sky-50 flex items-center gap-2">
+        </button>
+        <button
+          type="button"
+          onClick={() => setSelectedStep('LUNCH_OUT')}
+          aria-pressed={selectedStep === 'LUNCH_OUT'}
+          className={`text-left bg-white rounded-2xl p-3 shadow-sm border flex items-center gap-2 transition-all active:scale-[0.98] ${
+            selectedStep === 'LUNCH_OUT' ? 'ring-2 ring-orange-500 border-orange-200 shadow-md' : 'border-sky-50 hover:border-sky-200'
+          }`}
+        >
           <div className="w-9 h-9 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center flex-shrink-0">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" /></svg>
           </div>
@@ -453,8 +509,15 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
               {todayLunchOut ? new Date(todayLunchOut.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '--:--'}
             </p>
           </div>
-        </div>
-        <div className="bg-white rounded-2xl p-3 shadow-sm border border-sky-50 flex items-center gap-2">
+        </button>
+        <button
+          type="button"
+          onClick={() => setSelectedStep('LUNCH_IN')}
+          aria-pressed={selectedStep === 'LUNCH_IN'}
+          className={`text-left bg-white rounded-2xl p-3 shadow-sm border flex items-center gap-2 transition-all active:scale-[0.98] ${
+            selectedStep === 'LUNCH_IN' ? 'ring-2 ring-teal-500 border-teal-200 shadow-md' : 'border-sky-50 hover:border-sky-200'
+          }`}
+        >
           <div className="w-9 h-9 rounded-xl bg-teal-100 text-teal-600 flex items-center justify-center flex-shrink-0">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg>
           </div>
@@ -464,8 +527,15 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
               {todayLunchIn ? new Date(todayLunchIn.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '--:--'}
             </p>
           </div>
-        </div>
-        <div className="bg-white rounded-2xl p-3 shadow-sm border border-sky-50 flex items-center gap-2">
+        </button>
+        <button
+          type="button"
+          onClick={() => setSelectedStep('CHECK_OUT')}
+          aria-pressed={selectedStep === 'CHECK_OUT'}
+          className={`text-left bg-white rounded-2xl p-3 shadow-sm border flex items-center gap-2 transition-all active:scale-[0.98] ${
+            selectedStep === 'CHECK_OUT' ? 'ring-2 ring-cyan-500 border-cyan-200 shadow-md' : 'border-sky-50 hover:border-sky-200'
+          }`}
+        >
           <div className="w-9 h-9 rounded-xl bg-cyan-100 text-cyan-600 flex items-center justify-center flex-shrink-0">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" /></svg>
           </div>
@@ -475,7 +545,7 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
               {todayCheckOut ? new Date(todayCheckOut.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '--:--'}
             </p>
           </div>
-        </div>
+        </button>
       </div>
 
       {/* Check-in/Check-out Button Card */}
@@ -488,12 +558,12 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
         <div className="flex flex-col items-center gap-6">
           <div className="w-32 h-32 rounded-full border-4 border-white bg-white/20 backdrop-blur-md flex items-center justify-center shadow-2xl">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-16 h-16 text-white">
-              {nextAction === 'CHECK_IN' || nextAction === 'LUNCH_IN' ? (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
-              ) : nextAction === 'CHECK_OUT' || nextAction === 'LUNCH_OUT' ? (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9v-3m-3 3V9m3 3v3" />
-              ) : (
+              {doneForDay ? (
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              ) : selectedStep === 'CHECK_IN' || selectedStep === 'LUNCH_IN' ? (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9v-3m-3 3V9m3 3v3" />
               )}
             </svg>
           </div>
@@ -508,14 +578,12 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
           <button
             type="button"
             onClick={() => {
-              if (nextAction === 'CHECK_IN') return handleAttendance(AttendanceType.CHECK_IN);
-              if (nextAction === 'LUNCH_OUT') return handleAttendance(AttendanceType.LUNCH_OUT);
-              if (nextAction === 'LUNCH_IN') return handleAttendance(AttendanceType.LUNCH_IN);
-              if (nextAction === 'CHECK_OUT') return handleAttendance(AttendanceType.CHECK_OUT);
+              if (!canPerformSelected) return;
+              return handleAttendance(attendanceTypeForStep(selectedStep));
             }}
-            disabled={nextAction === 'DONE' || loading || (!canAction && navigator.onLine)}
+            disabled={!canPerformSelected || loading || (!canAction && navigator.onLine)}
             className={`h-14 px-10 rounded-full font-bold shadow-lg flex items-center space-x-3 transition-all active:scale-95 ${
-              nextAction === 'DONE' || loading || (!canAction && navigator.onLine)
+              !canPerformSelected || loading || (!canAction && navigator.onLine)
                 ? 'bg-slate-400 text-slate-200 cursor-not-allowed'
                 : 'bg-white text-blue-600 hover:bg-blue-50'
             }`}
@@ -531,7 +599,7 @@ const CheckIn: React.FC<CheckInProps> = ({ user }) => {
             ) : (
               <>
                 <span>{mainButtonLabel}</span>
-                {nextAction !== 'DONE' && (
+                {canPerformSelected && (
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                   </svg>
