@@ -70,7 +70,8 @@ function canPerformStep(
   if (step === 'CHECK_IN') return !checkIn;
   if (step === 'LUNCH_OUT') return !!checkIn && !lunchOut;
   if (step === 'LUNCH_IN') return !!lunchOut && !lunchIn;
-  return !!lunchIn && !checkOut;
+  // Cho phép ra ca ngay sau khi đã vào ca (nghỉ trưa là tùy chọn).
+  return !!checkIn && !checkOut;
 }
 
 const CheckIn: React.FC<CheckInProps> = ({ user }) => {
