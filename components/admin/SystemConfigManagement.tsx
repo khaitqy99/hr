@@ -53,6 +53,12 @@ const DEFAULT_SYSTEM_CONFIGS = [
     value: '1.5',
     description: 'Hệ số tăng ca',
     category: 'PAYROLL'
+  },
+  {
+    key: 'annual_leave_days_per_year',
+    value: '12',
+    description: 'Số ngày phép năm tiêu chuẩn/năm',
+    category: 'PAYROLL'
   }
 ];
 

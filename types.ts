@@ -162,6 +162,14 @@ export interface PayrollRecord {
   noLunchBreakDates?: number[];
 }
 
+export interface AnnualLeaveSummary {
+  year: number;
+  entitlementDays: number;
+  usedDays: number;
+  pendingDays: number;
+  remainingDays: number;
+}
+
 export interface Notification {
   id: string;
   userId: string;

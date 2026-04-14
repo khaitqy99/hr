@@ -10,6 +10,43 @@ interface EmployeeProfileProps {
 }
 
 const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUser, onBack, setView }) => {
+  const formatDateForInput = (timestamp?: number): string => {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return '';
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  };
+
+  const parseDisplayDateToTimestamp = (value: string): number | undefined => {
+    const raw = value.trim();
+    if (!raw) return undefined;
+    const match = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (!match) return undefined;
+    const day = Number(match[1]);
+    const month = Number(match[2]);
+    const year = Number(match[3]);
+    const date = new Date(year, month - 1, day);
+    if (
+      Number.isNaN(date.getTime()) ||
+      date.getFullYear() !== year ||
+      date.getMonth() !== month - 1 ||
+      date.getDate() !== day
+    ) {
+      return undefined;
+    }
+    return date.getTime();
+  };
+
+  const maskDateInput = (value: string): string => {
+    const digits = value.replace(/\D/g, '').slice(0, 8);
+    if (digits.length <= 2) return digits;
+    if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+    return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+  };
+
   const [employee, setEmployee] = useState<User | null>(null);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -54,7 +91,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
           socialInsuranceSalary: found.socialInsuranceSalary ?? '',
           traineeSalary: found.traineeSalary ?? '',
         contractType: found.contractType ?? ContractType.OFFICIAL,
-        startDate: found.startDate ? new Date(found.startDate).toISOString().split('T')[0] : '',
+        startDate: formatDateForInput(found.startDate),
         status: found.status ?? EmployeeStatus.ACTIVE,
         role: found.role,
       });
@@ -73,7 +110,11 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
     const gross = typeof editForm.grossSalary === 'number' ? editForm.grossSalary : (editForm.grossSalary === '' ? undefined : Number(String(editForm.grossSalary).replace(/\D/g, '')));
     const bhxh = typeof editForm.socialInsuranceSalary === 'number' ? editForm.socialInsuranceSalary : (editForm.socialInsuranceSalary === '' ? undefined : Number(String(editForm.socialInsuranceSalary).replace(/\D/g, '')));
     const trainee = typeof editForm.traineeSalary === 'number' ? editForm.traineeSalary : (editForm.traineeSalary === '' ? undefined : Number(String(editForm.traineeSalary).replace(/\D/g, '')));
-    const startDate = editForm.startDate ? new Date(editForm.startDate).getTime() : undefined;
+    const startDate = parseDisplayDateToTimestamp(editForm.startDate);
+    if (editForm.startDate && startDate === undefined) {
+      setEditFormError('Ngày vào làm không hợp lệ. Vui lòng nhập theo định dạng dd/mm/yyyy');
+      return;
+    }
     try {
       await updateUser(employee.id, {
         name: editForm.name.trim(),
@@ -482,7 +523,14 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-bold text-slate-500 mb-1">Ngày vào làm</label>
-                      <input type="date" value={editForm.startDate} onChange={e => setEditForm(f => ({ ...f, startDate: e.target.value }))} className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm" />
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="dd/mm/yyyy"
+                        value={editForm.startDate}
+                        onChange={e => setEditForm(f => ({ ...f, startDate: maskDateInput(e.target.value) }))}
+                        className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm"
+                      />
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-500 mb-1">Vai trò</label>
@@ -509,7 +557,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                           socialInsuranceSalary: employee.socialInsuranceSalary ?? '',
                           traineeSalary: employee.traineeSalary ?? '',
                           contractType: employee.contractType ?? ContractType.OFFICIAL,
-                          startDate: employee.startDate ? new Date(employee.startDate).toISOString().split('T')[0] : '',
+                          startDate: formatDateForInput(employee.startDate),
                           status: employee.status ?? EmployeeStatus.ACTIVE,
                           role: employee.role,
                         });

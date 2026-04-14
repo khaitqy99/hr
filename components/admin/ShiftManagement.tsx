@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { ShiftRegistration, RequestStatus, User, UserRole, ShiftTime, OFF_TYPE_LABELS, Holiday, Department, OffType, EmployeeStatus, Branch } from '../../types';
-import { getShiftRegistrations, updateShiftStatus, updateShiftRegistration, registerShift, getAllUsers, getHolidays, getDepartments, getBranches } from '../../services/db';
+import { ShiftRegistration, RequestStatus, User, UserRole, ShiftTime, OFF_TYPE_LABELS, Holiday, Department, OffType, EmployeeStatus, Branch, AnnualLeaveSummary } from '../../types';
+import { getShiftRegistrations, updateShiftStatus, updateShiftRegistration, registerShift, getAllUsers, getHolidays, getDepartments, getBranches, getAnnualLeaveSummary } from '../../services/db';
 import { exportToCSV } from '../../utils/export';
 import CustomSelect from '../CustomSelect';
 
@@ -72,6 +72,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
   const [branchFilter, setBranchFilter] = useState<string>('');
   const [searchName, setSearchName] = useState('');
   const [loading, setLoading] = useState(true);
+  const [annualLeaveByUser, setAnnualLeaveByUser] = useState<Record<string, AnnualLeaveSummary>>({});
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [rejectTarget, setRejectTarget] = useState<RejectTarget | null>(null);
@@ -168,6 +169,9 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       companyHoliday: 'Ngày lễ công ty',
       localHoliday: 'Ngày lễ địa phương',
       recurringYearly: 'Lặp lại hàng năm',
+      annualLeave: 'Phép năm',
+      annualLeaveRemaining: 'Còn',
+      annualLeaveUsed: 'Đã dùng',
     },
     en: {
       week: 'Week',
@@ -247,6 +251,9 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       companyHoliday: 'Company Holiday',
       localHoliday: 'Local Holiday',
       recurringYearly: 'Recurring Yearly',
+      annualLeave: 'Annual Leave',
+      annualLeaveRemaining: 'Remaining',
+      annualLeaveUsed: 'Used',
     }
   };
 
@@ -273,9 +280,22 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
         getAllUsers(),
         getBranches(),
       ]);
+      const currentYear = new Date().getFullYear();
+      const activeUsers = users.filter(u => u.status !== EmployeeStatus.LEFT);
+      const leaveSummaries = await Promise.all(
+        activeUsers.map(async user => ({
+          userId: user.id,
+          summary: await getAnnualLeaveSummary(user.id, currentYear),
+        }))
+      );
+      const summaryMap: Record<string, AnnualLeaveSummary> = {};
+      leaveSummaries.forEach(item => {
+        summaryMap[item.userId] = item.summary;
+      });
       setShiftRequests(shifts);
       setEmployees(users);
       setBranches(branchesData.filter(b => b.isActive));
+      setAnnualLeaveByUser(summaryMap);
     } catch (e) {
       setMessage({ type: 'error', text: text.loadFailed });
     } finally {
@@ -845,6 +865,16 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                           </button>
                         ) : (
                           <span className="text-sm font-medium text-slate-800">{emp.name}</span>
+                        )}
+                        {annualLeaveByUser[emp.id] && (
+                          <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
+                            <span className="rounded-md bg-blue-50 px-1.5 py-0.5 font-semibold text-blue-700">
+                              {text.annualLeave}: {annualLeaveByUser[emp.id].entitlementDays}
+                            </span>
+                            <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 font-semibold text-emerald-700">
+                              {text.annualLeaveRemaining}: {annualLeaveByUser[emp.id].remainingDays}
+                            </span>
+                          </div>
                         )}
                       </td>
                       <td className="px-2 py-2 border-r border-b border-slate-200">

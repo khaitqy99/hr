@@ -1,4 +1,4 @@
-import { User, UserRole, AttendanceRecord, LeaveRequest, Notification, RequestStatus, LeaveType, ShiftRegistration, PayrollRecord, ContractType, EmployeeStatus, AttendanceType, Department, Holiday, SystemConfig, OffType, ShiftTime, Branch, AllowedLocation } from '../types';
+import { User, UserRole, AttendanceRecord, LeaveRequest, Notification, RequestStatus, LeaveType, ShiftRegistration, PayrollRecord, ContractType, EmployeeStatus, AttendanceType, Department, Holiday, SystemConfig, OffType, ShiftTime, Branch, AllowedLocation, AnnualLeaveSummary } from '../types';
 import { supabase } from './supabase';
 import { emitUserEvent, emitAttendanceEvent, emitShiftEvent, emitPayrollEvent, emitDepartmentEvent, emitHolidayEvent, emitConfigEvent, emitNotificationEvent } from './events';
 
@@ -641,6 +641,82 @@ export const calculateLeaveDays = async (userId: string, month: string): Promise
     });
 
   return leaveDaysSet.size;
+};
+
+const toLocalDateKey = (timestamp: number): string => {
+  const date = new Date(timestamp);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
+
+const countOffPnDays = (shifts: ShiftRegistration[], year: number, status?: RequestStatus): number => {
+  const daySet = new Set<string>();
+  shifts.forEach(shift => {
+    if (shift.shift !== ShiftTime.OFF || shift.offType !== OffType.OFF_PN) return;
+    if (status && shift.status !== status) return;
+    const shiftDate = new Date(shift.date);
+    if (shiftDate.getFullYear() !== year) return;
+    daySet.add(toLocalDateKey(shift.date));
+  });
+  return daySet.size;
+};
+
+const calculateAnnualLeaveEntitlement = (
+  annualLeaveDaysPerYear: number,
+  startDate: number | undefined,
+  year: number
+): number => {
+  const maxDaysPerYear = annualLeaveDaysPerYear > 0 ? annualLeaveDaysPerYear : 12;
+  if (!startDate) return maxDaysPerYear;
+  // Hỗ trợ cả timestamp giây và mili-giây để tránh sai năm vào làm.
+  const normalizedStartDate = startDate < 1e12 ? startDate * 1000 : startDate;
+  const joinedDate = new Date(normalizedStartDate);
+  if (Number.isNaN(joinedDate.getTime())) return maxDaysPerYear;
+  const joinedYear = joinedDate.getFullYear();
+  const joinedMonth = joinedDate.getMonth(); // 0-11
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth(); // 0-11
+
+  // Chưa tới năm mục tiêu thì chưa có phép.
+  if (year > currentYear) return 0;
+  // Nhân sự vào sau năm mục tiêu thì chưa có phép trong năm đó.
+  if (joinedYear > year) return 0;
+
+  // Mốc bắt đầu tích lũy trong năm mục tiêu:
+  // - Nếu cùng năm vào làm: từ tháng vào làm (tháng ký HĐLĐ có luôn 1 ngày phép)
+  // - Nếu vào trước đó: từ tháng 1.
+  const accrualStartMonth = joinedYear === year ? joinedMonth : 0;
+  // Mốc kết thúc tích lũy:
+  // - Năm hiện tại: tới tháng hiện tại
+  // - Năm quá khứ: tới tháng 12
+  const accrualEndMonth = year === currentYear ? currentMonth : 11;
+
+  if (accrualEndMonth < accrualStartMonth) return 0;
+
+  // Mỗi tháng +1 ngày phép.
+  const accruedDays = accrualEndMonth - accrualStartMonth + 1;
+  return Math.min(maxDaysPerYear, accruedDays);
+};
+
+export const getAnnualLeaveSummary = async (userId: string, year: number = new Date().getFullYear()): Promise<AnnualLeaveSummary> => {
+  const [users, shifts, annualLeaveDaysPerYear] = await Promise.all([
+    getAllUsers(),
+    getShiftRegistrations(userId),
+    getConfigNumber('annual_leave_days_per_year', 12),
+  ]);
+
+  const user = users.find(u => u.id === userId);
+  const entitlementDays = calculateAnnualLeaveEntitlement(annualLeaveDaysPerYear, user?.startDate, year);
+  const usedDays = countOffPnDays(shifts, year, RequestStatus.APPROVED);
+  const pendingDays = countOffPnDays(shifts, year, RequestStatus.PENDING);
+
+  return {
+    year,
+    entitlementDays,
+    usedDays,
+    pendingDays,
+    remainingDays: Number(Math.max(0, entitlementDays - usedDays).toFixed(2)),
+  };
 };
 
 // Helper: Tính số ngày làm việc từ shift registrations trong tháng

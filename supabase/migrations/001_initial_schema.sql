@@ -314,5 +314,6 @@ VALUES
   (uuid_generate_v4(), 'work_hours_per_day', '8', 'Số giờ làm việc mỗi ngày', 'ATTENDANCE', EXTRACT(EPOCH FROM NOW())::BIGINT),
   (uuid_generate_v4(), 'standard_work_days', '27', 'Số ngày công tiêu chuẩn mỗi tháng', 'PAYROLL', EXTRACT(EPOCH FROM NOW())::BIGINT),
   (uuid_generate_v4(), 'social_insurance_rate', '10.5', 'Tỷ lệ khấu trừ BHXH (%)', 'PAYROLL', EXTRACT(EPOCH FROM NOW())::BIGINT),
-  (uuid_generate_v4(), 'overtime_rate', '1.5', 'Hệ số tính lương làm thêm giờ', 'PAYROLL', EXTRACT(EPOCH FROM NOW())::BIGINT)
+  (uuid_generate_v4(), 'overtime_rate', '1.5', 'Hệ số tính lương làm thêm giờ', 'PAYROLL', EXTRACT(EPOCH FROM NOW())::BIGINT),
+  (uuid_generate_v4(), 'annual_leave_days_per_year', '12', 'Số ngày phép năm tiêu chuẩn/năm', 'PAYROLL', EXTRACT(EPOCH FROM NOW())::BIGINT)
 ON CONFLICT (key) DO NOTHING;
