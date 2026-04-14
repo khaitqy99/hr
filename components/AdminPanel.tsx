@@ -56,6 +56,7 @@ const DEFAULT_TAB: Tab = 'USERS';
 
 /** Lưu ngôn ngữ admin: khi rời admin (tab NV, hồ sơ, reload) AdminPanel unmount — không persist thì quay lại mặc định EN */
 const ADMIN_PANEL_LANGUAGE_KEY = 'hr_connect_admin_language';
+const ADMIN_PANEL_SIDEBAR_COLLAPSED_KEY = 'hr_connect_admin_sidebar_collapsed';
 
 function readStoredAdminLanguage(): 'vi' | 'en' {
   try {
@@ -67,10 +68,19 @@ function readStoredAdminLanguage(): 'vi' | 'en' {
   return 'en';
 }
 
+function readStoredSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(ADMIN_PANEL_SIDEBAR_COLLAPSED_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
 const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmployeeId, onLogout, initialTab, onTabChange }) => {
   const tabFromUrl = (initialTab && PATH_TO_TAB[initialTab]) ? PATH_TO_TAB[initialTab] : DEFAULT_TAB;
   const [activeTab, setActiveTab] = useState<Tab>(tabFromUrl);
   const [language, setLanguage] = useState<'vi' | 'en'>(readStoredAdminLanguage);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(readStoredSidebarCollapsed);
 
   useEffect(() => {
     try {
@@ -79,6 +89,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
       /* ignore */
     }
   }, [language]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ADMIN_PANEL_SIDEBAR_COLLAPSED_KEY, String(isSidebarCollapsed));
+    } catch {
+      /* ignore */
+    }
+  }, [isSidebarCollapsed]);
 
   // Đồng bộ tab khi URL thay đổi (back/forward)
   React.useEffect(() => {
@@ -222,18 +240,31 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
   return (
     <div className="flex h-screen bg-slate-50">
       {/* Sidebar */}
-      <div className="bg-white border-r border-slate-200 flex flex-col shrink-0 w-52">
-        <div className="h-[56px] border-b border-slate-200 flex items-center shrink-0 px-4 gap-2.5">
+      <div className={`bg-white border-r border-slate-200 flex flex-col shrink-0 transition-all duration-200 ${isSidebarCollapsed ? 'w-16' : 'w-52'}`}>
+        <div className={`relative h-[56px] border-b border-slate-200 flex items-center shrink-0 ${isSidebarCollapsed ? 'px-2 justify-center' : 'px-4'} gap-2.5`}>
           <img src="/logo.png" alt="Y99 HR Logo" className="h-7 w-7 object-contain flex-shrink-0" />
-          <div className="flex flex-col justify-center min-w-0">
-            <h1 className="text-base font-bold text-slate-800 leading-tight">Y99 HR</h1>
-            <p className="text-[10px] text-slate-500 mt-0.5 leading-tight">Quản trị hệ thống</p>
-          </div>
+          {!isSidebarCollapsed && (
+            <div className="flex flex-col justify-center min-w-0">
+              <h1 className="text-base font-bold text-slate-800 leading-tight">Y99 HR</h1>
+              <p className="text-[10px] text-slate-500 mt-0.5 leading-tight">Quản trị hệ thống</p>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setIsSidebarCollapsed(prev => !prev)}
+            className={`${isSidebarCollapsed ? 'absolute top-3 right-2' : 'ml-auto'} p-1.5 rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-700`}
+            title={isSidebarCollapsed ? 'Mở rộng menu' : 'Thu gọn menu'}
+            aria-label={isSidebarCollapsed ? 'Mở rộng menu' : 'Thu gọn menu'}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className={`w-4 h-4 transition-transform ${isSidebarCollapsed ? 'rotate-180' : ''}`}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12l7.5-7.5M21 19.5L13.5 12 21 4.5" />
+            </svg>
+          </button>
         </div>
         <nav className="flex-1 p-2 space-y-1 overflow-y-auto overflow-x-hidden">
           {/* Main Management */}
           <div className="mb-4">
-            <p className="text-xs font-bold text-slate-400 uppercase mb-2 px-4">Quản lý</p>
+            {!isSidebarCollapsed && <p className="text-xs font-bold text-slate-400 uppercase mb-2 px-4">Quản lý</p>}
             {tabs.filter(t => t.category === 'main').map((tab) => (
               <button
                 key={tab.id}
@@ -242,21 +273,21 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
                   onTabChange?.(TAB_TO_PATH[tab.id]);
                 }}
                 title={tab.label}
-                className={`w-full flex items-center rounded-xl text-sm font-medium mb-1 min-h-[44px] py-3 pl-4 pr-4 ${
+                className={`w-full flex items-center rounded-xl text-sm font-medium mb-1 min-h-[44px] py-3 ${isSidebarCollapsed ? 'px-0 justify-center' : 'pl-4 pr-4'} ${
                   activeTab === tab.id
                     ? 'bg-blue-600 text-white shadow-md'
                     : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
                 <span className="flex items-center justify-center text-current shrink-0 w-5 h-5">{tab.icon}</span>
-                <span className="whitespace-nowrap ml-3">{tab.label}</span>
+                {!isSidebarCollapsed && <span className="whitespace-nowrap ml-3">{tab.label}</span>}
               </button>
             ))}
           </div>
 
           {/* Configuration */}
           <div>
-            <p className="text-xs font-bold text-slate-400 uppercase mb-2 px-4">Cấu hình</p>
+            {!isSidebarCollapsed && <p className="text-xs font-bold text-slate-400 uppercase mb-2 px-4">Cấu hình</p>}
             {tabs.filter(t => t.category === 'config').map((tab) => (
               <button
                 key={tab.id}
@@ -265,14 +296,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
                   onTabChange?.(TAB_TO_PATH[tab.id]);
                 }}
                 title={tab.label}
-                className={`w-full flex items-center rounded-xl text-sm font-medium mb-1 min-h-[44px] py-3 pl-4 pr-4 ${
+                className={`w-full flex items-center rounded-xl text-sm font-medium mb-1 min-h-[44px] py-3 ${isSidebarCollapsed ? 'px-0 justify-center' : 'pl-4 pr-4'} ${
                   activeTab === tab.id
                     ? 'bg-blue-600 text-white shadow-md'
                     : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
                 <span className="flex items-center justify-center text-current shrink-0 w-5 h-5">{tab.icon}</span>
-                <span className="whitespace-nowrap ml-3">{tab.label}</span>
+                {!isSidebarCollapsed && <span className="whitespace-nowrap ml-3">{tab.label}</span>}
               </button>
             ))}
           </div>
