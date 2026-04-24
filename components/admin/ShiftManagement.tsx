@@ -172,6 +172,9 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       annualLeave: 'Phép năm',
       annualLeaveRemaining: 'Còn',
       annualLeaveUsed: 'Đã dùng',
+      annualLeaveDaysInYear: 'Ngày phép năm trong năm',
+      noAnnualLeaveInYear: 'Năm này chưa có đăng ký phép năm.',
+      selectedEmployee: 'Nhân viên đang chọn',
     },
     en: {
       week: 'Week',
@@ -254,6 +257,9 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       annualLeave: 'Annual Leave',
       annualLeaveRemaining: 'Remaining',
       annualLeaveUsed: 'Used',
+      annualLeaveDaysInYear: 'Annual leave days in year',
+      noAnnualLeaveInYear: 'No annual leave registered in this year.',
+      selectedEmployee: 'Selected employee',
     }
   };
 
@@ -492,6 +498,21 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
         weekDateKeys.has(dateToKey(r.date))
     ).length;
   }, [selectedUserId, shiftRequests, weekDateKeys]);
+
+  const selectedEmployee = useMemo(
+    () => employees.find((u) => u.id === selectedUserId) || null,
+    [employees, selectedUserId]
+  );
+
+  const selectedEmployeeAnnualLeaveInYear = useMemo(() => {
+    if (!selectedUserId) return [];
+    const selectedYear = weekStart.getFullYear();
+    return shiftRequests
+      .filter((r) => r.userId === selectedUserId)
+      .filter((r) => new Date(r.date).getFullYear() === selectedYear)
+      .filter((r) => r.shift === ShiftTime.OFF && r.offType === OffType.OFF_PN)
+      .sort((a, b) => a.date - b.date);
+  }, [selectedUserId, shiftRequests, weekStart]);
 
   const weekRangeLabel = useMemo(() => {
     const start = weekDates[0];
@@ -773,6 +794,48 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
           >
             {text.rejectAll}
           </button>
+        </div>
+      )}
+
+      {selectedUserId && (
+        <div className="p-3 bg-blue-50 rounded-2xl border border-blue-100 space-y-2">
+          <div className="text-sm text-slate-700">
+            <span className="font-semibold">{text.selectedEmployee}:</span>{' '}
+            <span className="font-medium">{selectedEmployee?.name || selectedUserId}</span>
+          </div>
+          <div className="text-sm font-semibold text-blue-800">
+            {text.annualLeaveDaysInYear} ({weekStart.getFullYear()})
+          </div>
+          {selectedEmployeeAnnualLeaveInYear.length === 0 ? (
+            <p className="text-sm text-slate-500">{text.noAnnualLeaveInYear}</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {selectedEmployeeAnnualLeaveInYear.map((leave) => {
+                const leaveDate = new Date(leave.date);
+                const statusLabel =
+                  leave.status === RequestStatus.APPROVED
+                    ? text.approvedStatus
+                    : leave.status === RequestStatus.PENDING
+                      ? text.pendingStatus
+                      : text.rejectedStatus;
+                const statusClass =
+                  leave.status === RequestStatus.APPROVED
+                    ? 'bg-green-100 text-green-800'
+                    : leave.status === RequestStatus.PENDING
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-red-100 text-red-800';
+
+                return (
+                  <span
+                    key={leave.id}
+                    className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium ${statusClass}`}
+                  >
+                    {formatDateLabel(leaveDate)} - {statusLabel}
+                  </span>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
