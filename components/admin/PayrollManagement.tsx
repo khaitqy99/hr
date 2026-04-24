@@ -39,6 +39,26 @@ const filterShiftsByPayrollCycle = (shifts: ShiftRegistration[], month: string):
   return shifts.filter(shift => isInPayrollCycle(shift.date, month));
 };
 
+const toDateKey = (timestamp: number): string => {
+  const d = new Date(timestamp);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+/**
+ * Đồng bộ logic với /admin/shift: mỗi user + mỗi ngày chỉ giữ 1 bản ghi cuối cùng.
+ * (ShiftManagement dùng Map và map.set(...) theo thứ tự mảng để ghi đè bản ghi trước đó)
+ */
+const normalizeShiftsLikeAdminShift = (shifts: ShiftRegistration[]): ShiftRegistration[] => {
+  const map = new Map<string, ShiftRegistration>();
+  shifts.forEach((shift) => {
+    map.set(toDateKey(shift.date), shift);
+  });
+  return Array.from(map.values());
+};
+
 interface PayrollManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
   setView?: (view: string, options?: { replace?: boolean; adminPath?: string; employeeId?: string }) => void;
@@ -675,7 +695,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
     try {
       // Load shift details for the month
       const shifts = await getShiftRegistrations(employee.id);
-      const monthShifts = filterShiftsByPayrollCycle(shifts, selectedMonth);
+      const normalizedShifts = normalizeShiftsLikeAdminShift(shifts);
+      const monthShifts = filterShiftsByPayrollCycle(normalizedShifts, selectedMonth);
       setShiftDetails(monthShifts);
     } catch (err) {
       console.error('Error loading shift details:', err);
