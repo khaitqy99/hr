@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { ShiftRegistration, RequestStatus, User, UserRole, ShiftTime, OFF_TYPE_LABELS, Holiday, Department, OffType, EmployeeStatus, Branch, AnnualLeaveSummary } from '../../types';
+import { ShiftRegistration, RequestStatus, User, UserRole, ShiftTime, OFF_TYPE_LABELS, Holiday, Department, OffType, EmployeeStatus, Branch, AnnualLeaveSummary, ContractType } from '../../types';
 import { getShiftRegistrations, updateShiftStatus, updateShiftRegistration, registerShift, getAllUsers, getHolidays, getDepartments, getBranches, getAnnualLeaveSummary } from '../../services/db';
 import { exportToCSV } from '../../utils/export';
 import CustomSelect from '../CustomSelect';
@@ -797,7 +797,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
         </div>
       )}
 
-      {selectedUserId && (
+      {selectedUserId && selectedEmployee?.contractType !== ContractType.TRIAL && (
         <div className="p-3 bg-blue-50 rounded-2xl border border-blue-100 space-y-2">
           <div className="text-sm text-slate-700">
             <span className="font-semibold">{text.selectedEmployee}:</span>{' '}
@@ -929,7 +929,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                         ) : (
                           <span className="text-sm font-medium text-slate-800">{emp.name}</span>
                         )}
-                        {annualLeaveByUser[emp.id] && (
+                        {emp.contractType !== ContractType.TRIAL && annualLeaveByUser[emp.id] && (
                           <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
                             <span className="rounded-md bg-blue-50 px-1.5 py-0.5 font-semibold text-blue-700">
                               {text.annualLeave}: {annualLeaveByUser[emp.id].entitlementDays}
