@@ -882,7 +882,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                       </td>
                       {weekDates.map((date) => {
                         const reg = getShiftFor(emp.id, date);
-                        const openDetail = (e: React.MouseEvent) => {
+                        const openDetail = (e: React.SyntheticEvent) => {
                           e.stopPropagation();
                           setCellEditMode('view');
                           setCellDetail({ user: emp, date, reg });
@@ -894,8 +894,9 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                                 role="button"
                                 tabIndex={0}
                                 onClick={openDetail}
-                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e as unknown as React.MouseEvent); } }}
-                                className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs text-slate-300 cursor-pointer hover:bg-slate-100"
+                                onTouchEnd={openDetail}
+                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e); } }}
+                                className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs text-slate-300 cursor-pointer hover:bg-slate-100 touch-manipulation"
                               >
                                 —
                               </td>
@@ -903,8 +904,9 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                                 role="button"
                                 tabIndex={0}
                                 onClick={openDetail}
-                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e as unknown as React.MouseEvent); } }}
-                                className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs text-slate-300 cursor-pointer hover:bg-slate-100"
+                                onTouchEnd={openDetail}
+                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e); } }}
+                                className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs text-slate-300 cursor-pointer hover:bg-slate-100 touch-manipulation"
                               >
                                 —
                               </td>
@@ -925,8 +927,9 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                                 role="button"
                                 tabIndex={0}
                                 onClick={openDetail}
-                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e as unknown as React.MouseEvent); } }}
-                                className="px-2 py-2 border-r border-b border-slate-200 bg-red-50/80 text-red-700 text-xs font-medium text-center align-top cursor-pointer hover:bg-red-100/80"
+                                onTouchEnd={openDetail}
+                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e); } }}
+                                className="px-2 py-2 border-r border-b border-slate-200 bg-red-50/80 text-red-700 text-xs font-medium text-center align-top cursor-pointer hover:bg-red-100/80 touch-manipulation"
                               >
                                 <div className="flex flex-col items-center gap-1 relative">
                                   <span
@@ -971,8 +974,9 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                               role="button"
                               tabIndex={0}
                               onClick={openDetail}
-                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e as unknown as React.MouseEvent); } }}
-                              className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs relative align-top cursor-pointer hover:bg-slate-50"
+                              onTouchEnd={openDetail}
+                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e); } }}
+                              className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs relative align-top cursor-pointer hover:bg-slate-50 touch-manipulation"
                             >
                               <div className="font-medium text-slate-800">{inTime}</div>
                               <div
@@ -1008,8 +1012,9 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                               role="button"
                               tabIndex={0}
                               onClick={openDetail}
-                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e as unknown as React.MouseEvent); } }}
-                              className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs align-top font-medium text-slate-800 cursor-pointer hover:bg-slate-50"
+                              onTouchEnd={openDetail}
+                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(e); } }}
+                              className="px-1 py-2 border-r border-b border-slate-200 text-center text-xs align-top font-medium text-slate-800 cursor-pointer hover:bg-slate-50 touch-manipulation"
                             >
                               {outTime}
                             </td>

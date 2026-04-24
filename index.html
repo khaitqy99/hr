@@ -71,6 +71,11 @@
         min-width: 44px;
         touch-action: manipulation; /* Tắt double-tap zoom */
       }
+      /* Hỗ trợ các phần tử custom có thể click (tabIndex/role=button) trên iOS */
+      [role="button"], [tabindex="0"] {
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+      }
       
       /* Tối ưu input cho mobile */
       input, textarea, select {
@@ -312,6 +317,16 @@
         canvas {
           -webkit-backface-visibility: hidden;
           transform: translateZ(0);
+        }
+      }
+      /* iPhone/iPad: hạn chế "hover giả" khiến cần tap lần 2 mới click */
+      @media (hover: none) and (pointer: coarse) {
+        button:hover,
+        a:hover,
+        [role="button"]:hover {
+          opacity: inherit;
+          color: inherit;
+          background-color: inherit;
         }
       }
     </style>

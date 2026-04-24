@@ -38,13 +38,11 @@ const InstallPrompt: React.FC = () => {
 
     // Check if user dismissed before
     const dismissed = localStorage.getItem('pwa-install-dismissed');
-    if (!dismissed && !standalone && !iOS) {
-      // Show iOS instructions if on iOS
-      if (iOS) {
-        setTimeout(() => {
-          setShowPrompt(true);
-        }, 3000);
-      }
+    if (!dismissed && !standalone && iOS) {
+      // iOS does not emit beforeinstallprompt, so show manual install instructions.
+      setTimeout(() => {
+        setShowPrompt(true);
+      }, 3000);
     }
 
     return () => {

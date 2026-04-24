@@ -60,6 +60,7 @@ interface AttendanceManagementProps {
 }
 
 const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterReload, setView, language }) => {
+  const PAGE_SIZE = 25;
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -71,6 +72,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
   const [filterStatus, setFilterStatus] = useState<'ALL' | AttendanceStatus>('ALL');
   const [filterDepartment, setFilterDepartment] = useState<string>('ALL');
   const [filterBranch, setFilterBranch] = useState<string>('ALL');
+  const [currentPage, setCurrentPage] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const t = {
     vi: {
@@ -131,6 +133,10 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       customRangeHint: 'Để trống hai ô ngày để dùng lọc nhanh (Hôm nay / Tuần / Tháng / Tất cả).',
       clearDetailFilters: 'Xóa lọc chi tiết',
       usingCustomRangeNotice: 'Đang lọc theo khoảng ngày — các nút Hôm nay / Tuần / Tháng không áp dụng cho mốc thời gian.',
+      page: 'Trang',
+      previous: 'Trước',
+      next: 'Sau',
+      pageInfo: '{start}-{end} / {total} phiên',
     },
     en: {
       filters: 'Filters',
@@ -190,6 +196,10 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       customRangeHint: 'Leave both dates empty to use quick filters (Today / Week / Month / All).',
       clearDetailFilters: 'Clear detail filters',
       usingCustomRangeNotice: 'Date range is active — quick time presets do not apply to the time window.',
+      page: 'Page',
+      previous: 'Previous',
+      next: 'Next',
+      pageInfo: '{start}-{end} / {total} sessions',
     }
   };
 
@@ -208,10 +218,8 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
   const loadData = async () => {
     setIsLoading(true);
     try {
-      // Tối ưu: Chỉ load 500 records đầu tiên để tránh lag
-      // Nếu cần tất cả, có thể load thêm khi scroll hoặc filter
       const [records, users, branchesData] = await Promise.all([
-        getAllAttendance(500),
+        getAllAttendance(),
         getAllUsers(),
         getBranches(),
       ]);
@@ -231,6 +239,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       setEmployees(users);
       setBranches(branchesData.filter(b => b.isActive));
       setEmployees(users);
+      setCurrentPage(1);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -310,6 +319,12 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
 
   const filteredData = getFilteredData();
   const groupedByDay = useMemo(() => buildAttendanceDayGroups(filteredData), [filteredData]);
+  const totalPages = Math.max(1, Math.ceil(groupedByDay.length / PAGE_SIZE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const paginatedGroups = useMemo(() => {
+    const start = (safeCurrentPage - 1) * PAGE_SIZE;
+    return groupedByDay.slice(start, start + PAGE_SIZE);
+  }, [groupedByDay, safeCurrentPage, PAGE_SIZE]);
 
   const departmentOptions = useMemo(() => {
     const names = new Set<string>();
@@ -322,6 +337,16 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
   }, [employees, language]);
 
   const hasCustomDateRange = Boolean(dateFrom.trim() || dateTo.trim());
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [attendanceFilter, selectedEmployeeForAttendance, dateFrom, dateTo, filterType, filterStatus, filterDepartment, filterBranch]);
+
+  useEffect(() => {
+    if (currentPage !== safeCurrentPage) {
+      setCurrentPage(safeCurrentPage);
+    }
+  }, [currentPage, safeCurrentPage]);
 
   const clearDetailFilters = () => {
     setDateFrom('');
@@ -559,11 +584,42 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
         </div>
       ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-sky-50 overflow-hidden">
-          <div className="flex items-center px-4 py-3 border-b border-slate-200 bg-slate-50/50">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-slate-200 bg-slate-50/50">
             <span className="text-sm font-medium text-slate-600">
               {groupedByDay.length} {text.workSessions} · {filteredData.length} {text.records}
             </span>
+            {groupedByDay.length > 0 && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={safeCurrentPage <= 1}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 bg-white text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {text.previous}
+                </button>
+                <span className="text-xs text-slate-600">
+                  {text.page} {safeCurrentPage}/{totalPages}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={safeCurrentPage >= totalPages}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 bg-white text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {text.next}
+                </button>
+              </div>
+            )}
           </div>
+          {groupedByDay.length > 0 && (
+            <div className="px-4 py-2 border-b border-slate-100 text-xs text-slate-500 bg-slate-50/30">
+              {text.pageInfo
+                .replace('{start}', String((safeCurrentPage - 1) * PAGE_SIZE + 1))
+                .replace('{end}', String(Math.min(safeCurrentPage * PAGE_SIZE, groupedByDay.length)))
+                .replace('{total}', String(groupedByDay.length))}
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-slate-50 border-b border-slate-200">
@@ -577,7 +633,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {groupedByDay.map((group) => {
+                {paginatedGroups.map((group) => {
                   const employee = employees.find(e => e.id === group.userId);
                   const inInfo = group.checkIn ? getStatusLabel(group.checkIn.status) : null;
                   const outInfo = group.checkOut ? getStatusLabel(group.checkOut.status) : null;

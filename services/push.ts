@@ -71,7 +71,10 @@ const isMobileDevice = (): boolean => {
  * Kiểm tra app đã được cài đặt như PWA chưa
  */
 const isPWAInstalled = (): boolean => {
-  return window.matchMedia('(display-mode: standalone)').matches;
+  return (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    (window.navigator as any).standalone === true
+  );
 };
 
 /**

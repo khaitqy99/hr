@@ -75,7 +75,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
   }, [user.id]);
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    const handleClickOutside = (event: PointerEvent) => {
       const target = event.target as Node;
       
       // Bỏ qua nếu click vào dropdown của CustomSelect (được render vào document.body)
@@ -93,9 +93,9 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
     };
 
     if (expandedDate) {
-      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('pointerdown', handleClickOutside);
       return () => {
-        document.removeEventListener('mousedown', handleClickOutside);
+        document.removeEventListener('pointerdown', handleClickOutside);
       };
     }
   }, [expandedDate]);

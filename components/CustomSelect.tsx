@@ -60,7 +60,7 @@ const CustomSelect: React.FC<CustomSelectProps> = ({
   }, [isOpen]);
 
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
+    const handleClickOutside = (e: PointerEvent) => {
       const target = e.target as Node;
       // Close only if click is outside both container and dropdown list
       if (
@@ -74,8 +74,8 @@ const CustomSelect: React.FC<CustomSelectProps> = ({
     };
 
     if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
+      document.addEventListener('pointerdown', handleClickOutside);
+      return () => document.removeEventListener('pointerdown', handleClickOutside);
     }
   }, [isOpen]);
 
