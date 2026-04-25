@@ -440,8 +440,14 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
           }
         });
 
-        // Lấy shifts của nhân viên trong tháng
-        const empShifts = shiftsInMonth.filter(s => s.userId === payroll.userId);
+        // Lấy shifts của nhân viên trong tháng (đồng bộ /admin/shift: mỗi ngày chỉ giữ 1 bản ghi cuối)
+        const empShifts = normalizeShiftsLikeAdminShift(
+          shiftsInMonth.filter(s => s.userId === payroll.userId)
+        );
+        const shiftByDateKey = new Map<string, ShiftRegistration>();
+        empShifts.forEach((s) => {
+          shiftByDateKey.set(toDateKey(s.date), s);
+        });
 
         // Tính toán các giá trị - tính từ tổng giờ thực tế
         const baseSalary = payroll.baseSalary;
@@ -499,13 +505,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
           const dayAttendance = attendanceByDate[dateKey];
           
           // Tìm shift cho ngày này
-          const dayTimestamp = new Date(parseInt(yearStr), parseInt(monthStr) - 1, parseInt(dayStr)).getTime();
-          const dayShift = empShifts.find(s => {
-            const shiftDate = new Date(s.date);
-            return shiftDate.getDate() === parseInt(dayStr) && 
-                   shiftDate.getMonth() + 1 === parseInt(monthStr) &&
-                   shiftDate.getFullYear() === parseInt(yearStr);
-          });
+          const dayShift = shiftByDateKey.get(dateKey);
 
           let inValue = '';
           let outValue = '';
