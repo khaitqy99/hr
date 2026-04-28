@@ -54,7 +54,7 @@ const toDateKey = (timestamp: number): string => {
 const normalizeShiftsLikeAdminShift = (shifts: ShiftRegistration[]): ShiftRegistration[] => {
   const map = new Map<string, ShiftRegistration>();
   shifts.forEach((shift) => {
-    map.set(toDateKey(shift.date), shift);
+    map.set(`${shift.userId}_${toDateKey(shift.date)}`, shift);
   });
   return Array.from(map.values());
 };
@@ -300,8 +300,10 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       });
       setNoLunchBreakByKey(lunchMap);
       
-      // Lọc shifts theo kỳ lương [02/MM, 02/MM+1)
-      const shiftsInMonth = filterShiftsByPayrollCycle(allShifts, month);
+      // Lọc shifts theo kỳ lương [02/MM, 02/MM+1), rồi normalize giống /admin/shift
+      const shiftsInMonth = normalizeShiftsLikeAdminShift(
+        filterShiftsByPayrollCycle(allShifts, month)
+      );
       setAllShiftsInMonth(shiftsInMonth);
     } catch (err: any) {
       setError(text.loadPayrollError.replace('{error}', err?.message || 'Vui lòng thử lại'));
@@ -693,10 +695,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
     setSelectedPayrollDetail({ payroll, employee });
     setDetailLoading(true);
     try {
-      // Load shift details for the month
-      const shifts = await getShiftRegistrations(employee.id);
-      const normalizedShifts = normalizeShiftsLikeAdminShift(shifts);
-      const monthShifts = filterShiftsByPayrollCycle(normalizedShifts, selectedMonth);
+      // Dùng cùng nguồn dữ liệu với /admin/shift (admin scope), đã lọc kỳ lương + normalize
+      const monthShifts = allShiftsInMonth.filter(s => s.userId === employee.id);
       setShiftDetails(monthShifts);
     } catch (err) {
       console.error('Error loading shift details:', err);
