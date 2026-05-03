@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, ShiftRegistration, ShiftTime, RequestStatus, OffType, OFF_TYPE_LABELS, Holiday } from '../types';
-import { registerShift, getShiftRegistrations, getHolidays, updateShiftRegistration } from '../services/db';
+import { registerShift, getShiftRegistrations, getHolidays, updateShiftRegistration, getShiftRegistrationEnabled } from '../services/db';
+import { dataEvents } from '../services/events';
 import { sendShiftChangeNotification } from '../services/email';
 import CustomSelect from './CustomSelect';
 
@@ -67,12 +68,30 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
   });
-  
+  const [registrationEnabled, setRegistrationEnabled] = useState(true);
 
   useEffect(() => {
     loadShifts();
     loadHolidays();
   }, [user.id]);
+
+  useEffect(() => {
+    const loadReg = async () => {
+      const en = await getShiftRegistrationEnabled();
+      setRegistrationEnabled(en);
+      if (!en) {
+        setSelectedDates([]);
+        setExpandedDate(null);
+        setEditingShiftId(null);
+        setMultiSelectMode(false);
+      }
+    };
+    void loadReg();
+    const off = dataEvents.on('config:updated', () => {
+      void loadReg();
+    });
+    return () => off();
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (event: PointerEvent) => {
@@ -163,6 +182,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
   };
 
   const handleMultiModeChange = (enabled: boolean) => {
+    if (enabled && !registrationEnabled) return;
     setMultiSelectMode(enabled);
     setExpandedDate(null);
     if (!enabled) return;
@@ -253,6 +273,9 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
 
     const dateStr = toLocalDateStr(date);
     const registered = getRegisteredShift(date);
+    if (!registrationEnabled && !registered) {
+      return;
+    }
     const holiday = getHolidayForDate(date);
 
     /** Chế độ chọn nhiều ngày: bấm để gạch/bỏ gạch, cùng khung giờ qua form bên dưới */
@@ -480,6 +503,10 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
   };
 
   const enterEditMode = (registeredShift: ShiftRegistration, dateStr: string) => {
+    if (!registrationEnabled) {
+      alert('Admin đã tạm khóa đăng ký ca. Bạn không thể đổi lịch cho đến khi được mở lại.');
+      return;
+    }
     setEditingShiftId(registeredShift.id);
     setDateShifts(prev => ({ ...prev, [dateStr]: registeredShift.shift }));
     setDateReasons(prev => ({ ...prev, [dateStr]: registeredShift.reason || '' }));
@@ -524,6 +551,10 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
   };
 
   const handleSaveChange = async (dateStr: string) => {
+    if (!registrationEnabled) {
+      alert('Admin đã tạm khóa đăng ký ca.');
+      return;
+    }
     const registeredShift = shifts.find(s => toLocalDateStr(new Date(s.date)) === dateStr);
     
     if (!editingShiftId || !allDatesHaveShiftsForEdit(dateStr)) return;
@@ -632,6 +663,10 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!registrationEnabled) {
+      alert('Admin đã tạm khóa đăng ký ca. Vui lòng liên hệ quản trị viên.');
+      return;
+    }
     if (!allDatesHaveShifts()) return;
     setLoading(true);
 
@@ -721,6 +756,17 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
 
   return (
     <div className="space-y-6 fade-up">
+      {!registrationEnabled && (
+        <div
+          className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm"
+          role="status"
+        >
+          <p className="font-semibold">Đăng ký ca đang tạm khóa</p>
+          <p className="mt-1 text-xs text-amber-800/90">
+            Quản trị viên đã tắt đăng ký ca làm. Bạn vẫn xem được lịch đã đăng ký; không thể đăng ký mới hay đổi lịch cho đến khi được mở lại.
+          </p>
+        </div>
+      )}
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-600 to-cyan-500 rounded-3xl p-5 sm:p-6 text-white shadow-lg shadow-blue-200">
         <div className="flex flex-row items-center gap-2 sm:gap-3 min-w-0">
@@ -737,6 +783,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
               <button
                 type="button"
                 aria-pressed={!multiSelectMode}
+                disabled={!registrationEnabled}
                 onClick={() => handleMultiModeChange(false)}
                 className={`px-2.5 py-1 rounded-md text-[10px] font-bold leading-none transition-colors min-h-0 min-w-0 ${
                   !multiSelectMode
@@ -749,6 +796,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
               <button
                 type="button"
                 aria-pressed={multiSelectMode}
+                disabled={!registrationEnabled}
                 onClick={() => handleMultiModeChange(true)}
                 className={`px-2.5 py-1 rounded-md text-[10px] font-bold leading-none transition-colors min-h-0 min-w-0 ${
                   multiSelectMode
@@ -830,10 +878,12 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                             <button
                                 type="button"
                                 onClick={() => toggleDate(date)}
-                                disabled={!isCurrentMonth}
+                                disabled={!isCurrentMonth || (!registrationEnabled && !isRegistered)}
                                 className={`relative w-full aspect-square flex flex-col items-center justify-center p-0 rounded-lg border-2 transition-all ${
                                     !isCurrentMonth
                                         ? 'opacity-30 cursor-not-allowed bg-slate-50 border-slate-100 text-slate-400'
+                                        : !registrationEnabled && !isRegistered
+                                        ? 'opacity-40 cursor-not-allowed bg-slate-50 border-slate-200 text-slate-400'
                                         : isRegistered
                                         ? registeredShift?.shift === ShiftTime.OFF
                                             ? 'bg-slate-100 border-slate-400 text-slate-600 shadow-sm cursor-pointer hover:bg-slate-200'
@@ -1083,8 +1133,9 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                                                 <div className="flex gap-1.5 pt-3 mt-3 border-t border-slate-100">
                                                     <button
                                                         type="button"
+                                                        disabled={!registrationEnabled}
                                                         onClick={() => enterEditMode(registeredShift, dateStr)}
-                                                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-medium transition-colors ${
+                                                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                                                             registeredShift.status === RequestStatus.REJECTED
                                                                 ? 'bg-rose-600 text-white hover:bg-rose-700'
                                                                 : registeredShift.status === RequestStatus.APPROVED
@@ -1323,7 +1374,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
 
         <button 
             type="submit" 
-            disabled={loading || !allDatesHaveShifts()}
+            disabled={loading || !allDatesHaveShifts() || !registrationEnabled}
             className="w-full bg-blue-600 text-white py-2.5 rounded-xl text-sm font-bold hover:bg-blue-700 transition-all active:scale-[0.98] shadow-lg shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed"
         >
             {loading 
@@ -1396,6 +1447,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                                 )}
                                 <button
                                     type="button"
+                                    disabled={!registrationEnabled}
                                     onClick={() => {
                                         const d = new Date(shift.date);
                                         const dateStr = toLocalDateStr(d);
@@ -1403,7 +1455,7 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
                                         setExpandedDate(dateStr);
                                         enterEditMode(shift, dateStr);
                                     }}
-                                    className="text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:underline"
+                                    className="text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:underline disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
                                 >
                                     Đổi lịch
                                 </button>

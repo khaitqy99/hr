@@ -33,6 +33,12 @@ const DEFAULT_SYSTEM_CONFIGS = [
     description: 'Số giờ làm việc tiêu chuẩn/ngày',
     category: 'ATTENDANCE'
   },
+  {
+    key: 'shift_registration_enabled',
+    value: 'true',
+    description: 'Cho phép nhân viên đăng ký và đổi lịch ca (true/false)',
+    category: 'ATTENDANCE'
+  },
 
 
   // Payroll (Lương)

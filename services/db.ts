@@ -1174,6 +1174,13 @@ export const registerShift = async (
   options?: { initialStatus?: RequestStatus }
 ): Promise<void> => {
   const status = options?.initialStatus ?? shift.status;
+  const adminBypassLock = options?.initialStatus === RequestStatus.APPROVED;
+  if (!adminBypassLock) {
+    const enabled = await getShiftRegistrationEnabled();
+    if (!enabled) {
+      throw new Error('Đăng ký ca hiện đang tạm khóa. Vui lòng liên hệ quản trị viên.');
+    }
+  }
   if (isSupabaseAvailable()) {
     try {
       const { error } = await supabase
@@ -1261,6 +1268,12 @@ export const updateShiftRegistration = async (
   options?: { keepStatus?: boolean }
 ): Promise<void> => {
   const setPending = !options?.keepStatus;
+  if (setPending) {
+    const enabled = await getShiftRegistrationEnabled();
+    if (!enabled) {
+      throw new Error('Đăng ký ca hiện đang tạm khóa. Vui lòng liên hệ quản trị viên.');
+    }
+  }
   if (isSupabaseAvailable()) {
     try {
       const payload: Record<string, unknown> = {
@@ -2596,6 +2609,14 @@ export const getConfigNumber = async (key: string, defaultValue: number): Promis
   const value = await getConfigValue(key, String(defaultValue));
   const num = parseFloat(value);
   return isNaN(num) ? defaultValue : num;
+};
+
+const SHIFT_REGISTRATION_ENABLED_KEY = 'shift_registration_enabled';
+
+/** Admin có thể tắt để nhân viên không đăng ký/sửa ca (admin vẫn thao tác được). */
+export const getShiftRegistrationEnabled = async (): Promise<boolean> => {
+  const raw = (await getConfigValue(SHIFT_REGISTRATION_ENABLED_KEY, 'true')).toLowerCase().trim();
+  return raw === 'true' || raw === '1' || raw === 'yes';
 };
 
 /** Lấy office location từ config */

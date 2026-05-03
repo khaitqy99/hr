@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { ShiftRegistration, RequestStatus, User, UserRole, ShiftTime, OFF_TYPE_LABELS, Holiday, Department, OffType, EmployeeStatus, Branch, AnnualLeaveSummary, ContractType } from '../../types';
-import { getShiftRegistrations, updateShiftStatus, updateShiftRegistration, registerShift, getAllUsers, getHolidays, getDepartments, getBranches, getAnnualLeaveSummary } from '../../services/db';
+import { getShiftRegistrations, updateShiftStatus, updateShiftRegistration, registerShift, getAllUsers, getHolidays, getDepartments, getBranches, getAnnualLeaveSummary, getSystemConfigs, updateSystemConfig, createSystemConfig, getConfigValue } from '../../services/db';
 import { exportToCSV } from '../../utils/export';
 import CustomSelect from '../CustomSelect';
 
@@ -89,6 +89,9 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
     offType: OffType;
   }>({ shift: ShiftTime.CUSTOM, startTime: '09:00', endTime: '18:00', offType: OffType.OFF_PN });
   const [cellActionLoading, setCellActionLoading] = useState(false);
+  const [shiftRegEnabled, setShiftRegEnabled] = useState(true);
+  const [shiftRegConfigId, setShiftRegConfigId] = useState<string | null>(null);
+  const [shiftRegToggleLoading, setShiftRegToggleLoading] = useState(false);
 
   const t = {
     vi: {
@@ -175,6 +178,13 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       annualLeaveDaysInYear: 'Ngày phép năm trong năm',
       noAnnualLeaveInYear: 'Năm này chưa có đăng ký phép năm.',
       selectedEmployee: 'Nhân viên đang chọn',
+      shiftRegToggle: 'Đăng ký ca (NV)',
+      shiftRegSegmentOn: 'Bật',
+      shiftRegSegmentOff: 'Tắt',
+      shiftRegOn: 'Đang mở — nhân viên có thể đăng ký/sửa ca',
+      shiftRegOff: 'Đang khóa — chỉ admin gán/sửa ca',
+      shiftRegUpdated: 'Đã cập nhật cài đặt đăng ký ca.',
+      shiftRegUpdateFailed: 'Không lưu được cài đặt. Thử lại.',
     },
     en: {
       week: 'Week',
@@ -260,15 +270,68 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       annualLeaveDaysInYear: 'Annual leave days in year',
       noAnnualLeaveInYear: 'No annual leave registered in this year.',
       selectedEmployee: 'Selected employee',
+      shiftRegToggle: 'Shift signup (employees)',
+      shiftRegSegmentOn: 'On',
+      shiftRegSegmentOff: 'Off',
+      shiftRegOn: 'Open — employees can register or change shifts',
+      shiftRegOff: 'Locked — only admins can assign shifts',
+      shiftRegUpdated: 'Shift registration setting updated.',
+      shiftRegUpdateFailed: 'Could not save setting. Try again.',
     }
   };
 
   const text = t[language];
 
+  const parseShiftRegEnabled = (raw: string | undefined): boolean => {
+    const v = (raw ?? 'true').toLowerCase().trim();
+    return v === 'true' || v === '1' || v === 'yes';
+  };
+
+  const loadShiftRegistrationSetting = async () => {
+    try {
+      const configs = await getSystemConfigs();
+      const row = configs.find(c => c.key === 'shift_registration_enabled');
+      const val = row?.value ?? (await getConfigValue('shift_registration_enabled', 'true'));
+      setShiftRegConfigId(row?.id ?? null);
+      setShiftRegEnabled(parseShiftRegEnabled(val));
+    } catch {
+      setShiftRegEnabled(true);
+    }
+  };
+
+  const handleShiftRegistrationChange = async (next: boolean) => {
+    if (shiftRegToggleLoading || next === shiftRegEnabled) return;
+    setShiftRegToggleLoading(true);
+    setMessage(null);
+    try {
+      const val = next ? 'true' : 'false';
+      if (shiftRegConfigId && !shiftRegConfigId.startsWith('temp_')) {
+        await updateSystemConfig(shiftRegConfigId, val);
+      } else {
+        const created = await createSystemConfig(
+          'shift_registration_enabled',
+          val,
+          language === 'vi'
+            ? 'Cho phép nhân viên đăng ký và đổi lịch ca'
+            : 'Allow employees to register and edit shifts',
+          'ATTENDANCE'
+        );
+        setShiftRegConfigId(created.id);
+      }
+      setShiftRegEnabled(next);
+      showMsg('success', text.shiftRegUpdated);
+    } catch {
+      showMsg('error', text.shiftRegUpdateFailed);
+    } finally {
+      setShiftRegToggleLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadData();
     loadHolidays();
     loadDepartments();
+    loadShiftRegistrationSetting();
   }, []);
 
   useEffect(() => {
@@ -703,6 +766,43 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
             </button>
           </div>
           <div className="flex flex-wrap items-center gap-3 text-sm">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50/80">
+              <span className="text-xs font-semibold text-slate-700 shrink-0">{text.shiftRegToggle}</span>
+              <div
+                className="inline-flex rounded-xl border border-slate-200/80 bg-slate-100/90 p-0.5 shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)]"
+                role="group"
+                aria-label={text.shiftRegToggle}
+              >
+                <button
+                  type="button"
+                  disabled={shiftRegToggleLoading}
+                  aria-pressed={shiftRegEnabled}
+                  title={text.shiftRegOn}
+                  onClick={() => void handleShiftRegistrationChange(true)}
+                  className={`min-w-[4.25rem] px-3 py-1.5 rounded-[10px] text-xs font-bold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-1 disabled:opacity-50 ${
+                    shiftRegEnabled
+                      ? 'bg-white text-emerald-700 shadow-sm ring-1 ring-emerald-200/80'
+                      : 'text-slate-500 hover:text-slate-700 hover:bg-white/60'
+                  }`}
+                >
+                  {text.shiftRegSegmentOn}
+                </button>
+                <button
+                  type="button"
+                  disabled={shiftRegToggleLoading}
+                  aria-pressed={!shiftRegEnabled}
+                  title={text.shiftRegOff}
+                  onClick={() => void handleShiftRegistrationChange(false)}
+                  className={`min-w-[4.25rem] px-3 py-1.5 rounded-[10px] text-xs font-bold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-1 disabled:opacity-50 ${
+                    !shiftRegEnabled
+                      ? 'bg-white text-slate-800 shadow-sm ring-1 ring-slate-300/90'
+                      : 'text-slate-500 hover:text-slate-700 hover:bg-white/60'
+                  }`}
+                >
+                  {text.shiftRegSegmentOff}
+                </button>
+              </div>
+            </div>
             <span className="px-2.5 py-1 rounded-lg bg-amber-100 text-amber-800 font-medium">
               {text.pending}: {weekStats.pending}
             </span>
