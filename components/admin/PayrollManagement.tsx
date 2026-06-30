@@ -94,6 +94,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
   const [calcManualWorkDays, setCalcManualWorkDays] = useState<string>('');
   const [calcManualOTHours, setCalcManualOTHours] = useState<string>('');
   const [isCalcSaving, setIsCalcSaving] = useState(false);
+  const [calcStatsLoading, setCalcStatsLoading] = useState(false);
   const [calcAttendanceStats, setCalcAttendanceStats] = useState<{ actualWorkDays: number; otHours: number } | null>(null);
   const [calcShiftWorkDays, setCalcShiftWorkDays] = useState<number | null>(null);
 
@@ -724,7 +725,6 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
 
   const handleViewPayrollDetail = async (payroll: PayrollRecord, employee: User) => {
     setSelectedPayrollDetail({ payroll, employee });
-    setDetailLoading(true);
     // Reset calc state for this employee
     setCalcMethod('SHIFT');
     setCalcManualWorkDays('');
@@ -1115,7 +1115,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                       </div>
 
                       {/* Auto-filled info or manual inputs */}
-                      {detailLoading ? (
+                      {calcStatsLoading ? (
                         <p className="text-xs text-indigo-500 italic text-center py-2">{text.calcLoadingStats}</p>
                       ) : (
                         <div className="grid grid-cols-2 gap-3 mb-4">
@@ -1171,7 +1171,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                       <button
                         type="button"
                         onClick={handleCalcAndSave}
-                        disabled={isCalcSaving || detailLoading}
+                        disabled={isCalcSaving || calcStatsLoading}
                         className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         {isCalcSaving ? (
