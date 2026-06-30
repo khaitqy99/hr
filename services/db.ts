@@ -1366,6 +1366,7 @@ export const getPayroll = async (userId: string, month?: string): Promise<Payrol
         deductions: Number(record.deductions),
         netSalary: Number(record.net_salary),
         status: record.status as 'PAID' | 'PENDING',
+        calcMethod: ((record as any).calc_method as 'SHIFT' | 'ATTENDANCE' | 'MANUAL') ?? 'SHIFT',
         noLunchBreakDates: parseNoLunchBreakDatesFromDb((record as { no_lunch_break_dates?: unknown }).no_lunch_break_dates),
       }));
     } catch (error) {
@@ -1412,6 +1413,7 @@ export const getAllPayrolls = async (month: string): Promise<PayrollRecord[]> =>
         deductions: Number(record.deductions),
         netSalary: Number(record.net_salary),
         status: record.status as 'PAID' | 'PENDING',
+        calcMethod: ((record as any).calc_method as 'SHIFT' | 'ATTENDANCE' | 'MANUAL') ?? 'SHIFT',
         noLunchBreakDates: parseNoLunchBreakDatesFromDb((record as { no_lunch_break_dates?: unknown }).no_lunch_break_dates),
       }));
     } catch (error) {
@@ -1451,8 +1453,9 @@ export const createOrUpdatePayroll = async (record: PayrollRecord): Promise<Payr
           net_salary: record.netSalary,
           status: record.status,
           no_lunch_break_dates: noLunch,
+          calc_method: record.calcMethod ?? 'SHIFT',
         }, {
-          onConflict: 'id'
+          onConflict: 'user_id,month'
         })
         .select()
         .single();
@@ -1477,6 +1480,7 @@ export const createOrUpdatePayroll = async (record: PayrollRecord): Promise<Payr
         deductions: Number(data.deductions),
         netSalary: Number(data.net_salary),
         status: data.status as 'PAID' | 'PENDING',
+        calcMethod: ((data as any).calc_method as 'SHIFT' | 'ATTENDANCE' | 'MANUAL') ?? 'SHIFT',
         noLunchBreakDates: parseNoLunchBreakDatesFromDb((data as { no_lunch_break_dates?: unknown }).no_lunch_break_dates),
       };
     } catch (error) {
@@ -1568,35 +1572,43 @@ export const calculatePayroll = async (
   /** Có giá trị khi lương nền tính theo tổng giờ ca (khớp UI admin: đơn giá giờ × giờ). */
   let shiftHoursForPay: number | null = null;
 
-  // Tổng giờ từ đăng ký ca (đã duyệt) + lễ — không phụ thuộc chấm công
-  if (useShift && actualWorkDays === undefined) {
-    shiftHoursForPay = await calculateShiftTotalHours(employee.id, month);
-    finalWorkDays = shiftHoursForPay / validWorkHoursPerDay;
-  }
-
-  // Ưu tiên giờ OT từ đăng ký ca (shift) — không phụ thuộc check-in/check-out
-  if (useShift && otHours === undefined) {
-    const shiftOTHours = await calculateShiftOTHours(employee.id, month);
-    finalOtHours = shiftOTHours;
-  }
-
-  // Cải thiện: Nếu không có shift hoặc shift = 0, fallback sang attendance
-  // Điều này xử lý trường hợp nhân viên không đăng ký ca nhưng vẫn đi làm
-  if (useAttendance && (finalWorkDays === 0 || finalWorkDays === undefined || otHours === undefined)) {
-    const attendanceStats = await calculateAttendanceStats(employee.id, month);
-    
-    // Nếu không có shift hoặc shift = 0, dùng attendance (chuyển sang tính theo ngày công)
-    if (finalWorkDays === 0 || finalWorkDays === undefined) {
-      finalWorkDays = attendanceStats.actualWorkDays;
-      shiftHoursForPay = null;
+  if (useAttendance && !useShift) {
+    // ── Chế độ chấm công thuần: lấy toàn bộ từ check-in/check-out ──
+    if (actualWorkDays === undefined || otHours === undefined) {
+      const attendanceStats = await calculateAttendanceStats(employee.id, month);
+      if (actualWorkDays === undefined) finalWorkDays = attendanceStats.actualWorkDays;
+      if (otHours === undefined) finalOtHours = attendanceStats.otHours;
     }
-    
-    // Cộng thêm OT từ attendance (nếu có)
-    if (otHours === undefined) {
-      finalOtHours = attendanceStats.otHours;
-    } else if (attendanceStats.otHours > 0) {
-      // Lấy giá trị lớn hơn giữa shift OT và attendance OT
-      finalOtHours = Math.max(finalOtHours, attendanceStats.otHours);
+    shiftHoursForPay = null; // tính theo ngày công, không theo giờ ca
+  } else {
+    // ── Chế độ đăng ký ca (mặc định) ──
+
+    // Tổng giờ từ đăng ký ca (đã duyệt) + lễ — không phụ thuộc chấm công
+    if (useShift && actualWorkDays === undefined) {
+      shiftHoursForPay = await calculateShiftTotalHours(employee.id, month);
+      finalWorkDays = shiftHoursForPay / validWorkHoursPerDay;
+    }
+
+    // Ưu tiên giờ OT từ đăng ký ca (shift) — không phụ thuộc check-in/check-out
+    if (useShift && otHours === undefined) {
+      const shiftOTHours = await calculateShiftOTHours(employee.id, month);
+      finalOtHours = shiftOTHours;
+    }
+
+    // Fallback sang attendance chỉ khi shift không có dữ liệu (= 0)
+    if (useAttendance && (finalWorkDays === 0 || finalWorkDays === undefined || otHours === undefined)) {
+      const attendanceStats = await calculateAttendanceStats(employee.id, month);
+
+      if (finalWorkDays === 0 || finalWorkDays === undefined) {
+        finalWorkDays = attendanceStats.actualWorkDays;
+        shiftHoursForPay = null;
+      }
+
+      if (otHours === undefined) {
+        finalOtHours = attendanceStats.otHours;
+      } else if (attendanceStats.otHours > 0) {
+        finalOtHours = Math.max(finalOtHours, attendanceStats.otHours);
+      }
     }
   }
 
@@ -1669,6 +1681,14 @@ export const calculatePayroll = async (
   // Đảm bảo tính toán chính xác (fix lỗi underpay)
   const calculatedNetSalary = Math.round(totalIncome - deductions);
 
+  // Xác định phương thức tính lương để lưu vào DB
+  const resolvedCalcMethod: 'SHIFT' | 'ATTENDANCE' | 'MANUAL' =
+    actualWorkDays !== undefined && otHours !== undefined
+      ? 'MANUAL'
+      : useAttendance && !useShift
+      ? 'ATTENDANCE'
+      : 'SHIFT';
+
   return {
     id: `pr-${employee.id}-${month}`,
     userId: employee.id,
@@ -1684,6 +1704,7 @@ export const calculatePayroll = async (
     netSalary: calculatedNetSalary, // Sử dụng giá trị đã tính lại để đảm bảo chính xác
     status: 'PENDING',
     noLunchBreakDates: [],
+    calcMethod: resolvedCalcMethod,
   };
 };
 

@@ -158,6 +158,8 @@ export interface PayrollRecord {
   deductions: number; // BHXH, Tax, Fine
   netSalary: number; // Thực nhận
   status: 'PAID' | 'PENDING';
+  /** Phương thức tính lương: SHIFT (đăng ký ca) hoặc ATTENDANCE (chấm công) */
+  calcMethod?: 'SHIFT' | 'ATTENDANCE' | 'MANUAL';
   /** Timestamp (shift.date) các ngày không trừ 1h nghỉ trưa khi tính giờ ca CUSTOM */
   noLunchBreakDates?: number[];
 }

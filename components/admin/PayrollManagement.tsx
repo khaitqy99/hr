@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { PayrollRecord, User, UserRole, AttendanceRecord, AttendanceType, ShiftRegistration, OffType, Holiday, ContractType, Branch } from '../../types';
-import { getAllPayrolls, getAllUsers, calculatePayroll, createOrUpdatePayroll, getShiftRegistrations, getAllAttendance, getHolidays, getConfigNumber, updateShiftRegistration, setPayrollNoLunchBreakDates, getBranches, calculateAttendanceStats, calculateShiftWorkDays } from '../../services/db';
+import { getAllPayrolls, getAllUsers, calculatePayroll, createOrUpdatePayroll, getShiftRegistrations, getAllAttendance, getAttendance, getHolidays, getConfigNumber, updateShiftRegistration, setPayrollNoLunchBreakDates, getBranches, calculateAttendanceStats, calculateShiftWorkDays } from '../../services/db';
 import { exportMultipleTablesToCSV } from '../../utils/export';
 import {
   calculateRegularAndOTHoursWithNoLunchBreak,
@@ -84,9 +84,19 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
   const [isRecalculatingDetail, setIsRecalculatingDetail] = useState(false);
   const [editingNoteShiftId, setEditingNoteShiftId] = useState<string | null>(null);
   const [noteInputValue, setNoteInputValue] = useState<string>('');
+  const [attendanceDetails, setAttendanceDetails] = useState<AttendanceRecord[]>([]);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [selectedUpgradePlan, setSelectedUpgradePlan] = useState<'STARTER' | 'PRO' | 'ULTRA' | null>(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+
+  // ── Bulk Recalculate Modal state ──
+  const [showBulkRecalcModal, setShowBulkRecalcModal] = useState(false);
+  type BulkCalcMethod = 'SHIFT' | 'ATTENDANCE';
+  /** userId → phương thức tính lương cho từng nhân viên */
+  const [bulkMethodByUser, setBulkMethodByUser] = useState<Record<string, BulkCalcMethod>>({});
+  /** Nhân viên được chọn để tính lại (mặc định tất cả) */
+  const [bulkSelectedUsers, setBulkSelectedUsers] = useState<Set<string>>(new Set());
+  const [bulkRecalcProgress, setBulkRecalcProgress] = useState<{ done: number; total: number } | null>(null);
 
   // ── Inline Salary Calculator state ──
   type CalcMethod = 'SHIFT' | 'ATTENDANCE' | 'MANUAL';
@@ -697,9 +707,82 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
     }
   };
 
+  const handleBulkRecalcConfirm = async () => {
+    if (!selectedMonth) return;
+    setIsRecalculating(true);
+    setError(null);
+    const activeEmployees = employees.filter(
+      e => e.role !== UserRole.ADMIN && e.status === 'ACTIVE' && bulkSelectedUsers.has(e.id)
+    );
+    setBulkRecalcProgress({ done: 0, total: activeEmployees.length });
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (let i = 0; i < activeEmployees.length; i++) {
+      const employee = activeEmployees[i];
+      try {
+        const method = bulkMethodByUser[employee.id] ?? 'SHIFT';
+        const useAttendance = method === 'ATTENDANCE';
+        const useShift = method === 'SHIFT';
+
+        const payroll = await calculatePayroll(
+          employee,
+          selectedMonth,
+          undefined,
+          undefined,
+          0,
+          0,
+          useAttendance,
+          true,
+          useShift
+        );
+
+        // Giữ lại allowance, bonus, status và noLunchBreakDates cũ
+        const existingPayroll = payrollRecords.find(p => p.userId === employee.id);
+        if (existingPayroll) {
+          payroll.allowance = existingPayroll.allowance;
+          payroll.bonus = existingPayroll.bonus;
+          payroll.status = existingPayroll.status;
+          payroll.noLunchBreakDates = [...(existingPayroll.noLunchBreakDates ?? payroll.noLunchBreakDates ?? [])];
+        }
+        // Lưu phương thức tính lương
+        payroll.calcMethod = method;
+
+        await createOrUpdatePayroll(payroll);
+        successCount++;
+      } catch (err: any) {
+        console.error(`Error calculating payroll for ${employee.name}:`, err);
+        errorCount++;
+      }
+      setBulkRecalcProgress({ done: i + 1, total: activeEmployees.length });
+    }
+
+    await loadData(selectedMonth);
+    setIsRecalculating(false);
+    setShowBulkRecalcModal(false);
+    setBulkRecalcProgress(null);
+
+    if (errorCount > 0) {
+      alert(text.recalculateComplete.replace('{success}', String(successCount)).replace('{error}', String(errorCount)));
+    } else {
+      alert(text.recalculateSuccess.replace('{count}', String(successCount)));
+    }
+  };
+
   const handleRecalculateAll = () => {
-    setSelectedUpgradePlan('PRO');
-    setShowUpgradeModal(true);
+    if (!selectedMonth) { alert(text.selectMonth); return; }
+    // Khởi tạo giá trị mặc định cho modal: tất cả nhân viên active, phương thức SHIFT
+    const activeEmps = employees.filter(e => e.role !== UserRole.ADMIN && e.status === 'ACTIVE');
+    const defaultMethods: Record<string, BulkCalcMethod> = {};
+    const defaultSelected = new Set<string>();
+    activeEmps.forEach(e => {
+      defaultMethods[e.id] = 'SHIFT';
+      defaultSelected.add(e.id);
+    });
+    setBulkMethodByUser(defaultMethods);
+    setBulkSelectedUsers(defaultSelected);
+    setBulkRecalcProgress(null);
+    setShowBulkRecalcModal(true);
   };
 
   const handleUpgradePayment = async () => {
@@ -725,23 +808,29 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
 
   const handleViewPayrollDetail = async (payroll: PayrollRecord, employee: User) => {
     setSelectedPayrollDetail({ payroll, employee });
-    // Reset calc state for this employee
-    setCalcMethod('SHIFT');
+    // Khởi tạo calcMethod từ giá trị đã lưu trong DB (không reset về mặc định)
+    setCalcMethod((payroll.calcMethod ?? 'SHIFT') as 'SHIFT' | 'ATTENDANCE' | 'MANUAL');
     setCalcManualWorkDays('');
     setCalcManualOTHours('');
     setCalcAttendanceStats(null);
     setCalcShiftWorkDays(null);
+    setAttendanceDetails([]);
     try {
       // Dùng cùng nguồn dữ liệu với /admin/shift (admin scope), đã lọc kỳ lương + normalize
       const monthShifts = allShiftsInMonth.filter(s => s.userId === employee.id);
       setShiftDetails(monthShifts);
       // Pre-load stats for both methods in parallel
-      const [attendanceStats, shiftDays] = await Promise.all([
+      const [attendanceStats, shiftDays, attendanceRecords] = await Promise.all([
         calculateAttendanceStats(employee.id, selectedMonth),
         calculateShiftWorkDays(employee.id, selectedMonth),
+        getAttendance(employee.id),
       ]);
       setCalcAttendanceStats(attendanceStats);
       setCalcShiftWorkDays(shiftDays);
+      // Lọc attendance records theo kỳ lương
+      const { start: cycleStart, endExclusive: cycleEnd } = getPayrollCycleRange(selectedMonth);
+      const inCycle = attendanceRecords.filter(r => r.timestamp >= cycleStart && r.timestamp < cycleEnd);
+      setAttendanceDetails(inCycle);
     } catch (err) {
       console.error('Error loading shift details:', err);
       setShiftDetails([]);
@@ -775,11 +864,11 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       newPayroll.status = existingPayroll.status;
       newPayroll.noLunchBreakDates = existingPayroll.noLunchBreakDates;
 
-      await createOrUpdatePayroll(newPayroll);
+      const savedPayroll = await createOrUpdatePayroll(newPayroll);
 
-      // Refresh list and update modal with saved data
+      // Refresh list and update modal with saved data from DB
       await loadData(selectedMonth);
-      setSelectedPayrollDetail({ employee, payroll: newPayroll });
+      setSelectedPayrollDetail({ employee, payroll: savedPayroll });
 
       alert(text.calcSaveSuccess);
     } catch (err: any) {
@@ -891,6 +980,179 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
 
   return (
     <div className="space-y-6">
+      {/* Modal Tính lại lương */}
+      {showBulkRecalcModal && (() => {
+        const activeEmps = employees.filter(e => e.role !== UserRole.ADMIN && e.status === 'ACTIVE');
+        const allSelected = activeEmps.every(e => bulkSelectedUsers.has(e.id));
+        const someSelected = activeEmps.some(e => bulkSelectedUsers.has(e.id));
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4">
+            <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+                <div>
+                  <h3 className="text-base font-bold text-slate-800">Tính lại lương</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Kỳ lương: {formatPayrollCycleLabel(selectedMonth)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowBulkRecalcModal(false)}
+                  disabled={isRecalculating}
+                  className="text-slate-400 hover:text-slate-600 disabled:opacity-40"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Chọn tất cả + chú thích */}
+              <div className="px-6 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={el => { if (el) el.indeterminate = !allSelected && someSelected; }}
+                    onChange={() => {
+                      if (allSelected) {
+                        setBulkSelectedUsers(new Set());
+                      } else {
+                        setBulkSelectedUsers(new Set(activeEmps.map(e => e.id)));
+                      }
+                    }}
+                    className="w-4 h-4 rounded accent-indigo-600"
+                    disabled={isRecalculating}
+                  />
+                  Chọn tất cả
+                  <span className="text-slate-400 font-normal">({bulkSelectedUsers.size}/{activeEmps.length})</span>
+                </label>
+                <div className="flex items-center gap-3 text-xs text-slate-500">
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block w-2.5 h-2.5 rounded-full bg-indigo-500" />
+                    Đăng ký ca
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500" />
+                    Chấm công
+                  </span>
+                </div>
+              </div>
+
+              {/* Danh sách nhân viên */}
+              <div className="overflow-y-auto flex-1 divide-y divide-slate-50">
+                {activeEmps.length === 0 ? (
+                  <p className="text-center py-8 text-sm text-slate-400">Không có nhân viên đang hoạt động</p>
+                ) : (
+                  activeEmps.map(emp => {
+                    const isChecked = bulkSelectedUsers.has(emp.id);
+                    const method = bulkMethodByUser[emp.id] ?? 'SHIFT';
+                    return (
+                      <div
+                        key={emp.id}
+                        className={`flex items-center gap-4 px-6 py-3 transition-colors ${isChecked ? 'bg-white' : 'bg-slate-50/60 opacity-60'}`}
+                      >
+                        {/* Checkbox */}
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {
+                            setBulkSelectedUsers(prev => {
+                              const next = new Set(prev);
+                              if (next.has(emp.id)) next.delete(emp.id);
+                              else next.add(emp.id);
+                              return next;
+                            });
+                          }}
+                          className="w-4 h-4 rounded accent-indigo-600 flex-shrink-0"
+                          disabled={isRecalculating}
+                        />
+                        {/* Tên + phòng ban */}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-slate-800 truncate">{emp.name}</p>
+                          <p className="text-xs text-slate-400 truncate">{emp.department || '—'}</p>
+                        </div>
+                        {/* Toggle phương thức */}
+                        <div className="flex rounded-lg overflow-hidden border border-slate-200 flex-shrink-0 text-xs">
+                          <button
+                            type="button"
+                            disabled={isRecalculating || !isChecked}
+                            onClick={() => setBulkMethodByUser(prev => ({ ...prev, [emp.id]: 'SHIFT' }))}
+                            className={`px-3 py-1.5 font-medium transition-colors ${
+                              method === 'SHIFT'
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-white text-slate-500 hover:bg-slate-50'
+                            } disabled:cursor-not-allowed`}
+                          >
+                            Đăng ký ca
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isRecalculating || !isChecked}
+                            onClick={() => setBulkMethodByUser(prev => ({ ...prev, [emp.id]: 'ATTENDANCE' }))}
+                            className={`px-3 py-1.5 font-medium transition-colors border-l border-slate-200 ${
+                              method === 'ATTENDANCE'
+                                ? 'bg-amber-500 text-white'
+                                : 'bg-white text-slate-500 hover:bg-slate-50'
+                            } disabled:cursor-not-allowed`}
+                          >
+                            Chấm công
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Thanh tiến độ */}
+              {bulkRecalcProgress && (
+                <div className="px-6 py-3 bg-slate-50 border-t border-slate-100">
+                  <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
+                    <span>Đang tính lại lương...</span>
+                    <span>{bulkRecalcProgress.done}/{bulkRecalcProgress.total}</span>
+                  </div>
+                  <div className="w-full bg-slate-200 rounded-full h-1.5">
+                    <div
+                      className="bg-indigo-600 h-1.5 rounded-full transition-all duration-300"
+                      style={{ width: `${(bulkRecalcProgress.done / bulkRecalcProgress.total) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Footer */}
+              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowBulkRecalcModal(false)}
+                  disabled={isRecalculating}
+                  className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 transition-colors disabled:opacity-40"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  onClick={handleBulkRecalcConfirm}
+                  disabled={isRecalculating || bulkSelectedUsers.size === 0}
+                  className="px-5 py-2 rounded-xl text-sm font-bold text-white bg-green-600 hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isRecalculating && (
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 animate-spin">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                    </svg>
+                  )}
+                  {isRecalculating
+                    ? 'Đang tính...'
+                    : `Tính lại ${bulkSelectedUsers.size} nhân viên`}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Upgrade troll modal before recalculation */}
       {showUpgradeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4">
@@ -1049,6 +1311,21 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
               <div>
                 <h3 className="text-xl font-bold text-white">{selectedPayrollDetail.employee.name}</h3>
                 <p className="text-sm text-blue-100">{text.payrollDetail.replace('{month}', formatPayrollCycleLabel(selectedMonth))}</p>
+                <div className="mt-1.5">
+                  {selectedPayrollDetail.payroll.calcMethod === 'ATTENDANCE' ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-amber-400 text-amber-900">
+                      ⏱ {language === 'vi' ? 'Tính theo chấm công' : 'Attendance-based'}
+                    </span>
+                  ) : selectedPayrollDetail.payroll.calcMethod === 'MANUAL' ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-slate-300 text-slate-800">
+                      ✏️ {language === 'vi' ? 'Nhập tay' : 'Manual'}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-blue-300 text-blue-900">
+                      📋 {language === 'vi' ? 'Tính theo ca đăng ký' : 'Shift-based'}
+                    </span>
+                  )}
+                </div>
               </div>
               <button
                 onClick={() => setSelectedPayrollDetail(null)}
@@ -1071,122 +1348,11 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                   {/* LEFT COLUMN - Summary & Breakdown */}
                   <div className="space-y-6 lg:w-1/2 lg:shrink-0 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
 
-                    {/* ── Inline Salary Calculator ── */}
-                    <div className="bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-200 rounded-2xl p-5">
-                      <div className="flex items-center gap-2 mb-4">
-                        <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
-                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="white" className="w-4 h-4">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25V13.5zm0 2.25h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25V18zm2.498-6.75h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V13.5zm0 2.25h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V18zm2.504-6.75h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V13.5zm0 2.25h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V18zm2.498-6.75h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V13.5zM8.25 6h7.5v2.25h-7.5V6zM12 2.25c-1.892 0-3.758.11-5.593.322C5.307 2.7 4.5 3.65 4.5 4.757V19.5a2.25 2.25 0 002.25 2.25h10.5a2.25 2.25 0 002.25-2.25V4.757c0-1.108-.806-2.057-1.907-2.185A48.507 48.507 0 0012 2.25z" />
-                          </svg>
-                        </div>
-                        <h4 className="text-sm font-bold text-indigo-800">{text.calcSectionTitle}</h4>
-                      </div>
-
-                      {/* Method selector */}
-                      <div className="grid grid-cols-3 gap-2 mb-4">
-                        {(['SHIFT', 'ATTENDANCE', 'MANUAL'] as const).map((method) => {
-                          const labels: Record<string, string> = {
-                            SHIFT: text.calcMethodShift,
-                            ATTENDANCE: text.calcMethodAttendance,
-                            MANUAL: text.calcMethodManual,
-                          };
-                          const icons: Record<string, React.ReactNode> = {
-                            SHIFT: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" /></svg>,
-                            ATTENDANCE: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
-                            MANUAL: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>,
-                          };
-                          const isActive = calcMethod === method;
-                          return (
-                            <button
-                              key={method}
-                              type="button"
-                              onClick={() => setCalcMethod(method)}
-                              className={`flex flex-col items-center gap-1 px-2 py-3 rounded-xl border-2 text-center transition-all ${
-                                isActive
-                                  ? 'border-indigo-500 bg-indigo-600 text-white shadow-md shadow-indigo-200'
-                                  : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:bg-indigo-50'
-                              }`}
-                            >
-                              {icons[method]}
-                              <span className="text-[10px] font-bold leading-tight">{labels[method]}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {/* Auto-filled info or manual inputs */}
-                      {calcStatsLoading ? (
-                        <p className="text-xs text-indigo-500 italic text-center py-2">{text.calcLoadingStats}</p>
-                      ) : (
-                        <div className="grid grid-cols-2 gap-3 mb-4">
-                          <div>
-                            <label className="block text-xs font-bold text-slate-600 mb-1">{text.calcWorkDays}</label>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              readOnly={calcMethod !== 'MANUAL'}
-                              value={
-                                calcMethod === 'MANUAL'
-                                  ? calcManualWorkDays
-                                  : calcMethod === 'ATTENDANCE'
-                                  ? (calcAttendanceStats?.actualWorkDays ?? '').toString()
-                                  : (calcShiftWorkDays ?? '').toString()
-                              }
-                              onChange={(e) => calcMethod === 'MANUAL' && setCalcManualWorkDays(e.target.value)}
-                              className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold transition-colors ${
-                                calcMethod === 'MANUAL'
-                                  ? 'border-indigo-400 bg-white text-slate-800 focus:ring-2 focus:ring-indigo-400 focus:outline-none'
-                                  : 'border-slate-200 bg-slate-100 text-slate-600 cursor-not-allowed'
-                              }`}
-                              placeholder="0"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-bold text-slate-600 mb-1">{text.calcOTHours} (h)</label>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.1"
-                              readOnly={calcMethod === 'SHIFT'}
-                              value={
-                                calcMethod === 'MANUAL'
-                                  ? calcManualOTHours
-                                  : calcMethod === 'ATTENDANCE'
-                                  ? (calcAttendanceStats?.otHours ?? '').toString()
-                                  : '0'
-                              }
-                              onChange={(e) => calcMethod === 'MANUAL' && setCalcManualOTHours(e.target.value)}
-                              className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold transition-colors ${
-                                calcMethod !== 'SHIFT' && calcMethod !== 'MANUAL' ? 'border-slate-200 bg-slate-100 text-slate-600 cursor-not-allowed'
-                                : calcMethod === 'MANUAL' ? 'border-indigo-400 bg-white text-slate-800 focus:ring-2 focus:ring-indigo-400 focus:outline-none'
-                                : 'border-slate-200 bg-slate-100 text-slate-600 cursor-not-allowed'
-                              }`}
-                              placeholder="0"
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={handleCalcAndSave}
-                        disabled={isCalcSaving || calcStatsLoading}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                      >
-                        {isCalcSaving ? (
-                          <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" /><path fill="currentColor" d="M4 12a8 8 0 018-8v8z" className="opacity-75" /></svg>
-                        ) : (
-                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        )}
-                        {isCalcSaving ? text.calcSaving : text.calcSaveBtn}
-                      </button>
-                    </div>
-
                     {(() => {
                       const dailyRate = selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays;
                       const hourlyRate = dailyRate / workHoursPerDay;
-                      const basicSalary = dailyRate * selectedPayrollDetail.payroll.actualWorkDays;
+                      // Lương ngày công = đơn giá giờ × (ngày công × giờ/ngày) — khớp với calculatePayroll
+                      const basicSalary = hourlyRate * selectedPayrollDetail.payroll.actualWorkDays * workHoursPerDay;
                       const shiftOtPay = selectedPayrollDetail.payroll.otPay;
                       const calculatedNetSalary = selectedPayrollDetail.payroll.netSalary;
                       const otHoursCount = selectedPayrollDetail.payroll.otHours;
@@ -1293,7 +1459,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
 
                 {/* RIGHT COLUMN - Shift Details */}
                 <div className="min-h-0 flex flex-col lg:w-1/2 lg:flex-1 lg:overflow-hidden">
-                  {shiftDetails.length > 0 && (
+                  {/* Bảng ca làm việc - chỉ hiển thị khi calcMethod là SHIFT (hoặc không có) */}
+                  {(selectedPayrollDetail.payroll.calcMethod === 'SHIFT' || !selectedPayrollDetail.payroll.calcMethod) && shiftDetails.length > 0 && (
                     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden flex flex-col flex-1 min-h-0 lg:min-h-0 lg:max-h-full">
                       <div className="shrink-0 bg-slate-50 px-6 py-3 border-b border-slate-200">
                         <h4 className="text-sm font-bold text-slate-700">
@@ -1563,6 +1730,152 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                       </div>
                     </div>
                   )}
+
+                  {/* Bảng chi tiết chấm công - chỉ hiển thị khi calcMethod === 'ATTENDANCE' */}
+                  {(selectedPayrollDetail.payroll.calcMethod === 'ATTENDANCE') && (() => {
+                    // Nhóm records theo ngày
+                    const byDate: Record<string, { checkIn?: AttendanceRecord; checkOut?: AttendanceRecord }> = {};
+                    attendanceDetails.forEach(r => {
+                      const d = new Date(r.timestamp);
+                      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                      if (!byDate[key]) byDate[key] = {};
+                      if (r.type === AttendanceType.CHECK_IN) byDate[key].checkIn = r;
+                      else if (r.type === AttendanceType.CHECK_OUT) byDate[key].checkOut = r;
+                    });
+
+                    const sortedDays = Object.entries(byDate).sort(([a],[b]) => a.localeCompare(b));
+                    if (sortedDays.length === 0) return null;
+
+                    const dailyRate = selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays;
+                    const hourlyRate = dailyRate / workHoursPerDay;
+                    const standardWorkHours = workHoursPerDay;
+
+                    let totalHours = 0;
+                    let totalOtHours = 0;
+                    let totalMoney = 0;
+
+                    const rows = sortedDays.map(([dateKey, day]) => {
+                      const [y, m, dd] = dateKey.split('-');
+                      const dateLabel = `${dd}/${m}`;
+                      const hasCheckIn = !!day.checkIn;
+                      const hasCheckOut = !!day.checkOut;
+
+                      let workHours = 0;
+                      let otHours = 0;
+                      let money = 0;
+                      let inTime = '-';
+                      let outTime = '-';
+
+                      if (hasCheckIn) {
+                        const d = new Date(day.checkIn!.timestamp);
+                        inTime = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                      }
+                      if (hasCheckOut) {
+                        const d = new Date(day.checkOut!.timestamp);
+                        outTime = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                      }
+
+                      if (hasCheckIn && hasCheckOut) {
+                        const raw = (day.checkOut!.timestamp - day.checkIn!.timestamp) / 3_600_000;
+                        // Trừ 1h nghỉ trưa nếu làm >= 6 tiếng
+                        workHours = raw >= 6 ? raw - 1 : raw;
+                        const regularHours = Math.min(workHours, standardWorkHours);
+                        otHours = Math.max(0, workHours - standardWorkHours);
+                        money = hourlyRate * regularHours + hourlyRate * 1.5 * otHours;
+                        totalHours += regularHours;
+                        totalOtHours += otHours;
+                        totalMoney += money;
+                      }
+
+                      const statusColor = !hasCheckIn || !hasCheckOut
+                        ? 'text-red-500 bg-red-50'
+                        : otHours > 0
+                        ? 'text-purple-600 bg-purple-50'
+                        : 'text-green-600 bg-green-50';
+                      const statusLabel = !hasCheckIn ? 'Thiếu vào' : !hasCheckOut ? 'Thiếu ra' : otHours > 0 ? 'OT' : 'Đủ công';
+
+                      return (
+                        <tr key={dateKey} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 border-r border-slate-100">
+                            <div className="space-y-0.5">
+                              <p className="text-sm font-bold text-slate-700">{dateLabel}</p>
+                              <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                                <span className="font-medium text-green-700">▶ {inTime}</span>
+                                <span>→</span>
+                                <span className="font-medium text-red-600">■ {outTime}</span>
+                              </div>
+                              <span className={`inline-block text-xs font-bold px-2 py-0.5 rounded mt-1 ${statusColor}`}>
+                                {statusLabel}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="space-y-0.5">
+                              {hasCheckIn && hasCheckOut ? (
+                                <>
+                                  <p className="text-sm font-bold text-slate-800">{workHours.toFixed(1)}h</p>
+                                  {otHours > 0 && (
+                                    <p className="text-xs text-purple-600">{(workHours - otHours).toFixed(1)}h + OT {otHours.toFixed(1)}h</p>
+                                  )}
+                                  <p className="text-base font-bold text-blue-600">{formatCurrency(Math.round(money))}</p>
+                                </>
+                              ) : (
+                                <p className="text-xs text-red-400">—</p>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    });
+
+                    rows.push(
+                      <tr key="att-total" className="bg-gradient-to-r from-blue-50 to-blue-100 font-bold border-t-2 border-blue-200">
+                        <td className="px-4 py-3 border-r border-blue-200">
+                          <div className="space-y-1">
+                            <p className="text-sm text-blue-700">Tổng cộng</p>
+                            <p className="text-xs text-blue-600">
+                              {((totalHours + totalOtHours) / workHoursPerDay).toFixed(2)} công
+                            </p>
+                            {totalOtHours > 0 && (
+                              <p className="text-xs text-purple-600">
+                                {totalHours.toFixed(1)}h thường + {totalOtHours.toFixed(1)}h OT
+                              </p>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <p className="text-sm text-blue-700">{(totalHours + totalOtHours).toFixed(1)}h</p>
+                          <p className="text-lg text-blue-700">{formatCurrency(Math.round(totalMoney))}</p>
+                        </td>
+                      </tr>
+                    );
+
+                    return (
+                      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden flex flex-col flex-1 min-h-0">
+                        <div className="shrink-0 bg-amber-50 px-6 py-3 border-b border-amber-200 flex items-center gap-2">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 text-amber-600">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <h4 className="text-sm font-bold text-amber-800">
+                            Chi tiết chấm công ({sortedDays.length} ngày · {(totalHours + totalOtHours).toFixed(1)}h)
+                          </h4>
+                        </div>
+                        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto">
+                          <table className="w-full">
+                            <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
+                              <tr>
+                                <th className="px-4 py-2 text-left text-xs font-bold text-slate-600 w-1/2 border-r border-slate-200">Ngày / Giờ vào - ra</th>
+                                <th className="px-4 py-2 text-right text-xs font-bold text-slate-600 w-1/2">Giờ / Tiền</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {rows}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
               )}
@@ -1710,21 +2023,14 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                     return null;
                   }
                   
-                  // Tính tổng giờ thực tế từ shifts của nhân viên này
-                  const userShifts = allShiftsInMonth.filter(s => s.userId === item.userId);
-                  const rowNoLunchDates = new Set(noLunchBreakByKey[payrollNoLunchKey(selectedMonth, item.userId)] ?? []);
-                  const { regularHours: regH, otHours: shiftOtH } = calculateRegularAndOTHoursWithNoLunchBreak(
-                    userShifts,
-                    workHoursPerDay,
-                    rowNoLunchDates
-                  );
-                  const totalWorkedHours = regH + shiftOtH;
-
+                  // Tính ngày công và OT từ payroll record đã lưu (đúng với mọi phương thức tính)
                   const dailyRate = item.baseSalary / item.standardWorkDays;
                   const hourlyRate = dailyRate / workHoursPerDay;
-                  const basicSalary = hourlyRate * regH;
-                  const shiftOtPay = hourlyRate * 1.5 * shiftOtH;
-                  const totalIncome = basicSalary + shiftOtPay + item.allowance + item.bonus;
+                  // Lương ngày công = đơn giá giờ × (ngày công × giờ/ngày) — nhất quán với calculatePayroll
+                  const basicSalary = hourlyRate * item.actualWorkDays * workHoursPerDay;
+                  const storedOtPay = item.otPay;
+                  const storedOtHours = item.otHours;
+                  const totalIncome = basicSalary + storedOtPay + item.allowance + item.bonus;
                   
                   return (
                     <tr key={item.id} className="hover:bg-sky-50/50 transition-colors">
@@ -1747,18 +2053,20 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                         <p className="text-sm text-slate-700">{formatCurrency(item.baseSalary)}</p>
                       </td>
                       <td className="px-6 py-4">
-                        <p className="text-sm text-slate-700">{totalWorkedHours.toFixed(1)}h</p>
+                        <p className="text-sm text-slate-700">
+                          {(item.actualWorkDays * workHoursPerDay).toFixed(1)}h
+                        </p>
                         <p className="text-xs text-slate-500">
-                          ({(totalWorkedHours / workHoursPerDay).toFixed(2)} {language === 'vi' ? 'công' : 'days'})
+                          ({item.actualWorkDays.toFixed(2)} {language === 'vi' ? 'công' : 'days'})
                         </p>
                       </td>
                       <td className="px-6 py-4">
                         <p className="text-sm text-slate-700">{item.actualWorkDays.toFixed(2)}/{item.standardWorkDays}</p>
                       </td>
                       <td className="px-6 py-4">
-                        <p className="text-sm text-slate-700">{shiftOtH.toFixed(1)}h</p>
-                        {shiftOtPay > 0 && (
-                          <p className="text-xs text-green-600">+{formatCurrency(Math.round(shiftOtPay))}</p>
+                        <p className="text-sm text-slate-700">{storedOtHours.toFixed(1)}h</p>
+                        {storedOtPay > 0 && (
+                          <p className="text-xs text-green-600">+{formatCurrency(Math.round(storedOtPay))}</p>
                         )}
                       </td>
                       <td className="px-6 py-4">
@@ -1771,7 +2079,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                       </td>
                       <td className="px-6 py-4">
                         <p className="text-sm font-bold text-blue-600">
-                          {formatCurrency(Math.round(totalIncome - item.deductions))}
+                          {formatCurrency(item.netSalary)}
                         </p>
                       </td>
                       <td className="px-6 py-4">
