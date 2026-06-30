@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { User, UserRole, PayrollRecord } from '../types';
-import { getAllUsers, getPayroll, createOrUpdatePayroll, calculatePayroll, calculateShiftWorkDays, getIncompleteAttendanceDays } from '../services/db';
+import { getAllUsers, getPayroll, createOrUpdatePayroll, calculatePayroll, calculateShiftWorkDays, getIncompleteAttendanceDays, calculateAttendanceStats } from '../services/db';
 
 interface SalaryManagementProps {
   user: User;
@@ -22,7 +22,8 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
   const [shiftWorkDays, setShiftWorkDays] = useState<number | null>(null);
   const [incompleteDays, setIncompleteDays] = useState<{ date: string; hasCheckIn: boolean; hasCheckOut: boolean }[]>([]);
   const [isCalculating, setIsCalculating] = useState(false);
-  const [useShiftData, setUseShiftData] = useState(true); // Ngày công từ đăng ký ca (mặc định)
+  const [calculationMethod, setCalculationMethod] = useState<'shift' | 'attendance' | 'manual'>('shift');
+  const [attendanceStats, setAttendanceStats] = useState<{ actualWorkDays: number; otHours: number } | null>(null);
 
   useEffect(() => {
     const loadEmployees = async () => {
@@ -43,19 +44,23 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
       if (selectedEmployee && selectedMonth) {
         const records = await getPayroll(selectedEmployee.id, selectedMonth);
         setPayrollRecords(records);
-        const [days, incomplete] = await Promise.all([
+        const [days, incomplete, attStats] = await Promise.all([
           calculateShiftWorkDays(selectedEmployee.id, selectedMonth),
           getIncompleteAttendanceDays(selectedEmployee.id, selectedMonth),
+          calculateAttendanceStats(selectedEmployee.id, selectedMonth),
         ]);
         setShiftWorkDays(days);
         setIncompleteDays(incomplete);
-        if (useShiftData) {
+        setAttendanceStats(attStats);
+        if (calculationMethod === 'shift') {
           setSalaryForm(prev => ({ ...prev, actualWorkDays: days, otHours: 0 }));
+        } else if (calculationMethod === 'attendance') {
+          setSalaryForm(prev => ({ ...prev, actualWorkDays: attStats.actualWorkDays, otHours: attStats.otHours }));
         }
       }
     };
     loadPayrollData();
-  }, [selectedEmployee, selectedMonth, useShiftData]);
+  }, [selectedEmployee, selectedMonth, calculationMethod]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
@@ -69,13 +74,13 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
       const payroll = await calculatePayroll(
         selectedEmployee,
         selectedMonth,
-        useShiftData ? undefined : salaryForm.actualWorkDays,
-        salaryForm.otHours, // OT có thể nhập tay kể cả khi tính theo đăng ký ca
+        calculationMethod === 'manual' ? salaryForm.actualWorkDays : undefined,
+        calculationMethod === 'manual' ? salaryForm.otHours : undefined,
         salaryForm.allowance,
         salaryForm.bonus,
-        false, // useAttendance - không dùng chấm công
+        calculationMethod === 'attendance', // useAttendance - dùng chấm công khi chọn attendance
         true,  // useLeave
-        useShiftData, // useShift - ngày công từ đăng ký ca
+        calculationMethod === 'shift', // useShift - dùng đăng ký ca khi chọn shift
         salaryForm.deductions // customDeductions - khấu trừ nhập tay
       );
 
@@ -297,29 +302,84 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
                     </div>
                   )}
 
-                  {/* Ngày công từ đăng ký ca */}
-                  {selectedMonth && shiftWorkDays !== null && (
-                    <div className="bg-green-50 border border-green-200 rounded-xl p-4">
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-xs font-bold text-green-700">Đăng ký ca tháng {selectedMonth}</span>
-                        <label className="flex items-center space-x-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={useShiftData}
-                            onChange={(e) => {
-                              setUseShiftData(e.target.checked);
-                              if (e.target.checked && shiftWorkDays !== null) {
-                                setSalaryForm(prev => ({ ...prev, actualWorkDays: shiftWorkDays, otHours: 0 }));
-                              }
-                            }}
-                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                          />
-                          <span className="text-xs font-medium text-green-700">Tự động từ đăng ký ca</span>
-                        </label>
-                      </div>
-                      <div className="text-sm">
-                        <span className="text-slate-600">Ngày công (ca đã duyệt, không OFF):</span>
-                        <span className="font-bold text-green-700 ml-2">{shiftWorkDays} ngày</span>
+                  {/* Lựa chọn phương thức tính công */}
+                  {selectedMonth && (
+                    <div className="bg-white p-5 rounded-3xl shadow-sm border border-sky-50">
+                      <label className="block text-xs font-bold text-slate-500 mb-3">Phương thức tính công</label>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCalculationMethod('shift');
+                            if (shiftWorkDays !== null) {
+                              setSalaryForm(prev => ({ ...prev, actualWorkDays: shiftWorkDays, otHours: 0 }));
+                            }
+                          }}
+                          className={`p-4 rounded-2xl border text-left transition-all flex flex-col justify-between ${
+                            calculationMethod === 'shift'
+                              ? 'border-blue-500 bg-blue-50/50 shadow-sm shadow-blue-100'
+                              : 'border-slate-200 hover:border-slate-300 bg-white'
+                          }`}
+                        >
+                          <div>
+                            <p className="text-sm font-bold text-slate-800">Đăng ký ca</p>
+                            <p className="text-xs text-slate-500 mt-1">Dựa trên các ca làm việc được duyệt trước đó.</p>
+                          </div>
+                          {shiftWorkDays !== null && (
+                            <span className="mt-3 text-xs font-semibold text-blue-600 bg-blue-100/50 px-2 py-0.5 rounded-lg w-max">
+                              {shiftWorkDays.toFixed(2)} ngày công
+                            </span>
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCalculationMethod('attendance');
+                            if (attendanceStats !== null) {
+                              setSalaryForm(prev => ({ 
+                                ...prev, 
+                                actualWorkDays: attendanceStats.actualWorkDays, 
+                                otHours: attendanceStats.otHours 
+                              }));
+                            }
+                          }}
+                          className={`p-4 rounded-2xl border text-left transition-all flex flex-col justify-between ${
+                            calculationMethod === 'attendance'
+                              ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100'
+                              : 'border-slate-200 hover:border-slate-300 bg-white'
+                          }`}
+                        >
+                          <div>
+                            <p className="text-sm font-bold text-slate-800">Check-in / Check-out</p>
+                            <p className="text-xs text-slate-500 mt-1">Dựa trên chấm công thực tế của nhân viên.</p>
+                          </div>
+                          {attendanceStats !== null && (
+                            <span className="mt-3 text-xs font-semibold text-emerald-600 bg-emerald-100/50 px-2 py-0.5 rounded-lg w-max">
+                              {attendanceStats.actualWorkDays} công / {attendanceStats.otHours}h OT
+                            </span>
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCalculationMethod('manual');
+                          }}
+                          className={`p-4 rounded-2xl border text-left transition-all flex flex-col justify-between ${
+                            calculationMethod === 'manual'
+                              ? 'border-orange-500 bg-orange-50/50 shadow-sm shadow-orange-100'
+                              : 'border-slate-200 hover:border-slate-300 bg-white'
+                          }`}
+                        >
+                          <div>
+                            <p className="text-sm font-bold text-slate-800">Nhập tay</p>
+                            <p className="text-xs text-slate-500 mt-1">Tự nhập số ngày công và giờ tăng ca tùy ý.</p>
+                          </div>
+                          <span className="mt-3 text-xs font-semibold text-orange-600 bg-orange-100/50 px-2 py-0.5 rounded-lg w-max">
+                            Tự chỉnh sửa
+                          </span>
+                        </button>
                       </div>
                     </div>
                   )}
@@ -332,8 +392,11 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
                         <div>
                           <label className="block text-xs font-bold text-slate-500 mb-1">
                             Ngày công thực tế
-                            {useShiftData && shiftWorkDays !== null && (
+                            {calculationMethod === 'shift' && shiftWorkDays !== null && (
                               <span className="text-green-600 ml-2">(Từ đăng ký ca: {shiftWorkDays.toFixed(2)})</span>
+                            )}
+                            {calculationMethod === 'attendance' && attendanceStats !== null && (
+                              <span className="text-emerald-600 ml-2">(Từ chấm công: {attendanceStats.actualWorkDays})</span>
                             )}
                           </label>
                           <input
@@ -346,15 +409,18 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
                               const value = Number(e.target.value);
                               setSalaryForm(f => ({ ...f, actualWorkDays: value >= 0 ? value : 0 }));
                             }}
-                            disabled={useShiftData}
-                            className={`w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm ${useShiftData ? 'bg-slate-100 text-slate-500' : ''}`}
+                            disabled={calculationMethod !== 'manual'}
+                            className={`w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm ${calculationMethod !== 'manual' ? 'bg-slate-100 text-slate-500' : ''}`}
                           />
                         </div>
                         <div>
                           <label className="block text-xs font-bold text-slate-500 mb-1">
-                            Giờ làm thêm (OT) — nhập tay nếu có
-                            {useShiftData && (
-                              <span className="text-slate-400 ml-2">(Tính lương theo ca, không lấy từ chấm công)</span>
+                            Giờ làm thêm (OT)
+                            {calculationMethod === 'shift' && (
+                              <span className="text-slate-400 ml-2">(Nhập tay nếu có)</span>
+                            )}
+                            {calculationMethod === 'attendance' && attendanceStats !== null && (
+                              <span className="text-emerald-600 ml-2">(Từ chấm công: {attendanceStats.otHours}h)</span>
                             )}
                           </label>
                           <input
@@ -366,8 +432,8 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
                               const value = Number(e.target.value);
                               setSalaryForm(f => ({ ...f, otHours: value >= 0 ? value : 0 }));
                             }}
-                            disabled={false}
-                            className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm"
+                            disabled={calculationMethod === 'attendance'}
+                            className={`w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm ${calculationMethod === 'attendance' ? 'bg-slate-100 text-slate-500' : ''}`}
                           />
                         </div>
                         <div>
@@ -413,20 +479,32 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
                         <button
                           onClick={handleCalculateSalary}
                           disabled={isCalculating || !selectedEmployee || (!selectedEmployee.grossSalary && !selectedEmployee.traineeSalary)}
-                          className={`w-full py-3 rounded-xl text-sm font-bold shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${useShiftData
-                            ? 'bg-green-600 text-white hover:bg-green-700'
-                            : 'bg-blue-600 text-white hover:bg-blue-700'
-                            }`}
+                          className={`w-full py-3 rounded-xl text-sm font-bold shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${
+                            calculationMethod === 'shift'
+                              ? 'bg-green-600 text-white hover:bg-green-700'
+                              : calculationMethod === 'attendance'
+                              ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                              : 'bg-blue-600 text-white hover:bg-blue-700'
+                          }`}
                         >
-                          {isCalculating ? 'Đang tính...' : useShiftData ? 'Tính lương từ đăng ký ca' : 'Tính lương'}
+                          {isCalculating
+                            ? 'Đang tính...'
+                            : calculationMethod === 'shift'
+                            ? 'Tính lương từ đăng ký ca'
+                            : calculationMethod === 'attendance'
+                            ? 'Tính lương từ chấm công'
+                            : 'Tính lương'}
                         </button>
                         {!selectedEmployee?.grossSalary && !selectedEmployee?.traineeSalary && (
                           <p className="text-xs text-red-500 text-center">Nhân viên chưa có thông tin lương cơ bản</p>
                         )}
-                        {useShiftData && shiftWorkDays !== null && shiftWorkDays === 0 && (
+                        {calculationMethod === 'shift' && shiftWorkDays !== null && shiftWorkDays === 0 && (
                           <p className="text-xs text-orange-500 text-center">Chưa có đăng ký ca đã duyệt cho tháng này</p>
                         )}
-                        {!useShiftData && incompleteDays.length > 0 && (
+                        {calculationMethod === 'attendance' && attendanceStats !== null && attendanceStats.actualWorkDays === 0 && (
+                          <p className="text-xs text-orange-500 text-center">Chưa có dữ liệu check-in/check-out hợp lệ cho tháng này</p>
+                        )}
+                        {calculationMethod !== 'shift' && incompleteDays.length > 0 && (
                           <div className="mt-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-left">
                             <p className="text-xs font-bold text-amber-800 mb-1">Ngày thiếu chấm công (tham khảo):</p>
                             <p className="text-xs text-amber-700 mb-2">

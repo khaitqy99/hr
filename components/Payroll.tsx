@@ -194,28 +194,11 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
     );
   }
 
-  // Dùng cùng logic với admin payroll để đảm bảo hiển thị đồng nhất.
-  const noLunchDates = new Set(data.noLunchBreakDates ?? []);
-  const { regularHours: regH, otHours: shiftOtH } = calculateRegularAndOTHoursWithNoLunchBreak(
-    shiftDetails,
-    workHoursPerDay,
-    noLunchDates
-  );
-  const totalWorkedHours = calculateTotalWorkedHoursWithNoLunchBreak(
-    shiftDetails,
-    workHoursPerDay,
-    noLunchDates
-  );
-
+  // Sử dụng trực tiếp dữ liệu từ bản ghi lương đã tính để đảm bảo đồng nhất tuyệt đối với admin
   const dailyRate = data.baseSalary / data.standardWorkDays;
-  const hourlyRate = dailyRate / workHoursPerDay;
-  const basicSalary = hourlyRate * regH;
-  const shiftOtPay = hourlyRate * 1.5 * shiftOtH;
-  const totalIncome = basicSalary + shiftOtPay + data.allowance + data.bonus;
-  const calculatedNetSalary = totalIncome - data.deductions;
-  
-  // Sử dụng giá trị đã tính lại từ giờ thực tế
-  const displayNetSalary = Math.round(calculatedNetSalary);
+  const basicSalary = dailyRate * data.actualWorkDays;
+  const shiftOtPay = data.otPay;
+  const displayNetSalary = data.netSalary;
 
   return (
     <div className="space-y-6 fade-up">
@@ -299,10 +282,7 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                   <div>
                       <p className="text-xs text-slate-500 font-medium">Lương cơ bản</p>
                       <p className="text-[10px] text-slate-400">
-                        {totalWorkedHours > 0
-                          ? `${totalWorkedHours.toFixed(1)}h (${(totalWorkedHours / workHoursPerDay).toFixed(2)} công)`
-                          : `Công thực tế: ${data.actualWorkDays.toFixed(2)}/${data.standardWorkDays}`
-                        }
+                        {`Công thực tế: ${data.actualWorkDays.toFixed(2)}/${data.standardWorkDays} ngày`}
                       </p>
                   </div>
                   <p className="text-sm font-bold text-slate-800">{formatCurrency(Math.round(basicSalary))}</p>
@@ -311,7 +291,7 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                 <div className="p-4 flex justify-between items-center">
                     <div>
                         <p className="text-xs text-slate-500 font-medium">Làm thêm giờ (OT)</p>
-                        <p className="text-[10px] text-slate-400">{shiftOtH.toFixed(1)} giờ</p>
+                        <p className="text-[10px] text-slate-400">{data.otHours.toFixed(1)} giờ</p>
                     </div>
                     <p className="text-sm font-bold text-green-600">+{formatCurrency(Math.round(shiftOtPay))}</p>
                 </div>

@@ -987,29 +987,12 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                   {/* LEFT COLUMN - Summary & Breakdown */}
                   <div className="space-y-6 lg:w-1/2 lg:shrink-0 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
                     {(() => {
-                      const { regularHours: regH, otHours: shiftOtH } = calculateRegularAndOTHoursWithNoLunchBreak(
-                        shiftDetails,
-                        workHoursPerDay,
-                        detailNoLunchDates
-                      );
-                      const totalWorkedHours = calculateTotalWorkedHoursWithNoLunchBreak(
-                        shiftDetails,
-                        workHoursPerDay,
-                        detailNoLunchDates
-                      );
-                      const totalActualHours = regH;
-
                       const dailyRate = selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays;
                       const hourlyRate = dailyRate / workHoursPerDay;
-                      const basicSalary = hourlyRate * regH;
-                      const shiftOtPay = hourlyRate * 1.5 * shiftOtH;
-
-                      const totalIncome =
-                        basicSalary +
-                        shiftOtPay +
-                        selectedPayrollDetail.payroll.allowance +
-                        selectedPayrollDetail.payroll.bonus;
-                      const calculatedNetSalary = Math.round(totalIncome - selectedPayrollDetail.payroll.deductions);
+                      const basicSalary = dailyRate * selectedPayrollDetail.payroll.actualWorkDays;
+                      const shiftOtPay = selectedPayrollDetail.payroll.otPay;
+                      const calculatedNetSalary = selectedPayrollDetail.payroll.netSalary;
+                      const otHoursCount = selectedPayrollDetail.payroll.otHours;
                       
                       return (
                         <>
@@ -1021,14 +1004,16 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                       </div>
                       <div className="bg-green-50 rounded-xl p-4">
                         <p className="text-xs font-bold text-green-600 mb-1">{text.workDays}</p>
-                        <p className="text-lg font-bold text-green-700">{totalWorkedHours.toFixed(1)}h</p>
+                        <p className="text-lg font-bold text-green-700">
+                          {selectedPayrollDetail.payroll.actualWorkDays.toFixed(2)} {language === 'vi' ? 'công' : 'days'}
+                        </p>
                         <p className="text-xs text-green-600">
-                          {(totalWorkedHours / workHoursPerDay).toFixed(2)} {language === 'vi' ? 'công (gồm OT)' : 'days (incl. OT)'}
+                          {language === 'vi' ? 'Số ngày công đã tính' : 'Calculated work days'}
                         </p>
                       </div>
                       <div className="bg-purple-50 rounded-xl p-4">
-                        <p className="text-xs font-bold text-purple-600 mb-1">{language === 'vi' ? 'Giờ OT (theo ca)' : 'OT hrs (shifts)'}</p>
-                        <p className="text-lg font-bold text-purple-700">{shiftOtH.toFixed(1)}h</p>
+                        <p className="text-xs font-bold text-purple-600 mb-1">{language === 'vi' ? 'Giờ làm thêm (OT)' : 'OT hours'}</p>
+                        <p className="text-lg font-bold text-purple-700">{otHoursCount.toFixed(1)}h</p>
                         <p className="text-xs text-purple-600">+{formatCurrency(Math.round(shiftOtPay))}</p>
                       </div>
                       <div className="bg-orange-50 rounded-xl p-4">
@@ -1051,28 +1036,28 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                             <div className="flex justify-between items-center py-2 border-b border-slate-200">
                               <span className="text-sm text-slate-600">
                                 {language === 'vi'
-                                  ? `Tính từ ${shiftDetails.length} ca: ${regH.toFixed(1)}h thường + ${shiftOtH.toFixed(1)}h OT = ${totalWorkedHours.toFixed(1)}h`
-                                  : `From ${shiftDetails.length} shifts: ${regH.toFixed(1)}h reg + ${shiftOtH.toFixed(1)}h OT = ${totalWorkedHours.toFixed(1)}h`}
+                                  ? `Số ngày công thực tế: ${selectedPayrollDetail.payroll.actualWorkDays.toFixed(2)} / ${selectedPayrollDetail.payroll.standardWorkDays} ngày`
+                                  : `Actual work days: ${selectedPayrollDetail.payroll.actualWorkDays.toFixed(2)} / ${selectedPayrollDetail.payroll.standardWorkDays} days`}
                               </span>
                               <span className="text-xs text-slate-500">
-                                = {formatCurrency(Math.round(hourlyRate))}/{language === 'vi' ? 'giờ' : 'hour'}
+                                = {formatCurrency(Math.round(dailyRate))}/{language === 'vi' ? 'ngày' : 'day'}
                               </span>
                             </div>
 
-                    {shiftOtH > 0 && (
+                    {otHoursCount > 0 && (
                       <>
                         <div className="flex justify-between items-center py-2 border-b border-slate-200">
-                          <span className="text-sm text-slate-600">{text.overtimeSalary.replace('{hours}', shiftOtH.toFixed(1))}</span>
+                          <span className="text-sm text-slate-600">{text.overtimeSalary.replace('{hours}', otHoursCount.toFixed(1))}</span>
                           <span className="text-sm font-bold text-green-600">+{formatCurrency(Math.round(shiftOtPay))}</span>
                         </div>
                         <div className="flex justify-between items-center py-2 border-b border-slate-200">
                           <span className="text-sm text-slate-600">
                             {language === 'vi'
-                              ? `Công thức: (LCB / ${selectedPayrollDetail.payroll.standardWorkDays} / ${workHoursPerDay}) × 1.5 × ${shiftOtH.toFixed(1)}`
-                              : `Formula: (Base / ${selectedPayrollDetail.payroll.standardWorkDays} / ${workHoursPerDay}) × 1.5 × ${shiftOtH.toFixed(1)}`}
+                              ? `Công thức: (LCB / ${selectedPayrollDetail.payroll.standardWorkDays} / ${workHoursPerDay}) × 1.5 × ${otHoursCount.toFixed(1)}`
+                              : `Formula: (Base / ${selectedPayrollDetail.payroll.standardWorkDays} / ${workHoursPerDay}) × 1.5 × ${otHoursCount.toFixed(1)}`}
                           </span>
                           <span className="text-xs text-slate-500">
-                            = {formatCurrency(selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays / workHoursPerDay)} × 1.5 × {shiftOtH.toFixed(1)}
+                            = {formatCurrency(selectedPayrollDetail.payroll.baseSalary / selectedPayrollDetail.payroll.standardWorkDays / workHoursPerDay)} × 1.5 × {otHoursCount.toFixed(1)}
                           </span>
                         </div>
                       </>
