@@ -8,9 +8,15 @@ export default defineConfig(({ mode }) => {
     const isProduction = mode === 'production';
     return {
       server: {
-        port: 3000,
+        port: Number(env.VITE_DEV_PORT || env.PORT || 3000),
+        strictPort: false,
         host: '0.0.0.0',
         allowedHosts: true, // Cho phép tunnel (Cloudflare, ngrok, ...)
+      },
+      preview: {
+        port: Number(env.VITE_PREVIEW_PORT || env.PORT || 4173),
+        strictPort: false,
+        host: '0.0.0.0',
       },
       build: {
         minify: 'terser',

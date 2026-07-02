@@ -1388,6 +1388,35 @@ export const getPayroll = async (userId: string, month?: string): Promise<Payrol
   return savedForUser;
 };
 
+const sortPayrollMonthsDesc = (months: string[]): string[] =>
+  [...new Set(months)].sort((a, b) => {
+    const [aMonth, aYear] = a.split('-').map(Number);
+    const [bMonth, bYear] = b.split('-').map(Number);
+    if (aYear !== bYear) return bYear - aYear;
+    return bMonth - aMonth;
+  });
+
+/** Danh sách các kỳ lương đã có bản ghi (dùng cho dropdown lịch sử). */
+export const getPayrollMonths = async (): Promise<string[]> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { data, error } = await supabase
+        .from('payroll_records')
+        .select('month');
+
+      if (error || !data) return [];
+
+      return sortPayrollMonthsDesc((data as Array<{ month: string }>).map(record => record.month));
+    } catch (error) {
+      console.error('Error getting payroll months from Supabase:', error);
+      return [];
+    }
+  }
+
+  const saved: PayrollRecord[] = JSON.parse(localStorage.getItem(PAYROLL_KEY) || '[]');
+  return sortPayrollMonthsDesc(saved.map(r => r.month));
+};
+
 export const getAllPayrolls = async (month: string): Promise<PayrollRecord[]> => {
   if (isSupabaseAvailable()) {
     try {

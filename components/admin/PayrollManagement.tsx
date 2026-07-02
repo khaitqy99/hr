@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { PayrollRecord, User, UserRole, AttendanceRecord, AttendanceType, ShiftRegistration, OffType, Holiday, ContractType, Branch } from '../../types';
-import { getAllPayrolls, getAllUsers, calculatePayroll, createOrUpdatePayroll, getShiftRegistrations, getAllAttendance, getAttendance, getHolidays, getConfigNumber, updateShiftRegistration, setPayrollNoLunchBreakDates, getBranches, calculateAttendanceStats, calculateShiftWorkDays } from '../../services/db';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { PayrollRecord, User, UserRole, AttendanceRecord, AttendanceType, ShiftRegistration, OffType, Branch } from '../../types';
+import { getAllPayrolls, getPayrollMonths, getAllUsers, calculatePayroll, createOrUpdatePayroll, getShiftRegistrations, getAttendance, getConfigNumber, updateShiftRegistration, setPayrollNoLunchBreakDates, getBranches, calculateAttendanceStats, calculateShiftWorkDays } from '../../services/db';
 import { exportMultipleTablesToCSV } from '../../utils/export';
 import {
   calculateRegularAndOTHoursWithNoLunchBreak,
@@ -35,6 +35,11 @@ const formatPayrollCycleLabel = (month: string): string => {
   return `${ddmmyyyy(startDate)} - ${ddmmyyyy(endDate)}`;
 };
 
+const isHistoricalPayrollCycle = (month: string): boolean => {
+  if (!month) return false;
+  return Date.now() >= getPayrollCycleRange(month).endExclusive;
+};
+
 const filterShiftsByPayrollCycle = (shifts: ShiftRegistration[], month: string): ShiftRegistration[] => {
   return shifts.filter(shift => isInPayrollCycle(shift.date, month));
 };
@@ -59,6 +64,35 @@ const normalizeShiftsLikeAdminShift = (shifts: ShiftRegistration[]): ShiftRegist
   return Array.from(map.values());
 };
 
+const normalizeEmployeeStartDate = (startDate?: number): number | null => {
+  if (startDate == null || startDate <= 0) return null;
+  return startDate < 1e12 ? startDate * 1000 : startDate;
+};
+
+/** Nhân viên đã vào làm trước khi kết thúc kỳ lương (tránh lẫn NV mới vào kỳ cũ). */
+const wasEmployedInPayrollCycle = (employee: User | undefined, month: string): boolean => {
+  if (!employee) return false;
+
+  const normalizedStart = normalizeEmployeeStartDate(employee.startDate);
+  const { endExclusive } = getPayrollCycleRange(month);
+
+  if (normalizedStart === null) {
+    // Kỳ đã qua: bắt buộc có ngày vào làm, không thì không hiển thị
+    return !isHistoricalPayrollCycle(month);
+  }
+
+  return normalizedStart < endExclusive;
+};
+
+const sortMonthKeysDesc = (months: string[]): string[] => {
+  return [...new Set(months)].sort((a, b) => {
+    const [aMonth, aYear] = a.split('-').map(Number);
+    const [bMonth, bYear] = b.split('-').map(Number);
+    if (aYear !== bYear) return bYear - aYear;
+    return bMonth - aMonth;
+  });
+};
+
 interface PayrollManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
   setView?: (view: string, options?: { replace?: boolean; adminPath?: string; employeeId?: string }) => void;
@@ -70,6 +104,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
   const [employees, setEmployees] = useState<User[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedMonth, setSelectedMonth] = useState('');
+  const [monthOptions, setMonthOptions] = useState<string[]>([]);
   const [filterBranch, setFilterBranch] = useState<string>('ALL');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -97,6 +132,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
   /** Nhân viên được chọn để tính lại (mặc định tất cả) */
   const [bulkSelectedUsers, setBulkSelectedUsers] = useState<Set<string>>(new Set());
   const [bulkRecalcProgress, setBulkRecalcProgress] = useState<{ done: number; total: number } | null>(null);
+  const loadGenerationRef = useRef(0);
 
   // ── Inline Salary Calculator state ──
   type CalcMethod = 'SHIFT' | 'ATTENDANCE' | 'MANUAL';
@@ -279,29 +315,60 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
     [noLunchBreakByKey, selectedMonth, selectedPayrollDetail]
   );
 
+  const selectedMonthIsLocked = isHistoricalPayrollCycle(selectedMonth);
+  const lockedCycleMessage =
+    language === 'vi'
+      ? 'Kỳ lương đã qua đã được khóa để lưu trữ, không thể cập nhật.'
+      : 'Past payroll cycles are locked for archival and cannot be updated.';
+
+  const visiblePayrollRows = useMemo(() => {
+    return payrollRecords
+      .map((payroll) => {
+        const employee = employees.find(e => e.id === payroll.userId);
+
+        if (!wasEmployedInPayrollCycle(employee, selectedMonth)) {
+          return null;
+        }
+
+        if (filterBranch !== 'ALL' && employee?.branchId !== filterBranch) {
+          return null;
+        }
+
+        const dailyRate = payroll.baseSalary / payroll.standardWorkDays;
+        const hourlyRate = dailyRate / workHoursPerDay;
+        const basicSalary = hourlyRate * payroll.actualWorkDays * workHoursPerDay;
+        const totalIncome = basicSalary + payroll.otPay + payroll.allowance + payroll.bonus;
+
+        return {
+          payroll,
+          employee,
+          workHours: payroll.actualWorkDays * workHoursPerDay,
+          totalIncome,
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null);
+  }, [payrollRecords, employees, selectedMonth, filterBranch, workHoursPerDay]);
+
   useEffect(() => {
     const initData = async () => {
       try {
         setError(null);
-        setLoading(true);
         const now = new Date();
         const currentMonth = `${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
-        setSelectedMonth(currentMonth);
-        await loadData(currentMonth);
-        const [users, branchesData] = await Promise.all([
+        const [users, branchesData, savedMonths] = await Promise.all([
           getAllUsers(),
           getBranches(),
+          getPayrollMonths(),
         ]);
         setEmployees(users);
         setBranches(branchesData.filter(b => b.isActive));
-        // Load work hours per day config
+        setMonthOptions(buildMonthOptions(savedMonths, currentMonth));
+        setSelectedMonth(currentMonth);
         const hours = await getConfigNumber('work_hours_per_day', 8);
         setWorkHoursPerDay(hours);
       } catch (err: any) {
         setError(text.loadError.replace('{error}', err?.message || 'Vui lòng thử lại'));
         console.error('Error initializing data:', err);
-      } finally {
-        setLoading(false);
       }
     };
     initData();
@@ -312,29 +379,44 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       onRegisterReload(async () => {
         try {
           setError(null);
-          await loadData(selectedMonth);
+          const requestId = ++loadGenerationRef.current;
+          setLoading(true);
+          await loadData(selectedMonth, requestId);
           const [users, branchesData] = await Promise.all([
             getAllUsers(),
             getBranches(),
           ]);
-          setEmployees(users);
-          setBranches(branchesData.filter(b => b.isActive));
+          if (requestId === loadGenerationRef.current) {
+            setEmployees(users);
+            setBranches(branchesData.filter(b => b.isActive));
+          }
         } catch (err: any) {
           setError(text.loadError.replace('{error}', err?.message || 'Vui lòng thử lại'));
           console.error('Error reloading data:', err);
+        } finally {
+          if (requestId === loadGenerationRef.current) {
+            setLoading(false);
+          }
         }
       });
     }
   }, [onRegisterReload, selectedMonth]);
 
-  const loadData = async (month: string) => {
+  const loadData = async (month: string, requestId?: number) => {
     try {
       setError(null);
-      const [records, allShifts] = await Promise.all([
+      const [records, allShifts, savedMonths] = await Promise.all([
         getAllPayrolls(month),
-        getShiftRegistrations(undefined, UserRole.ADMIN)
+        getShiftRegistrations(undefined, UserRole.ADMIN),
+        getPayrollMonths(),
       ]);
+
+      if (requestId !== undefined && requestId !== loadGenerationRef.current) {
+        return;
+      }
+
       setPayrollRecords(records);
+      setMonthOptions(prev => buildMonthOptions(savedMonths, month, prev));
 
       const lunchMap: Record<string, number[]> = {};
       records.forEach(r => {
@@ -348,6 +430,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       );
       setAllShiftsInMonth(shiftsInMonth);
     } catch (err: any) {
+      if (requestId !== undefined && requestId !== loadGenerationRef.current) {
+        return;
+      }
       setError(text.loadPayrollError.replace('{error}', err?.message || 'Vui lòng thử lại'));
       console.error('Error loading payroll data:', err);
       setPayrollRecords([]);
@@ -358,261 +443,104 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
   };
 
   useEffect(() => {
-    if (selectedMonth) {
-      loadData(selectedMonth).catch(() => {
+    if (!selectedMonth) return;
+
+    const requestId = ++loadGenerationRef.current;
+    setSelectedPayrollDetail(null);
+    setPayrollRecords([]);
+    setNoLunchBreakByKey({});
+    setAllShiftsInMonth([]);
+    setLoading(true);
+
+    loadData(selectedMonth, requestId)
+      .catch(() => {
         // Error đã được handle trong loadData
+      })
+      .finally(() => {
+        if (requestId === loadGenerationRef.current) {
+          setLoading(false);
+        }
       });
-    }
   }, [selectedMonth]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
   };
 
-  const getMonthOptions = (): string[] => {
-    const options: string[] = [];
+  const buildMonthOptions = (savedMonths: string[], currentMonth: string, fallback: string[] = []): string[] => {
+    const rolling: string[] = [];
     const now = new Date();
     for (let i = 0; i < 6; i++) {
       const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const month = `${String(date.getMonth() + 1).padStart(2, '0')}-${date.getFullYear()}`;
-      options.push(month);
+      rolling.push(`${String(date.getMonth() + 1).padStart(2, '0')}-${date.getFullYear()}`);
     }
-    return options;
+    const merged = sortMonthKeysDesc([...savedMonths, ...rolling, ...fallback, currentMonth]);
+    return merged.length > 0 ? merged : rolling;
   };
 
+  const getEmployeesForPayrollCycle = (month: string): User[] =>
+    employees.filter(
+      e =>
+        e.role !== UserRole.ADMIN &&
+        e.status === 'ACTIVE' &&
+        wasEmployedInPayrollCycle(e, month)
+    );
+
   const handleExport = async () => {
-    if (payrollRecords.length === 0) {
+    if (visiblePayrollRows.length === 0) {
       alert(text.noDataToExport);
       return;
     }
 
     try {
-      // Lấy tất cả dữ liệu cần thiết
-      const [allAttendance, allShifts, holidays] = await Promise.all([
-        getAllAttendance(10000), // Lấy nhiều records để đảm bảo có đủ dữ liệu
-        getShiftRegistrations(undefined, UserRole.ADMIN),
-        getHolidays(),
-      ]);
+      const formatNumber = (num: number): string =>
+        Math.round(num).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
-      const [monthStr, yearStr] = selectedMonth.split('-');
-      const targetMonth = parseInt(monthStr, 10);
-      const targetYear = parseInt(yearStr, 10);
-      const { start: cycleStart, endExclusive: cycleEndExclusive } = getPayrollCycleRange(selectedMonth);
-
-      // Lọc dữ liệu theo kỳ lương [02/MM, 02/MM+1)
-      const attendanceInMonth = allAttendance.filter(record => {
-        return record.timestamp >= cycleStart && record.timestamp < cycleEndExclusive;
-      });
-
-      const shiftsInMonth = filterShiftsByPayrollCycle(allShifts, selectedMonth);
-
-      const dateColumns: string[] = [];
-      for (let ts = cycleStart; ts < cycleEndExclusive; ts += 24 * 60 * 60 * 1000) {
-        const date = new Date(ts);
-        const dateStr = `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`;
-        dateColumns.push(dateStr);
-      }
-
-      // Lấy config
-      const [standardWorkDays, workHoursPerDay, overtimeRate] = await Promise.all([
-        getConfigNumber('standard_work_days', 27),
-        getConfigNumber('work_hours_per_day', 8),
-        getConfigNumber('overtime_rate', 1.5),
-      ]);
-
-      // Tạo dữ liệu CSV
-      const csvRows: any[] = [];
-
-      // Tạo header - chỉ giữ lại các cột có dữ liệu trong hệ thống
       const headers = language === 'vi' ? [
         'Họ Tên',
         'Bộ Phận',
-        'Lương Tổng',
+        'Lương cơ bản',
         'Giờ làm việc',
-        'Ngày công - Số ngày',
-        'Ngày công - Lương',
-        'Tăng ca bắt buộc x1.5 - Số giờ',
-        'Tăng ca bắt buộc x1.5 - Lương',
-        'Phụ cấp',
-        'Thưởng',
+        'Ngày công',
+        'Tăng ca - Số giờ',
+        'Tăng ca - Lương',
         'Tổng lương (trước BHXH)',
+        'Khấu trừ',
         'Thực lãnh (sau BHXH)',
-        'Ghi Chú',
+        'Trạng thái',
       ] : [
         'Full Name',
         'Department',
-        'Total Salary',
+        'Base Salary',
         'Work Hours',
-        'Work Days - Count',
-        'Work Days - Salary',
-        'Mandatory OT x1.5 - Hours',
-        'Mandatory OT x1.5 - Salary',
-        'Allowance',
-        'Bonus',
+        'Work Days',
+        'OT Hours',
+        'OT Pay',
         'Total Salary (Before Deductions)',
+        'Deductions',
         'Net Salary (After Deductions)',
-        'Notes',
+        'Status',
       ];
 
-      // Thêm các cột ngày
-      dateColumns.forEach(dateStr => {
-        headers.push(`${dateStr} - IN`, `${dateStr} - OUT`);
-      });
+      const csvRows: Array<Array<string | number>> = [
+        headers,
+        ...visiblePayrollRows.map(({ payroll, employee, workHours, totalIncome }) => [
+          employee?.name ?? payroll.userId,
+          employee?.department ?? '',
+          formatNumber(payroll.baseSalary),
+          `${workHours.toFixed(1)}h`,
+          `${payroll.actualWorkDays.toFixed(2)}/${payroll.standardWorkDays}`,
+          payroll.otHours.toFixed(1),
+          formatNumber(payroll.otPay),
+          formatNumber(totalIncome),
+          `-${formatNumber(payroll.deductions)}`,
+          formatNumber(payroll.netSalary),
+          payroll.status === 'PAID' ? text.paid : text.pending,
+        ]),
+      ];
 
-      csvRows.push(headers);
-
-      // Xử lý từng nhân viên
-      for (const payroll of payrollRecords) {
-        const employee = employees.find(e => e.id === payroll.userId);
-        if (!employee) continue;
-
-        // Lấy attendance của nhân viên trong tháng
-        const empAttendance = attendanceInMonth.filter(a => a.userId === payroll.userId);
-        
-        // Nhóm attendance theo ngày
-        const attendanceByDate: Record<string, { checkIn?: AttendanceRecord; checkOut?: AttendanceRecord }> = {};
-        empAttendance.forEach(record => {
-          const date = new Date(record.timestamp);
-          const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-          if (!attendanceByDate[dateKey]) {
-            attendanceByDate[dateKey] = {};
-          }
-          if (record.type === AttendanceType.CHECK_IN) {
-            attendanceByDate[dateKey].checkIn = record;
-          } else if (record.type === AttendanceType.CHECK_OUT) {
-            attendanceByDate[dateKey].checkOut = record;
-          }
-        });
-
-        // Lấy shifts của nhân viên trong tháng (đồng bộ /admin/shift: mỗi ngày chỉ giữ 1 bản ghi cuối)
-        const empShifts = normalizeShiftsLikeAdminShift(
-          shiftsInMonth.filter(s => s.userId === payroll.userId)
-        );
-        const shiftByDateKey = new Map<string, ShiftRegistration>();
-        empShifts.forEach((s) => {
-          shiftByDateKey.set(toDateKey(s.date), s);
-        });
-
-        // Tính toán các giá trị - tính từ tổng giờ thực tế
-        const baseSalary = payroll.baseSalary;
-        
-        // Tính tổng giờ thực tế từ shifts
-        const exportNoLunch = new Set(noLunchBreakByKey[payrollNoLunchKey(selectedMonth, payroll.userId)] ?? []);
-        const { regularHours: regH, otHours: shiftOtH } = calculateRegularAndOTHoursWithNoLunchBreak(
-          empShifts,
-          workHoursPerDay,
-          exportNoLunch
-        );
-        const totalWorkedHours = regH + shiftOtH;
-
-        const dailyRate = baseSalary / standardWorkDays;
-        const hourlyRate = dailyRate / workHoursPerDay;
-        const workDaySalary = hourlyRate * regH;
-        const shiftOtPayCalc = hourlyRate * 1.5 * shiftOtH;
-
-        const mandatoryOTHours = shiftOtH;
-        const mandatoryOTSalary = shiftOtPayCalc;
-
-        const totalIncome = workDaySalary + shiftOtPayCalc + payroll.allowance + payroll.bonus;
-        const totalBeforeDeduction = Math.round(totalIncome);
-        const netSalaryCalculated = Math.round(totalIncome - payroll.deductions);
-
-        // Helper function để format số tiền với dấu phẩy ngăn cách
-        const formatNumber = (num: number): string => {
-          return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-        };
-
-        // Tạo row cho nhân viên - chỉ các cột có dữ liệu trong hệ thống
-        const row: any[] = [
-          employee.name,
-          employee.department || '',
-          formatNumber(baseSalary), // Format với dấu phẩy: 5,000,000
-          totalWorkedHours.toFixed(1) + 'h',
-          (totalWorkedHours / workHoursPerDay).toFixed(2),
-          formatNumber(Math.round(workDaySalary)), // Format với dấu phẩy
-          mandatoryOTHours.toFixed(1),
-          formatNumber(Math.round(mandatoryOTSalary)), // Format với dấu phẩy
-          formatNumber(payroll.allowance), // Format với dấu phẩy
-          formatNumber(payroll.bonus), // Format với dấu phẩy
-          formatNumber(totalBeforeDeduction), // Tổng lương trước BHXH
-          formatNumber(netSalaryCalculated), // Thực lãnh sau BHXH - tính từ giờ thực tế
-          '', // Ghi chú
-        ];
-
-        // Thêm dữ liệu IN/OUT cho từng ngày
-        const DEFAULT_IN = '09:00';
-        const DEFAULT_OUT = '18:00';
-        
-        dateColumns.forEach(dateStr => {
-          const [dayStr, monthStr, yearStr] = dateStr.split('/');
-          const dateKey = `${yearStr}-${monthStr.padStart(2, '0')}-${dayStr.padStart(2, '0')}`;
-          const dayAttendance = attendanceByDate[dateKey];
-          
-          // Tìm shift cho ngày này
-          const dayShift = shiftByDateKey.get(dateKey);
-
-          let inValue = '';
-          let outValue = '';
-
-          // Kiểm tra ngày lễ
-          const date = new Date(parseInt(yearStr), parseInt(monthStr) - 1, parseInt(dayStr));
-          const isHolidayDate = holidays.some(h => {
-            const hDate = new Date(h.date);
-            if (h.isRecurring) {
-              return hDate.getMonth() === date.getMonth() && hDate.getDate() === date.getDate();
-            } else {
-              return hDate.getTime() === date.getTime();
-            }
-          });
-
-          // Logic hiển thị theo đăng ký ca
-          if (isHolidayDate) {
-            inValue = 'LỄ';
-            outValue = 'LỄ';
-          } else if (dayShift) {
-            if (dayShift.shift === 'OFF') {
-              if (dayShift.offType === OffType.LE) {
-                inValue = 'LỄ';
-                outValue = 'LỄ';
-              } else {
-                // Hiển thị loại OFF
-                if (dayShift.offType === OffType.OFF_DK) {
-                  inValue = 'OFF DK';
-                } else if (dayShift.offType === OffType.OFF_PN) {
-                  inValue = 'OFF PN';
-                } else if (dayShift.offType === OffType.OFF_KL) {
-                  inValue = 'OFF KL';
-                } else if (dayShift.offType === OffType.CT) {
-                  inValue = 'CT';
-                } else {
-                  inValue = 'OFF';
-                }
-                outValue = '';
-              }
-            } else if (dayShift.shift === 'CUSTOM') {
-              // Luôn hiển thị giờ từ shift đăng ký
-              inValue = dayShift.startTime || DEFAULT_IN;
-              outValue = dayShift.endTime || DEFAULT_OUT;
-            } else {
-              // Ca cố định (MORNING, AFTERNOON, EVENING)
-              inValue = DEFAULT_IN;
-              outValue = DEFAULT_OUT;
-            }
-          } else {
-            // Không có shift đăng ký - để trống
-            inValue = '';
-            outValue = '';
-          }
-
-          row.push(inValue, outValue);
-        });
-
-        csvRows.push(row);
-      }
-
-      // Xuất CSV
-      const csvContent = csvRows.map(row => 
-        row.map((cell: any) => {
+      const csvContent = csvRows.map(row =>
+        row.map((cell) => {
           const str = String(cell);
           if (str.includes(',') || str.includes('"') || str.includes('\n')) {
             return `"${str.replace(/"/g, '""')}"`;
@@ -645,6 +573,11 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       return;
     }
 
+    if (selectedMonthIsLocked) {
+      alert(lockedCycleMessage);
+      return;
+    }
+
     if (!confirm(text.confirmRecalculate.replace('{month}', formatPayrollCycleLabel(selectedMonth)))) {
       return;
     }
@@ -653,7 +586,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
     setError(null);
 
     try {
-      const activeEmployees = employees.filter(e => e.role !== UserRole.ADMIN && e.status === 'ACTIVE');
+      const activeEmployees = getEmployeesForPayrollCycle(selectedMonth);
       let successCount = 0;
       let errorCount = 0;
 
@@ -709,10 +642,15 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
 
   const handleBulkRecalcConfirm = async () => {
     if (!selectedMonth) return;
+    if (selectedMonthIsLocked) {
+      alert(lockedCycleMessage);
+      setShowBulkRecalcModal(false);
+      return;
+    }
     setIsRecalculating(true);
     setError(null);
-    const activeEmployees = employees.filter(
-      e => e.role !== UserRole.ADMIN && e.status === 'ACTIVE' && bulkSelectedUsers.has(e.id)
+    const activeEmployees = getEmployeesForPayrollCycle(selectedMonth).filter(
+      e => bulkSelectedUsers.has(e.id)
     );
     setBulkRecalcProgress({ done: 0, total: activeEmployees.length });
     let successCount = 0;
@@ -771,8 +709,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
 
   const handleRecalculateAll = () => {
     if (!selectedMonth) { alert(text.selectMonth); return; }
+    if (selectedMonthIsLocked) { alert(lockedCycleMessage); return; }
     // Khởi tạo giá trị mặc định cho modal: tất cả nhân viên active, phương thức SHIFT
-    const activeEmps = employees.filter(e => e.role !== UserRole.ADMIN && e.status === 'ACTIVE');
+    const activeEmps = getEmployeesForPayrollCycle(selectedMonth);
     const defaultMethods: Record<string, BulkCalcMethod> = {};
     const defaultSelected = new Set<string>();
     activeEmps.forEach(e => {
@@ -841,6 +780,10 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
 
   const handleCalcAndSave = async () => {
     if (!selectedPayrollDetail) return;
+    if (selectedMonthIsLocked) {
+      alert(lockedCycleMessage);
+      return;
+    }
     setIsCalcSaving(true);
     try {
       const { employee, payroll: existingPayroll } = selectedPayrollDetail;
@@ -881,6 +824,10 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
 
   const toggleNoLunchBreak = async (shiftDate: number) => {
     if (!selectedPayrollDetail) return;
+    if (selectedMonthIsLocked) {
+      alert(lockedCycleMessage);
+      return;
+    }
     const userId = selectedPayrollDetail.employee.id;
     const key = payrollNoLunchKey(selectedMonth, userId);
     const prevArr =
@@ -910,6 +857,10 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
 
   const handleUpdatePayrollStatus = async (status: 'PAID' | 'PENDING') => {
     if (!selectedPayrollDetail) return;
+    if (selectedMonthIsLocked) {
+      alert(lockedCycleMessage);
+      return;
+    }
     
     try {
       const updatedPayroll = {
@@ -936,11 +887,19 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
   };
 
   const handleEditNote = (shift: ShiftRegistration) => {
+    if (selectedMonthIsLocked) {
+      alert(lockedCycleMessage);
+      return;
+    }
     setEditingNoteShiftId(shift.id);
     setNoteInputValue(shift.note || '');
   };
 
   const handleSaveNote = async (shiftId: string) => {
+    if (selectedMonthIsLocked) {
+      alert(lockedCycleMessage);
+      return;
+    }
     try {
       // Find the shift to get its current data
       const shift = shiftDetails.find(s => s.id === shiftId);
@@ -982,7 +941,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
     <div className="space-y-6">
       {/* Modal Tính lại lương */}
       {showBulkRecalcModal && (() => {
-        const activeEmps = employees.filter(e => e.role !== UserRole.ADMIN && e.status === 'ACTIVE');
+        const activeEmps = getEmployeesForPayrollCycle(selectedMonth);
         const allSelected = activeEmps.every(e => bulkSelectedUsers.has(e.id));
         const someSelected = activeEmps.some(e => bulkSelectedUsers.has(e.id));
         return (
@@ -1312,6 +1271,11 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                 <h3 className="text-xl font-bold text-white">{selectedPayrollDetail.employee.name}</h3>
                 <p className="text-sm text-blue-100">{text.payrollDetail.replace('{month}', formatPayrollCycleLabel(selectedMonth))}</p>
                 <div className="mt-1.5">
+                  {selectedMonthIsLocked && (
+                    <span className="mr-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-slate-200 text-slate-700">
+                      {language === 'vi' ? 'Đã khóa lưu trữ' : 'Archived'}
+                    </span>
+                  )}
                   {selectedPayrollDetail.payroll.calcMethod === 'ATTENDANCE' ? (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-amber-400 text-amber-900">
                       ⏱ {language === 'vi' ? 'Tính theo chấm công' : 'Attendance-based'}
@@ -1607,11 +1571,12 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                           </span>
                                           {isCustomShift && hours >= 5 && (
                                             <div className="mt-2">
-                                              <label className="flex items-center gap-2 cursor-pointer">
+                                              <label className={`flex items-center gap-2 ${selectedMonthIsLocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
                                                 <input
                                                   type="checkbox"
                                                   checked={detailNoLunchDates.has(shift.date)}
                                                   onChange={() => void toggleNoLunchBreak(shift.date)}
+                                                  disabled={selectedMonthIsLocked}
                                                   className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
                                                 />
                                                 <span className="text-xs text-slate-600">{language === 'vi' ? 'Không nghỉ trưa' : 'No lunch break'}</span>
@@ -1633,7 +1598,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                                 <div className="flex gap-2">
                                                   <button
                                                     onClick={() => handleSaveNote(shift.id)}
-                                                    className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                                                    disabled={selectedMonthIsLocked}
+                                                    className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                                                   >
                                                     Lưu
                                                   </button>
@@ -1656,7 +1622,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                                 )}
                                                 <button
                                                   onClick={() => handleEditNote(shift)}
-                                                  className="text-xs text-blue-600 hover:text-blue-700 hover:underline"
+                                                  disabled={selectedMonthIsLocked}
+                                                  className="text-xs text-blue-600 hover:text-blue-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline"
                                                 >
                                                   {shift.note ? 'Sửa ghi chú' : 'Thêm ghi chú'}
                                                 </button>
@@ -1887,7 +1854,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                 {selectedPayrollDetail.payroll.status === 'PENDING' ? (
                   <button
                     onClick={() => handleUpdatePayrollStatus('PAID')}
-                    className="px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold hover:bg-green-700 transition-colors flex items-center gap-2"
+                    disabled={selectedMonthIsLocked}
+                    className="px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold hover:bg-green-700 transition-colors flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -1897,7 +1865,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                 ) : (
                   <button
                     onClick={() => handleUpdatePayrollStatus('PENDING')}
-                    className="px-4 py-2 bg-orange-600 text-white rounded-xl text-sm font-bold hover:bg-orange-700 transition-colors flex items-center gap-2"
+                    disabled={selectedMonthIsLocked}
+                    className="px-4 py-2 bg-orange-600 text-white rounded-xl text-sm font-bold hover:bg-orange-700 transition-colors flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -1937,7 +1906,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
             onChange={(e) => setSelectedMonth(e.target.value)}
             className="rounded-xl border border-slate-200 px-4 py-2 text-sm"
           >
-            {getMonthOptions().map(month => (
+            {monthOptions.map(month => (
               <option key={month} value={month}>
                 {text.month} {formatPayrollCycleLabel(month)}
               </option>
@@ -1955,9 +1924,14 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
           </select>
         </div>
         <div className="flex items-center gap-3">
+          {selectedMonthIsLocked && (
+            <span className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-500">
+              {language === 'vi' ? 'Kỳ đã qua: chỉ xem/xuất' : 'Past cycle: view/export only'}
+            </span>
+          )}
           <button
             onClick={handleRecalculateAll}
-            disabled={loading || isRecalculating || !selectedMonth}
+            disabled={loading || isRecalculating || !selectedMonth || selectedMonthIsLocked}
             className="px-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className={`w-4 h-4 ${isRecalculating ? 'animate-spin' : ''}`}>
@@ -1967,7 +1941,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
           </button>
           <button
             onClick={handleExport}
-            disabled={loading || payrollRecords.length === 0}
+            disabled={loading || visiblePayrollRows.length === 0}
             className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
@@ -1988,7 +1962,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
         <div className="text-center py-12 bg-white rounded-2xl border border-sky-50">
           <p className="text-slate-400 font-medium">{text.loading}</p>
         </div>
-      ) : payrollRecords.length === 0 ? (
+      ) : visiblePayrollRows.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-2xl border border-sky-50">
           <p className="text-slate-400 font-medium">{text.noData}</p>
         </div>
@@ -2010,27 +1984,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {payrollRecords.map((item: PayrollRecord) => {
-                  const employee = employees.find(e => e.id === item.userId);
-                  
-                  // Ẩn nhân viên đã nghỉ việc
-                  if (!employee || employee.status !== 'ACTIVE') {
-                    return null;
-                  }
-                  
-                  // Lọc theo chi nhánh
-                  if (filterBranch !== 'ALL' && employee.branchId !== filterBranch) {
-                    return null;
-                  }
-                  
-                  // Tính ngày công và OT từ payroll record đã lưu (đúng với mọi phương thức tính)
-                  const dailyRate = item.baseSalary / item.standardWorkDays;
-                  const hourlyRate = dailyRate / workHoursPerDay;
-                  // Lương ngày công = đơn giá giờ × (ngày công × giờ/ngày) — nhất quán với calculatePayroll
-                  const basicSalary = hourlyRate * item.actualWorkDays * workHoursPerDay;
+                {visiblePayrollRows.map(({ payroll: item, employee, workHours, totalIncome }) => {
                   const storedOtPay = item.otPay;
                   const storedOtHours = item.otHours;
-                  const totalIncome = basicSalary + storedOtPay + item.allowance + item.bonus;
                   
                   return (
                     <tr key={item.id} className="hover:bg-sky-50/50 transition-colors">
@@ -2047,6 +2003,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                             <p className="text-sm font-bold text-slate-800">{item.userId}</p>
                           )}
                           <p className="text-xs text-slate-500">{employee?.department || ''}</p>
+                          {employee?.status && employee.status !== 'ACTIVE' && (
+                            <p className="text-[10px] font-bold text-slate-400 uppercase">Đã nghỉ</p>
+                          )}
                         </div>
                       </td>
                       <td className="px-6 py-4">
@@ -2054,7 +2013,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                       </td>
                       <td className="px-6 py-4">
                         <p className="text-sm text-slate-700">
-                          {(item.actualWorkDays * workHoursPerDay).toFixed(1)}h
+                          {workHours.toFixed(1)}h
                         </p>
                         <p className="text-xs text-slate-500">
                           ({item.actualWorkDays.toFixed(2)} {language === 'vi' ? 'công' : 'days'})

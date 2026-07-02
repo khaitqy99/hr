@@ -1,12 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { User, PayrollRecord, ShiftRegistration, OffType } from '../types';
-import { getPayroll, calculateLeaveDays, getShiftRegistrations, getConfigNumber } from '../services/db';
+import { User, PayrollRecord, ShiftRegistration, OffType, AttendanceRecord, AttendanceType } from '../types';
+import { getPayroll, calculateLeaveDays, getShiftRegistrations, getConfigNumber, getAttendance } from '../services/db';
 import { calculateRegularAndOTHoursWithNoLunchBreak, calculateTotalWorkedHoursWithNoLunchBreak } from '../utils/payrollHours';
 
 interface PayrollProps {
   user: User;
   setView?: (view: string) => void;
 }
+
+/** Kỳ lương: [02/MM, 02/MM+1) */
+const getPayrollCycleRange = (month: string): { start: number; endExclusive: number } => {
+  const [monthStr, yearStr] = month.split('-');
+  const targetMonth = parseInt(monthStr, 10);
+  const targetYear = parseInt(yearStr, 10);
+  const start = new Date(targetYear, targetMonth - 1, 2).getTime();
+  const endExclusive = new Date(targetYear, targetMonth, 2).getTime();
+  return { start, endExclusive };
+};
 
 const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
   const toDateKey = (timestamp: number): string => {
@@ -41,11 +51,12 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
   } | null>(null);
   const [showDetailDropdown, setShowDetailDropdown] = useState(false);
   const [shiftDetails, setShiftDetails] = useState<ShiftRegistration[]>([]);
+  const [attendanceDetails, setAttendanceDetails] = useState<AttendanceRecord[]>([]);
   const [workHoursPerDay, setWorkHoursPerDay] = useState(8);
 
   // Generate month options (current month and 5 previous months)
   const generateMonthOptions = () => {
-    const months: string[] = [];
+    const months: string[] = []
     const now = new Date();
     for (let i = 0; i < 6; i++) {
       const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -77,23 +88,28 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
         // Load data for selected month
         const records = await getPayroll(user.id, selectedMonth);
         if (records.length > 0) {
-          setData(records[0]);
+          const record = records[0];
+          setData(record);
           
-          // Load shift details immediately for calculation
+          const { start: cycleStart, endExclusive: cycleEndExclusive } = getPayrollCycleRange(selectedMonth);
+
+          // Load shift details always (needed for SHIFT method)
           const shifts = await getShiftRegistrations(user.id);
-          const [monthStr, yearStr] = selectedMonth.split('-');
-          const targetMonth = parseInt(monthStr);
-          const targetYear = parseInt(yearStr);
-          
-          const cycleStart = new Date(targetYear, targetMonth - 1, 2).getTime();
-          const cycleEndExclusive = new Date(targetYear, targetMonth, 2).getTime();
           const monthShifts = normalizeShiftsLikeAdminShift(
             shifts.filter(shift => shift.date >= cycleStart && shift.date < cycleEndExclusive)
           );
-          
           setShiftDetails(monthShifts);
+
+          // Load attendance details if needed (ATTENDANCE method)
+          if (record.calcMethod === 'ATTENDANCE') {
+            const allAttendance = await getAttendance(user.id);
+            const inCycle = allAttendance.filter(r => r.timestamp >= cycleStart && r.timestamp < cycleEndExclusive);
+            setAttendanceDetails(inCycle);
+          } else {
+            setAttendanceDetails([]);
+          }
           
-          // Chi tiết tính lương: nghỉ phép + số ca đăng ký (ngày công lấy từ đăng ký ca)
+          // Chi tiết tính lương
           try {
             const leaveDays = await calculateLeaveDays(user.id, selectedMonth);
             const shiftDays = new Set<string>();
@@ -113,12 +129,14 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
           setData(null);
           setPayrollDetails(null);
           setShiftDetails([]);
+          setAttendanceDetails([]);
         }
       } catch (error) {
         console.error('Error loading payroll:', error);
         setData(null);
         setPayrollDetails(null);
         setShiftDetails([]);
+        setAttendanceDetails([]);
       } finally {
         setIsLoading(false);
       }
@@ -200,6 +218,370 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
   const shiftOtPay = data.otPay;
   const displayNetSalary = data.netSalary;
 
+  // Badge phương thức tính lương
+  const calcMethodBadge = () => {
+    if (data.calcMethod === 'ATTENDANCE') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800">
+          ⏱ Tính theo chấm công
+        </span>
+      );
+    } else if (data.calcMethod === 'MANUAL') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-slate-200 text-slate-700">
+          ✏️ Nhập tay
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800">
+        📋 Tính theo ca đăng ký
+      </span>
+    );
+  };
+
+  // ── Render bảng chi tiết ca làm việc (SHIFT) ──
+  const renderShiftDetailTable = () => {
+    if (shiftDetails.length === 0) return null;
+
+    const hr = (data.baseSalary / data.standardWorkDays) / workHoursPerDay;
+    const dr = data.baseSalary / data.standardWorkDays;
+    // noLunchBreakDates (employee xem → đọc từ record lương)
+    const noLunchDates = new Set<number>(data.noLunchBreakDates ?? []);
+
+    let totalRegularHours = 0;
+    let totalOTHours = 0;
+    let totalOTMoney = 0;
+
+    const rows = shiftDetails
+      .sort((a, b) => a.date - b.date)
+      .map((shift, idx) => {
+        const date = new Date(shift.date);
+        const dateStr = `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}`;
+
+        let shiftLabel = shift.shift;
+        let hours = workHoursPerDay;
+        let typeLabel = 'Làm việc';
+        let typeColor = 'text-green-600 bg-green-50';
+        let money = 0;
+        let otHours = 0;
+        let otMoney = 0;
+
+        if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
+          shiftLabel = `${shift.startTime} - ${shift.endTime}`;
+          const [startHour, startMin] = shift.startTime.split(':').map(Number);
+          const [endHour, endMin] = shift.endTime.split(':').map(Number);
+          hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
+          if (hours >= 6 && !noLunchDates.has(shift.date)) {
+            hours = hours - 1;
+          }
+          const regularHours = Math.min(hours, workHoursPerDay);
+          money = hr * regularHours;
+          if (hours > workHoursPerDay) {
+            otHours = hours - workHoursPerDay;
+            otMoney = hr * 1.5 * otHours;
+          }
+        } else if (shift.shift === 'OFF') {
+          if (shift.offType === OffType.OFF_PN) {
+            typeLabel = 'Phép năm';
+            typeColor = 'text-blue-600 bg-blue-50';
+            money = dr;
+          } else if (shift.offType === OffType.LE) {
+            typeLabel = 'Nghỉ lễ';
+            typeColor = 'text-purple-600 bg-purple-50';
+            money = dr;
+          } else if (shift.offType === OffType.OFF_DK) {
+            typeLabel = 'OFF định kỳ';
+            typeColor = 'text-slate-600 bg-slate-50';
+            hours = 0;
+            money = 0;
+          } else if (shift.offType === OffType.OFF_KL) {
+            typeLabel = 'OFF không lương';
+            typeColor = 'text-red-600 bg-red-50';
+            hours = 0;
+            money = 0;
+          } else {
+            typeLabel = 'OFF';
+            typeColor = 'text-slate-600 bg-slate-50';
+            hours = 0;
+            money = 0;
+          }
+          shiftLabel = shift.offType || 'OFF';
+        } else {
+          money = dr;
+        }
+
+        if (hours > 0) {
+          totalRegularHours += Math.min(hours, workHoursPerDay);
+        }
+        if (otHours > 0) {
+          totalOTHours += otHours;
+          totalOTMoney += otMoney;
+        }
+
+        return (
+          <div key={idx} className="p-4 hover:bg-slate-50 transition-colors">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <p className="text-sm font-bold text-slate-700">{dateStr}</p>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${typeColor}`}>
+                    {typeLabel}
+                  </span>
+                  {otHours > 0 && (
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">OT</span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 truncate">{shiftLabel}</p>
+                
+                {/* Note if exists */}
+                {shift.note && (
+                  <div className="mt-2 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                    <p className="text-xs text-amber-800">
+                      <span className="font-bold">Ghi chú: </span>
+                      {shift.note}
+                    </p>
+                  </div>
+                )}
+              </div>
+              <div className="text-right flex-shrink-0">
+                <p className="text-sm font-bold text-slate-800">
+                  {hours > 0 ? `${Math.min(hours, workHoursPerDay).toFixed(1)}h` : '-'}
+                </p>
+                <p className="text-base font-bold text-blue-600">
+                  {money + otMoney > 0 ? formatCurrency(Math.round(money + otMoney)) : '-'}
+                </p>
+                {otHours > 0 && (
+                  <>
+                    <p className="text-[10px] text-slate-500">
+                      {Math.min(hours, workHoursPerDay).toFixed(1)}h thường + {otHours.toFixed(1)}h OT
+                    </p>
+                    <p className="text-[10px] font-bold text-purple-600">
+                      OT ×1.5: +{formatCurrency(Math.round(otMoney))}
+                    </p>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      });
+
+    const totalWorkedInTable = totalRegularHours + totalOTHours;
+    const totalMoneyFromHours = hr * totalRegularHours + totalOTMoney;
+
+    return (
+      <div className="bg-white rounded-3xl border border-sky-100 overflow-hidden shadow-sm">
+        <div className="bg-gradient-to-r from-slate-50 to-sky-50 px-4 py-3 border-b border-sky-100">
+          <h4 className="text-sm font-bold text-slate-700">
+            Chi tiết ca làm việc ({totalWorkedInTable.toFixed(1)}h)
+          </h4>
+          {totalOTHours > 0 && (
+            <p className="text-xs text-purple-600 mt-0.5">
+              {totalRegularHours.toFixed(1)}h thường + {totalOTHours.toFixed(1)}h OT
+            </p>
+          )}
+        </div>
+        <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+          {rows}
+          {/* Total row */}
+          <div className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 border-t-2 border-blue-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-bold text-blue-700">Tổng cộng</p>
+                <p className="text-xs text-blue-600">{(totalWorkedInTable / workHoursPerDay).toFixed(2)} công</p>
+                {totalOTHours > 0 && (
+                  <p className="text-xs text-purple-600">{totalRegularHours.toFixed(1)}h thường + {totalOTHours.toFixed(1)}h OT</p>
+                )}
+              </div>
+              <div className="text-right">
+                <p className="text-sm font-bold text-blue-700">{totalWorkedInTable.toFixed(1)}h</p>
+                <p className="text-lg font-bold text-blue-700">
+                  {formatCurrency(Math.round(totalMoneyFromHours))}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ── Render bảng chấm công (ATTENDANCE) ──
+  const renderAttendanceDetailTable = () => {
+    const byDate: Record<string, { checkIn?: AttendanceRecord; checkOut?: AttendanceRecord }> = {};
+    attendanceDetails.forEach(r => {
+      const d = new Date(r.timestamp);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      if (!byDate[key]) byDate[key] = {};
+      if (r.type === AttendanceType.CHECK_IN) byDate[key].checkIn = r;
+      else if (r.type === AttendanceType.CHECK_OUT) byDate[key].checkOut = r;
+    });
+
+    const sortedDays = Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b));
+    if (sortedDays.length === 0) return (
+      <div className="bg-white rounded-3xl border border-amber-100 overflow-hidden shadow-sm p-8 text-center">
+        <p className="text-sm text-slate-400">Không có dữ liệu chấm công trong kỳ này</p>
+      </div>
+    );
+
+    const hr = (data.baseSalary / data.standardWorkDays) / workHoursPerDay;
+    const stdHours = workHoursPerDay;
+
+    let totalHours = 0;
+    let totalOtHours = 0;
+    let totalMoney = 0;
+
+    const rows = sortedDays.map(([dateKey, day]) => {
+      const [y, m, dd] = dateKey.split('-');
+      const dateLabel = `${dd}/${m}`;
+      const hasCheckIn = !!day.checkIn;
+      const hasCheckOut = !!day.checkOut;
+
+      let workHours = 0;
+      let otHours = 0;
+      let money = 0;
+      let inTime = '-';
+      let outTime = '-';
+
+      if (hasCheckIn) {
+        const d = new Date(day.checkIn!.timestamp);
+        inTime = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      }
+      if (hasCheckOut) {
+        const d = new Date(day.checkOut!.timestamp);
+        outTime = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      }
+
+      if (hasCheckIn && hasCheckOut) {
+        const raw = (day.checkOut!.timestamp - day.checkIn!.timestamp) / 3_600_000;
+        workHours = raw >= 6 ? raw - 1 : raw;
+        const regularHours = Math.min(workHours, stdHours);
+        otHours = Math.max(0, workHours - stdHours);
+        money = hr * regularHours + hr * 1.5 * otHours;
+        totalHours += regularHours;
+        totalOtHours += otHours;
+        totalMoney += money;
+      }
+
+      const statusColor = !hasCheckIn || !hasCheckOut
+        ? 'text-red-500 bg-red-50'
+        : otHours > 0
+        ? 'text-purple-600 bg-purple-50'
+        : 'text-green-600 bg-green-50';
+      const statusLabel = !hasCheckIn ? 'Thiếu vào' : !hasCheckOut ? 'Thiếu ra' : otHours > 0 ? 'OT' : 'Đủ công';
+
+      return (
+        <div key={dateKey} className="p-4 hover:bg-slate-50 transition-colors">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <p className="text-sm font-bold text-slate-700">{dateLabel}</p>
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${statusColor}`}>
+                  {statusLabel}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                <span className="font-medium text-green-700">▶ {inTime}</span>
+                <span>→</span>
+                <span className="font-medium text-red-600">■ {outTime}</span>
+              </div>
+            </div>
+            <div className="text-right flex-shrink-0">
+              {hasCheckIn && hasCheckOut ? (
+                <>
+                  <p className="text-sm font-bold text-slate-800">{workHours.toFixed(1)}h</p>
+                  {otHours > 0 && (
+                    <p className="text-[10px] text-purple-600">{(workHours - otHours).toFixed(1)}h + OT {otHours.toFixed(1)}h</p>
+                  )}
+                  <p className="text-base font-bold text-blue-600">{formatCurrency(Math.round(money))}</p>
+                </>
+              ) : (
+                <p className="text-xs text-red-400">—</p>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    });
+
+    return (
+      <div className="bg-white rounded-3xl border border-amber-100 overflow-hidden shadow-sm">
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 px-4 py-3 border-b border-amber-200 flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 text-amber-600">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <div>
+            <h4 className="text-sm font-bold text-amber-800">
+              Chi tiết chấm công ({sortedDays.length} ngày · {(totalHours + totalOtHours).toFixed(1)}h)
+            </h4>
+            {totalOtHours > 0 && (
+              <p className="text-xs text-purple-700 mt-0.5">
+                {totalHours.toFixed(1)}h thường + {totalOtHours.toFixed(1)}h OT
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+          {rows}
+          {/* Total row */}
+          <div className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 border-t-2 border-blue-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-bold text-blue-700">Tổng cộng</p>
+                <p className="text-xs text-blue-600">{((totalHours + totalOtHours) / workHoursPerDay).toFixed(2)} công</p>
+                {totalOtHours > 0 && (
+                  <p className="text-xs text-purple-600">{totalHours.toFixed(1)}h thường + {totalOtHours.toFixed(1)}h OT</p>
+                )}
+              </div>
+              <div className="text-right">
+                <p className="text-sm font-bold text-blue-700">{(totalHours + totalOtHours).toFixed(1)}h</p>
+                <p className="text-lg font-bold text-blue-700">
+                  {formatCurrency(Math.round(totalMoney))}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ── Render bảng nhập tay (MANUAL) ──
+  const renderManualDetail = () => {
+    return (
+      <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+        <div className="bg-gradient-to-r from-slate-50 to-slate-100 px-4 py-3 border-b border-slate-200 flex items-center gap-2">
+          <span className="text-slate-500">✏️</span>
+          <h4 className="text-sm font-bold text-slate-700">Chi tiết lương (Nhập tay)</h4>
+        </div>
+        <div className="p-4 space-y-3">
+          <div className="flex justify-between items-center">
+            <p className="text-sm text-slate-600">Ngày công thực tế</p>
+            <p className="text-sm font-bold text-slate-800">{data.actualWorkDays.toFixed(2)} / {data.standardWorkDays} ngày</p>
+          </div>
+          {data.otHours > 0 && (
+            <div className="flex justify-between items-center">
+              <p className="text-sm text-slate-600">Giờ OT</p>
+              <p className="text-sm font-bold text-purple-700">+{data.otHours.toFixed(1)}h</p>
+            </div>
+          )}
+          <div className="flex justify-between items-center pt-3 border-t border-slate-100">
+            <p className="text-sm font-bold text-slate-700">Lương ngày công</p>
+            <p className="text-sm font-bold text-blue-700">{formatCurrency(Math.round(basicSalary))}</p>
+          </div>
+          {shiftOtPay > 0 && (
+            <div className="flex justify-between items-center">
+              <p className="text-sm text-slate-600">Lương OT (×1.5)</p>
+              <p className="text-sm font-bold text-green-600">+{formatCurrency(Math.round(shiftOtPay))}</p>
+            </div>
+          )}
+          <p className="text-xs text-slate-400 mt-2">* Số liệu được HR/Admin nhập tay</p>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6 fade-up">
       {/* Header Selector */}
@@ -229,13 +611,15 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
             <div className={`inline-block mt-3 px-3 py-1 rounded-full text-[10px] font-bold uppercase ${data.status === 'PAID' ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-orange-500/20 text-orange-400 border border-orange-500/30'}`}>
                 {data.status === 'PAID' ? 'Đã thanh toán' : 'Chờ thanh toán'}
             </div>
+            {/* Badge phương thức tính lương */}
+            <div className="mt-2 flex justify-center">
+              {calcMethodBadge()}
+            </div>
          </div>
          {/* Decoration */}
          <div className="absolute top-0 left-0 w-32 h-32 bg-blue-500 opacity-10 rounded-full blur-3xl -ml-10 -mt-10"></div>
          <div className="absolute bottom-0 right-0 w-32 h-32 bg-cyan-500 opacity-10 rounded-full blur-3xl -mr-10 -mb-10"></div>
       </div>
-
-
 
       {/* Payroll Calculation Details - Simplified */}
       {payrollDetails && (
@@ -321,164 +705,17 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
           </div>
       </div>
 
-      {/* Chi tiết các ngày làm việc */}
-      {showDetailDropdown && shiftDetails.length > 0 && (
+      {/* Chi tiết theo ngày - hiển thị bảng phù hợp với phương thức tính lương */}
+      {showDetailDropdown && (
         <div className="space-y-4 animate-fadeIn">
-          <div className="bg-white rounded-3xl border border-sky-100 overflow-hidden shadow-sm">
-              <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
-                {(() => {
-                  const dailyRate = data.baseSalary / data.standardWorkDays;
-                  const hourlyRate = dailyRate / workHoursPerDay;
-                  
-                  // Dùng cùng logic với admin payroll ở màn chi tiết ngày.
-                  let totalRegularHours = 0;
-                  let totalOTHours = 0;
-                  let totalOTMoney = 0;
-                  
-                  const rows = shiftDetails
-                    .sort((a, b) => a.date - b.date)
-                    .map((shift, idx) => {
-                      const date = new Date(shift.date);
-                      const dateStr = `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}`;
-                      
-                      let shiftLabel = shift.shift;
-                      let hours = workHoursPerDay;
-                      let typeLabel = 'Làm việc';
-                      let typeColor = 'text-green-600 bg-green-50';
-                      let money = 0;
-                      let otHours = 0;
-                      let otMoney = 0;
+          {/* SHIFT method → bảng ca đăng ký */}
+          {(!data.calcMethod || data.calcMethod === 'SHIFT') && renderShiftDetailTable()}
 
-                      if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
-                        shiftLabel = `${shift.startTime} - ${shift.endTime}`;
-                        const [startHour, startMin] = shift.startTime.split(':').map(Number);
-                        const [endHour, endMin] = shift.endTime.split(':').map(Number);
-                        hours = ((endHour * 60 + endMin) - (startHour * 60 + startMin)) / 60;
-                        // Cùng điều kiện với admin: ca >= 6h và không được đánh dấu "không nghỉ trưa" thì trừ 1h.
-                        if (hours >= 6 && !noLunchDates.has(shift.date)) {
-                          hours = hours - 1;
-                        }
-                        const regularHours = Math.min(hours, workHoursPerDay);
-                        money = hourlyRate * regularHours;
-                        if (hours > workHoursPerDay) {
-                          otHours = hours - workHoursPerDay;
-                          otMoney = hourlyRate * 1.5 * otHours;
-                        }
-                      } else if (shift.shift === 'OFF') {
-                        if (shift.offType === OffType.OFF_PN) {
-                          typeLabel = 'Phép năm';
-                          typeColor = 'text-blue-600 bg-blue-50';
-                          money = dailyRate;
-                        } else if (shift.offType === OffType.LE) {
-                          typeLabel = 'Nghỉ lễ';
-                          typeColor = 'text-purple-600 bg-purple-50';
-                          money = dailyRate;
-                        } else if (shift.offType === OffType.OFF_DK) {
-                          typeLabel = 'OFF định kỳ';
-                          typeColor = 'text-slate-600 bg-slate-50';
-                          hours = 0;
-                          money = 0;
-                        } else if (shift.offType === OffType.OFF_KL) {
-                          typeLabel = 'OFF không lương';
-                          typeColor = 'text-red-600 bg-red-50';
-                          hours = 0;
-                          money = 0;
-                        } else {
-                          typeLabel = 'OFF';
-                          typeColor = 'text-slate-600 bg-slate-50';
-                          hours = 0;
-                          money = 0;
-                        }
-                        shiftLabel = shift.offType || 'OFF';
-                      } else {
-                        money = dailyRate;
-                      }
+          {/* ATTENDANCE method → bảng chấm công */}
+          {data.calcMethod === 'ATTENDANCE' && renderAttendanceDetailTable()}
 
-                      // Cộng dồn giờ làm việc thực tế (chỉ tính giờ có lương)
-                      if (hours > 0) {
-                        totalRegularHours += Math.min(hours, workHoursPerDay);
-                      }
-                      if (otHours > 0) {
-                        totalOTHours += otHours;
-                        totalOTMoney += otMoney;
-                      }
-
-                      return (
-                        <div key={idx} className="p-4 hover:bg-slate-50 transition-colors">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1">
-                                <p className="text-sm font-bold text-slate-700">{dateStr}</p>
-                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${typeColor}`}>
-                                  {typeLabel}
-                                </span>
-                              </div>
-                              <p className="text-xs text-slate-500 truncate">{shiftLabel}</p>
-                              
-                              {/* Display note if exists */}
-                              {shift.note && (
-                                <div className="mt-2 bg-amber-50 border border-amber-200 rounded px-2 py-1">
-                                  <p className="text-xs text-amber-800">
-                                    <span className="font-bold">Ghi chú: </span>
-                                    {shift.note}
-                                  </p>
-                                </div>
-                              )}
-                            </div>
-                            <div className="text-right flex-shrink-0">
-                              <p className="text-sm font-bold text-slate-800">
-                                {hours > 0 ? `${Math.min(hours, workHoursPerDay).toFixed(1)}h` : '-'}
-                              </p>
-                              <p className="text-base font-bold text-blue-600">
-                                {money + otMoney > 0 ? formatCurrency(Math.round(money + otMoney)) : '-'}
-                              </p>
-                              {otHours > 0 && (
-                                <p className="text-[10px] font-bold text-purple-600">
-                                  OT ×1.5: +{formatCurrency(Math.round(otMoney))}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    });
-
-                  const totalWorkedInTable = totalRegularHours + totalOTHours;
-                  const totalMoneyFromHours = hourlyRate * totalRegularHours + totalOTMoney;
-                  
-                  // Add total - sử dụng cùng công thức với admin.
-                  rows.push(
-                    <div key="total" className="p-4 bg-gradient-to-r from-blue-50 to-cyan-50 border-t-2 border-blue-200">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-bold text-blue-700">Tổng cộng</p>
-                          <p className="text-xs text-blue-600">{(totalWorkedInTable / workHoursPerDay).toFixed(2)} công</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-sm font-bold text-blue-700">
-                            {totalWorkedInTable.toFixed(1)}h
-                          </p>
-                          <p className="text-lg font-bold text-blue-700">
-                            {formatCurrency(Math.round(totalMoneyFromHours))}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  );
-
-                  return (
-                    <>
-                      <div className="bg-gradient-to-r from-slate-50 to-sky-50 px-4 py-3 border-b border-sky-100">
-                        <h4 className="text-sm font-bold text-slate-700">
-                          Chi tiết ca làm việc ({totalWorkedInTable.toFixed(1)}h)
-                        </h4>
-                      </div>
-                      {rows}
-                    </>
-                  );
-                })()}
-              </div>
-            </div>
+          {/* MANUAL method → bảng nhập tay */}
+          {data.calcMethod === 'MANUAL' && renderManualDetail()}
         </div>
       )}
     </div>

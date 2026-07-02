@@ -9,8 +9,14 @@
   },
   "scripts": {
     "dev": "vite",
+    "dev:3000": "vite --port 3000",
+    "dev:5173": "vite --port 5173",
+    "dev:4000": "vite --port 4000",
+    "dev:8080": "vite --port 8080",
     "build": "vite build",
     "preview": "vite preview",
+    "preview:4173": "vite preview --port 4173",
+    "preview:5000": "vite preview --port 5000",
     "generate-icons": "node scripts/generate-icons.js"
   },
   "dependencies": {
