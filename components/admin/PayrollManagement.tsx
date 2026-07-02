@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { PayrollRecord, User, UserRole, AttendanceRecord, AttendanceType, ShiftRegistration, OffType, Branch } from '../../types';
+import { PayrollRecord, User, UserRole, AttendanceRecord, AttendanceType, ShiftRegistration, OffType, Branch, EmployeeStatus } from '../../types';
 import { getAllPayrolls, getPayrollMonths, getAllUsers, calculatePayroll, createOrUpdatePayroll, getShiftRegistrations, getAttendance, getConfigNumber, updateShiftRegistration, setPayrollNoLunchBreakDates, getBranches, calculateAttendanceStats, calculateShiftWorkDays } from '../../services/db';
 import { exportMultipleTablesToCSV } from '../../utils/export';
 import {
@@ -69,7 +69,7 @@ const normalizeEmployeeStartDate = (startDate?: number): number | null => {
   return startDate < 1e12 ? startDate * 1000 : startDate;
 };
 
-/** Nhân viên đã vào làm trước khi kết thúc kỳ lương (tránh lẫn NV mới vào kỳ cũ). */
+/** Nhân viên đã vào làm trước khi kết thúc kỳ lương (dùng khi thêm dòng chờ tính lương kỳ hiện tại). */
 const wasEmployedInPayrollCycle = (employee: User | undefined, month: string): boolean => {
   if (!employee) return false;
 
@@ -77,7 +77,6 @@ const wasEmployedInPayrollCycle = (employee: User | undefined, month: string): b
   const { endExclusive } = getPayrollCycleRange(month);
 
   if (normalizedStart === null) {
-    // Kỳ đã qua: bắt buộc có ngày vào làm, không thì không hiển thị
     return !isHistoricalPayrollCycle(month);
   }
 
@@ -322,31 +321,67 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       : 'Past payroll cycles are locked for archival and cannot be updated.';
 
   const visiblePayrollRows = useMemo(() => {
-    return payrollRecords
+    const mapRecordToRow = (payroll: PayrollRecord, employee: User | undefined) => {
+      const dailyRate = payroll.baseSalary / (payroll.standardWorkDays || 27);
+      const hourlyRate = dailyRate / workHoursPerDay;
+      const basicSalary = hourlyRate * payroll.actualWorkDays * workHoursPerDay;
+      const totalIncome = basicSalary + payroll.otPay + payroll.allowance + payroll.bonus;
+
+      return {
+        payroll,
+        employee,
+        workHours: payroll.actualWorkDays * workHoursPerDay,
+        totalIncome,
+      };
+    };
+
+    const rows = payrollRecords
       .map((payroll) => {
         const employee = employees.find(e => e.id === payroll.userId);
 
-        if (!wasEmployedInPayrollCycle(employee, selectedMonth)) {
+        // Bản ghi lương đã lưu trong DB → luôn hiện (kể cả kỳ cũ, NV đã nghỉ, ngày vào làm cập nhật sau)
+        if (filterBranch !== 'ALL' && employee != null && employee.branchId !== filterBranch) {
           return null;
         }
 
-        if (filterBranch !== 'ALL' && employee?.branchId !== filterBranch) {
-          return null;
-        }
-
-        const dailyRate = payroll.baseSalary / payroll.standardWorkDays;
-        const hourlyRate = dailyRate / workHoursPerDay;
-        const basicSalary = hourlyRate * payroll.actualWorkDays * workHoursPerDay;
-        const totalIncome = basicSalary + payroll.otPay + payroll.allowance + payroll.bonus;
-
-        return {
-          payroll,
-          employee,
-          workHours: payroll.actualWorkDays * workHoursPerDay,
-          totalIncome,
-        };
+        return mapRecordToRow(payroll, employee);
       })
       .filter((row): row is NonNullable<typeof row> => row !== null);
+
+    if (!isHistoricalPayrollCycle(selectedMonth)) {
+      const existingUserIds = new Set(rows.map(row => row.payroll.userId));
+      const pendingRows = employees
+        .filter(
+          e =>
+            e.role !== UserRole.ADMIN &&
+            e.status === EmployeeStatus.ACTIVE &&
+            wasEmployedInPayrollCycle(e, selectedMonth) &&
+            !existingUserIds.has(e.id) &&
+            (filterBranch === 'ALL' || e.branchId === filterBranch)
+        )
+        .map(employee => mapRecordToRow({
+          id: `pending-${employee.id}-${selectedMonth}`,
+          userId: employee.id,
+          month: selectedMonth,
+          baseSalary: employee.grossSalary || employee.traineeSalary || 0,
+          standardWorkDays: 27,
+          actualWorkDays: 0,
+          otHours: 0,
+          otPay: 0,
+          allowance: 0,
+          bonus: 0,
+          deductions: 0,
+          netSalary: 0,
+          status: 'PENDING',
+          calcMethod: 'SHIFT',
+        }, employee));
+
+      rows.push(...pendingRows);
+    }
+
+    return rows.sort((a, b) =>
+      (a.employee?.name ?? a.payroll.userId).localeCompare(b.employee?.name ?? b.payroll.userId, 'vi')
+    );
   }, [payrollRecords, employees, selectedMonth, filterBranch, workHoursPerDay]);
 
   useEffect(() => {
@@ -499,6 +534,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       const headers = language === 'vi' ? [
         'Họ Tên',
         'Bộ Phận',
+        'Trạng thái NV',
         'Lương cơ bản',
         'Giờ làm việc',
         'Ngày công',
@@ -507,10 +543,11 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
         'Tổng lương (trước BHXH)',
         'Khấu trừ',
         'Thực lãnh (sau BHXH)',
-        'Trạng thái',
+        'Trạng thái thanh toán',
       ] : [
         'Full Name',
         'Department',
+        'Employment Status',
         'Base Salary',
         'Work Hours',
         'Work Days',
@@ -519,7 +556,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
         'Total Salary (Before Deductions)',
         'Deductions',
         'Net Salary (After Deductions)',
-        'Status',
+        'Payment Status',
       ];
 
       const csvRows: Array<Array<string | number>> = [
@@ -527,6 +564,11 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
         ...visiblePayrollRows.map(({ payroll, employee, workHours, totalIncome }) => [
           employee?.name ?? payroll.userId,
           employee?.department ?? '',
+          employee?.status === EmployeeStatus.LEFT
+            ? (language === 'vi' ? 'Đã nghỉ' : 'Resigned')
+            : employee?.status === EmployeeStatus.ACTIVE
+            ? (language === 'vi' ? 'Đang làm' : 'Active')
+            : '',
           formatNumber(payroll.baseSalary),
           `${workHours.toFixed(1)}h`,
           `${payroll.actualWorkDays.toFixed(2)}/${payroll.standardWorkDays}`,
