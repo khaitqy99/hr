@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { PayrollRecord, User, UserRole, AttendanceRecord, AttendanceType, ShiftRegistration, OffType, Branch, EmployeeStatus } from '../../types';
-import { getAllPayrolls, getPayrollMonths, getAllUsers, calculatePayroll, createOrUpdatePayroll, getShiftRegistrations, getAttendance, getConfigNumber, updateShiftRegistration, setPayrollNoLunchBreakDates, getBranches, calculateAttendanceStats, calculateShiftWorkDays } from '../../services/db';
-import { exportMultipleTablesToCSV } from '../../utils/export';
+import { PayrollRecord, User, UserRole, AttendanceRecord, AttendanceType, ShiftRegistration, OffType, Branch, EmployeeStatus, ContractType, Holiday } from '../../types';
+import { getAllPayrolls, getPayrollMonths, getAllUsers, calculatePayroll, createOrUpdatePayroll, getShiftRegistrations, getAttendance, getAllAttendance, getHolidays, getConfigNumber, updateShiftRegistration, setPayrollNoLunchBreakDates, getBranches, calculateAttendanceStats, calculateShiftWorkDays } from '../../services/db';
 import {
   calculateRegularAndOTHoursWithNoLunchBreak,
   calculateTotalWorkedHoursWithNoLunchBreak,
@@ -90,6 +89,133 @@ const sortMonthKeysDesc = (months: string[]): string[] => {
     if (aYear !== bYear) return bYear - aYear;
     return bMonth - aMonth;
   });
+};
+
+const formatDateDDMMYYYY = (date: Date): string =>
+  `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`;
+
+/** Các ngày trong kỳ lương [02/MM, 02/MM+1) để xuất cột đăng ký ca. */
+const getPayrollCycleDateColumns = (month: string): string[] => {
+  const { start, endExclusive } = getPayrollCycleRange(month);
+  const columns: string[] = [];
+  const current = new Date(start);
+  while (current.getTime() < endExclusive) {
+    columns.push(formatDateDDMMYYYY(current));
+    current.setDate(current.getDate() + 1);
+  }
+  return columns;
+};
+
+const parseDateColumnKey = (dateStr: string): string => {
+  const [dayStr, monthStr, yearStr] = dateStr.split('/');
+  return `${yearStr}-${monthStr.padStart(2, '0')}-${dayStr.padStart(2, '0')}`;
+};
+
+const isHolidayOnDate = (date: Date, holidays: Holiday[]): boolean =>
+  holidays.some(h => {
+    const hDate = new Date(h.date);
+    if (h.isRecurring) {
+      return hDate.getMonth() === date.getMonth() && hDate.getDate() === date.getDate();
+    }
+    return hDate.getFullYear() === date.getFullYear() &&
+      hDate.getMonth() === date.getMonth() &&
+      hDate.getDate() === date.getDate();
+  });
+
+const getOffTypeExportLabel = (offType: OffType | undefined, language: 'vi' | 'en'): string => {
+  if (language === 'en') {
+    switch (offType) {
+      case OffType.OFF_DK: return 'OFF DK';
+      case OffType.OFF_PN: return 'OFF PN';
+      case OffType.OFF_KL: return 'OFF KL';
+      case OffType.CT: return 'CT';
+      case OffType.LE: return 'HOLIDAY';
+      default: return 'OFF';
+    }
+  }
+  switch (offType) {
+    case OffType.OFF_DK: return 'OFF DK';
+    case OffType.OFF_PN: return 'OFF PN';
+    case OffType.OFF_KL: return 'OFF KL';
+    case OffType.CT: return 'CT';
+    case OffType.LE: return 'LỄ';
+    default: return 'OFF';
+  }
+};
+
+/** Hiển thị đăng ký ca theo ngày (logic khớp bản xuất CSV cũ). */
+const getShiftInOutForExportDay = (
+  dayShift: ShiftRegistration | undefined,
+  dayAttendance: { checkIn?: AttendanceRecord; checkOut?: AttendanceRecord } | undefined,
+  isHolidayDate: boolean,
+  isTrainee: boolean,
+  language: 'vi' | 'en'
+): { inValue: string; outValue: string } => {
+  const DEFAULT_IN = '09:00';
+  const DEFAULT_OUT = '18:00';
+  const holidayLabel = language === 'vi' ? 'LỄ' : 'HOLIDAY';
+  const traineeLabel = language === 'vi' ? 'HV' : 'TR';
+
+  if (isHolidayDate) {
+    return { inValue: holidayLabel, outValue: holidayLabel };
+  }
+
+  if (!dayShift) {
+    let inValue = '';
+    let outValue = '';
+    if (dayAttendance?.checkIn) {
+      const time = new Date(dayAttendance.checkIn.timestamp);
+      inValue = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
+    }
+    if (dayAttendance?.checkOut) {
+      const time = new Date(dayAttendance.checkOut.timestamp);
+      outValue = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
+      if (dayAttendance.checkOut.status === 'OVERTIME') {
+        outValue += ' BB';
+      }
+    }
+    return { inValue, outValue };
+  }
+
+  if (dayShift.shift === 'OFF') {
+    if (dayShift.offType === OffType.LE) {
+      return { inValue: holidayLabel, outValue: holidayLabel };
+    }
+    return { inValue: getOffTypeExportLabel(dayShift.offType, language), outValue: '' };
+  }
+
+  if (dayShift.shift === 'CUSTOM') {
+    if (isTrainee) {
+      return { inValue: traineeLabel, outValue: traineeLabel };
+    }
+    let inValue = '';
+    let outValue = '';
+    if (dayAttendance?.checkIn) {
+      const time = new Date(dayAttendance.checkIn.timestamp);
+      inValue = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
+    } else {
+      inValue = dayShift.startTime || DEFAULT_IN;
+    }
+    if (dayAttendance?.checkOut) {
+      const time = new Date(dayAttendance.checkOut.timestamp);
+      outValue = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
+      if (dayAttendance.checkOut.status === 'OVERTIME') {
+        outValue += ' BB';
+      }
+    } else {
+      outValue = dayShift.endTime || DEFAULT_OUT;
+    }
+    return { inValue, outValue };
+  }
+
+  if (isTrainee) {
+    return { inValue: traineeLabel, outValue: traineeLabel };
+  }
+
+  return {
+    inValue: dayShift.startTime || DEFAULT_IN,
+    outValue: dayShift.endTime || DEFAULT_OUT,
+  };
 };
 
 interface PayrollManagementProps {
@@ -183,7 +309,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       loadError: 'Không thể tải dữ liệu: {error}',
       loadPayrollError: 'Không thể tải bảng lương: {error}',
       noDataToExport: 'Không có dữ liệu để xuất',
-      exportSuccess: 'Đã xuất thành công file CSV bảng lương chi tiết!',
+      exportSuccess: 'Đã xuất thành công file CSV bảng lương và đăng ký ca!',
       exportError: 'Lỗi khi xuất dữ liệu: {error}',
       payrollDetail: 'Chi tiết kỳ lương {month}',
       close: 'Đóng',
@@ -262,7 +388,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       loadError: 'Unable to load data: {error}',
       loadPayrollError: 'Unable to load payroll: {error}',
       noDataToExport: 'No data to export',
-      exportSuccess: 'Successfully exported detailed payroll CSV file!',
+      exportSuccess: 'Successfully exported payroll and shift registration CSV file!',
       exportError: 'Error exporting data: {error}',
       payrollDetail: 'Payroll cycle details for {month}',
       close: 'Close',
@@ -531,7 +657,20 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       const formatNumber = (num: number): string =>
         Math.round(num).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
-      const headers = language === 'vi' ? [
+      const { start, endExclusive } = getPayrollCycleRange(selectedMonth);
+      const [allAttendance, holidays] = await Promise.all([
+        getAllAttendance(10000),
+        getHolidays(),
+      ]);
+      const attendanceInCycle = allAttendance.filter(
+        record => record.timestamp >= start && record.timestamp < endExclusive
+      );
+
+      const dateColumns = getPayrollCycleDateColumns(selectedMonth);
+      const inSuffix = language === 'vi' ? ' - Ca IN' : ' - Shift IN';
+      const outSuffix = language === 'vi' ? ' - Ca OUT' : ' - Shift OUT';
+
+      const summaryHeaders = language === 'vi' ? [
         'Họ Tên',
         'Bộ Phận',
         'Trạng thái NV',
@@ -559,9 +698,35 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
         'Payment Status',
       ];
 
-      const csvRows: Array<Array<string | number>> = [
-        headers,
-        ...visiblePayrollRows.map(({ payroll, employee, workHours, totalIncome }) => [
+      const headers = [
+        ...summaryHeaders,
+        ...dateColumns.flatMap(dateStr => [`${dateStr}${inSuffix}`, `${dateStr}${outSuffix}`]),
+      ];
+
+      const shiftByUserDate = new Map<string, ShiftRegistration>();
+      allShiftsInMonth.forEach(shift => {
+        shiftByUserDate.set(`${shift.userId}_${toDateKey(shift.date)}`, shift);
+      });
+
+      const csvRows: Array<Array<string | number>> = [headers];
+
+      for (const { payroll, employee, workHours, totalIncome } of visiblePayrollRows) {
+        const attendanceByDate: Record<string, { checkIn?: AttendanceRecord; checkOut?: AttendanceRecord }> = {};
+        attendanceInCycle
+          .filter(record => record.userId === payroll.userId)
+          .forEach(record => {
+            const dateKey = toDateKey(record.timestamp);
+            if (!attendanceByDate[dateKey]) {
+              attendanceByDate[dateKey] = {};
+            }
+            if (record.type === AttendanceType.CHECK_IN) {
+              attendanceByDate[dateKey].checkIn = record;
+            } else if (record.type === AttendanceType.CHECK_OUT) {
+              attendanceByDate[dateKey].checkOut = record;
+            }
+          });
+
+        const row: Array<string | number> = [
           employee?.name ?? payroll.userId,
           employee?.department ?? '',
           employee?.status === EmployeeStatus.LEFT
@@ -578,8 +743,27 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
           `-${formatNumber(payroll.deductions)}`,
           formatNumber(payroll.netSalary),
           payroll.status === 'PAID' ? text.paid : text.pending,
-        ]),
-      ];
+        ];
+
+        const isTrainee = employee?.contractType === ContractType.TRIAL;
+
+        dateColumns.forEach(dateStr => {
+          const dateKey = parseDateColumnKey(dateStr);
+          const [dayStr, monthStr, yearStr] = dateStr.split('/');
+          const date = new Date(parseInt(yearStr, 10), parseInt(monthStr, 10) - 1, parseInt(dayStr, 10));
+          const dayShift = shiftByUserDate.get(`${payroll.userId}_${dateKey}`);
+          const { inValue, outValue } = getShiftInOutForExportDay(
+            dayShift,
+            attendanceByDate[dateKey],
+            isHolidayOnDate(date, holidays),
+            isTrainee,
+            language
+          );
+          row.push(inValue, outValue);
+        });
+
+        csvRows.push(row);
+      }
 
       const csvContent = csvRows.map(row =>
         row.map((cell) => {
@@ -595,7 +779,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       const link = document.createElement('a');
       const url = URL.createObjectURL(blob);
       link.setAttribute('href', url);
-      link.setAttribute('download', `bang_luong_chi_tiet_${selectedMonth}_${Date.now()}.csv`);
+      link.setAttribute('download', `bang_luong_va_dang_ky_ca_${selectedMonth}_${Date.now()}.csv`);
       link.style.visibility = 'hidden';
       document.body.appendChild(link);
       link.click();
