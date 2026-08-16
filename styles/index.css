@@ -1,0 +1,318 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  overscroll-behavior-y: none;
+  overscroll-behavior-x: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Chiều cao viewport thật trên iOS: dvh không tính thanh công cụ Safari.
+   Safe-area được đặt bên trong container này để không cộng thêm chiều cao trang. */
+.app-viewport {
+  height: 100vh;
+  height: 100dvh;
+}
+.app-min-viewport {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+.app-safe-x {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Vẫn cho phép chọn text trong ô nhập */
+input,
+textarea,
+[contenteditable='true'] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/* Đảm bảo touch targets đủ lớn (min 44x44px theo Apple/Google guidelines) */
+button,
+a,
+[role='button'],
+input[type='button'],
+input[type='submit'] {
+  min-height: 44px;
+  min-width: 44px;
+  touch-action: manipulation; /* Tắt double-tap zoom */
+}
+/* Hỗ trợ các phần tử custom có thể click (tabIndex/role=button) trên iOS */
+[role='button'],
+[tabindex='0'] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Tối ưu input cho mobile */
+input,
+textarea,
+select {
+  font-size: 16px; /* Tránh zoom trên iOS khi focus */
+  touch-action: manipulation;
+}
+
+/* Prevent zoom on input focus (iOS Safari) */
+@supports (-webkit-touch-callout: none) {
+  input[type='text'],
+  input[type='email'],
+  input[type='number'],
+  input[type='tel'],
+  input[type='url'],
+  input[type='search'],
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* Ẩn toàn bộ thanh cuộn trong dự án */
+html,
+body,
+* {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+*::-webkit-scrollbar {
+  display: none !important;
+}
+/* Hide scrollbar và tối ưu scroll trên iOS */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+/* Ẩn hoàn toàn thanh cuộn trang employee (dashboard, checkin, shifts, ...) */
+.layout-employee main::-webkit-scrollbar {
+  display: none !important;
+}
+.layout-employee main {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+
+/* Ocean Animations - Tối ưu cho mobile */
+@keyframes float-slow {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+.animate-float-slow {
+  animation: float-slow 4s ease-in-out infinite;
+}
+/* Giảm animation trên mobile để tiết kiệm battery và CPU */
+@media (max-width: 768px) {
+  .animate-float-slow {
+    animation: float-slow 6s ease-in-out infinite;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-float-slow,
+  .animate-enter-right,
+  .animate-enter-left,
+  .fade-up {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.fade-up {
+  animation: fadeUp 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  opacity: 0;
+  transform: translateY(10px);
+}
+@keyframes fadeUp {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Page Transitions - đơn giản hóa để giảm GPU load trên iOS */
+.animate-enter-right {
+  animation: pageEnterRight 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+.animate-enter-left {
+  animation: pageEnterLeft 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+@keyframes pageEnterRight {
+  0% {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pageEnterLeft {
+  0% {
+    opacity: 0;
+    transform: translateX(-30px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Trạng thái idle sau khi animation xong — không chạy animation mới, tránh nháy */
+.content-idle {
+  opacity: 1;
+  transform: none;
+  animation: none;
+}
+
+/* Bottom bar - Tối ưu transitions cho iOS */
+.nav-sliding-pill {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.2s ease-out;
+}
+.nav-item {
+  transition: flex-grow 0.25s ease-out, padding 0.25s ease-out;
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: transparent;
+  border: 0;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-item:focus,
+.nav-item:active {
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-item:focus-visible {
+  outline: 2px solid #0ea5e9;
+  outline-offset: 2px;
+}
+.nav-icon {
+  transition: transform 0.2s ease-out, color 0.2s ease-out;
+}
+.nav-label {
+  transition: max-width 0.25s ease-out, margin 0.25s ease-out, opacity 0.2s ease-out;
+}
+.nav-bar-wrap {
+  transition: box-shadow 0.2s ease;
+}
+
+/* Giảm backdrop-blur trên mobile - tốn CPU/battery trên iOS/Android */
+@media (max-width: 768px) {
+  .backdrop-blur-md {
+    backdrop-filter: blur(8px);
+  }
+  .backdrop-blur-xl {
+    backdrop-filter: blur(12px);
+  }
+  .backdrop-blur-2xl {
+    backdrop-filter: blur(16px);
+  }
+}
+
+/* Tối ưu cho mạng chậm - giảm animations */
+@media (prefers-reduced-data: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Tối ưu scroll performance */
+* {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+
+/* Prevent text size adjustment on iOS */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Pull to refresh animation */
+@keyframes slide-down {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.animate-slide-down {
+  animation: slide-down 0.3s ease-out;
+}
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes scale-in {
+  from {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+.animate-scale-in {
+  animation: scale-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* iOS-specific optimizations */
+@supports (-webkit-touch-callout: none) {
+  img {
+    image-rendering: -webkit-optimize-contrast;
+    -webkit-backface-visibility: hidden;
+    max-width: 100%;
+    height: auto;
+  }
+  video,
+  canvas {
+    -webkit-backface-visibility: hidden;
+  }
+}

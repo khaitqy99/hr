@@ -67,6 +67,7 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
   const maxVerticalRatio = 0.5; // vuốt ngang phải rõ: |dx| > |dy| * (1/0.5) = 2 lần
 
   const mainRef = useRef<HTMLElement>(null);
+  const [activeStyleView, setActiveStyleView] = useState(currentView);
 
   // Profile Menu State
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -102,10 +103,19 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
   const handleSetView = useCallback(
     (newView: string) => {
       if (newView === currentView) return;
+      // Giữ icon tab đích màu xanh trong lúc pill đang trượt tới.
+      setActiveStyleView('');
       setView(newView);
     },
     [currentView, setView]
   );
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setActiveStyleView(currentView);
+    }, 340);
+    return () => window.clearTimeout(timer);
+  }, [currentView]);
 
   const onTouchStart = (e: React.TouchEvent) => {
     touchEndRef.current = null;
@@ -382,7 +392,11 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
               label={item.label}
               icon={item.icon}
               isActive={currentView === item.view}
-              showActiveStyle={currentView === item.view && pill !== null}
+              showActiveStyle={
+                currentView === item.view &&
+                activeStyleView === item.view &&
+                pill !== null
+              }
               onSelect={handleSetView}
               registerRef={registerItemRefs[index]}
             />

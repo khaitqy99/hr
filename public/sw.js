@@ -125,22 +125,6 @@ if (typeof workbox !== 'undefined' && workbox) {
     })
   );
 
-  // Cache strategy cho Tailwind CSS CDN
-  workbox.routing.registerRoute(
-    /^https:\/\/cdn\.tailwindcss\.com\/.*/i,
-    new workbox.strategies.CacheFirst({
-      cacheName: 'tailwind-cache',
-      plugins: [
-        new workbox.expiration.ExpirationPlugin({
-          maxEntries: 1,
-          maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year
-        }),
-        new workbox.cacheableResponse.CacheableResponsePlugin({
-          statuses: [0, 200],
-        }),
-      ],
-    })
-  );
 } else {
   console.error('Workbox could not be loaded');
 }
