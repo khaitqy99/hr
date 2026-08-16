@@ -171,9 +171,8 @@ self.addEventListener('message', (event) => {
   }
 });
 
-// ============ PUSH NOTIFICATIONS HANDLERS (Quan trọng cho mobile) ============
+// ============ WEB PUSH (hoạt động khi app đã đóng) ============
 
-// Xử lý khi nhận được push notification (từ server hoặc local)
 self.addEventListener('push', (event) => {
   console.log('📨 [SW] Push event received');
 
@@ -183,6 +182,11 @@ self.addEventListener('push', (event) => {
     icon: '/icon-192.png',
     badge: '/icon-192.png',
     url: '/employee/notifications',
+    tag: 'hr-notification',
+    requireInteraction: false,
+    silent: false,
+    vibrate: [100, 50, 100],
+    data: { url: '/employee/notifications' },
   };
 
   if (event.data) {
@@ -194,17 +198,22 @@ self.addEventListener('push', (event) => {
         icon: data.icon || notificationData.icon,
         badge: data.badge || notificationData.badge,
         url: data.url || data.actionUrl || notificationData.url,
-        tag: data.tag || data.id || 'hr-notification',
+        tag: data.tag || data.id || notificationData.tag,
         requireInteraction: data.requireInteraction || false,
         silent: data.silent || false,
         vibrate: data.vibrate || [100, 50, 100],
         data: {
           ...data,
-          url: data.url || data.actionUrl || '/employee/notifications',
+          url: data.url || data.actionUrl || data.data?.url || '/employee/notifications',
         },
       };
     } catch (e) {
-      console.warn('⚠️ [SW] Could not parse push data:', e);
+      try {
+        const text = event.data.text();
+        if (text) notificationData.body = text;
+      } catch (_) {
+        console.warn('⚠️ [SW] Could not parse push data:', e);
+      }
     }
   }
 
@@ -224,34 +233,28 @@ self.addEventListener('push', (event) => {
   );
 });
 
-// Xử lý khi user click vào notification (quan trọng cho mobile)
 self.addEventListener('notificationclick', (event) => {
   console.log('👆 [SW] Notification clicked');
-  console.log('👆 [SW] Notification data:', event.notification.data);
-
   event.notification.close();
 
-  const urlToOpen = event.notification.data?.url || '/employee/notifications';
-  console.log('🔗 [SW] URL to open:', urlToOpen);
+  const rawUrl = event.notification.data?.url || '/employee/notifications';
+  const absoluteUrl = new URL(rawUrl, self.location.origin).href;
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      console.log('🪟 [SW] Found clients:', clientList.length);
-
-      // Kiểm tra xem có cửa sổ nào đang mở URL này không
       for (let i = 0; i < clientList.length; i++) {
         const client = clientList[i];
-        console.log(`🪟 [SW] Client ${i}:`, client.url);
-        if (client.url === urlToOpen && 'focus' in client) {
-          console.log('✅ [SW] Focusing existing window');
-          return client.focus();
+        if (client.url.startsWith(self.location.origin) && 'focus' in client) {
+          return client.focus().then((focused) => {
+            if (focused && 'navigate' in focused) {
+              return focused.navigate(absoluteUrl);
+            }
+            return focused;
+          });
         }
       }
-
-      // Nếu không có cửa sổ nào mở, mở cửa sổ mới
       if (clients.openWindow) {
-        console.log('🆕 [SW] Opening new window');
-        return clients.openWindow(urlToOpen);
+        return clients.openWindow(absoluteUrl);
       }
     }).catch((error) => {
       console.error('❌ [SW] Error handling notification click:', error);
@@ -259,7 +262,6 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
-// Xử lý khi notification đóng (optional, để log)
 self.addEventListener('notificationclose', (event) => {
   console.log('ℹ️ [SW] Notification closed:', event.notification.tag);
 });

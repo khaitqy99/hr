@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { Notification, User } from '../types';
 import { getNotifications, markNotificationAsRead } from '../services/db';
-import { sendLocalNotification, getNotificationPermission, requestNotificationPermission } from '../services/push';
+import { sendLocalNotification, getNotificationPermission, requestNotificationPermission, ensurePushSubscription } from '../services/push';
 import { supabase } from '../services/supabase';
 import { isSupabaseAvailable } from '../services/db';
 
@@ -236,6 +236,9 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user, setView }
         }
       }
 
+      // Đăng ký Web Push để nhận khi app đóng
+      await ensurePushSubscription(user.id);
+
       // Send test notification
       console.log('📨 Đang gửi test notification...');
       await sendLocalNotification({
@@ -248,7 +251,7 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user, setView }
         data: { type: 'success', test: true },
       });
 
-      alert('✅ Đã gửi test notification!\n\nNếu bạn thấy thông báo hiện lên, nghĩa là push notifications đang hoạt động bình thường.');
+      alert('✅ Đã gửi test notification và đăng ký Web Push!\n\nNếu bạn thấy thông báo hiện lên, nghĩa là thông báo đang hoạt động. Khi app đóng, thông báo mới từ admin vẫn được gửi qua Web Push.');
     } catch (error: any) {
       console.error('❌ Lỗi test notification:', error);
       alert('❌ Lỗi khi gửi test notification:\n' + (error?.message || 'Vui lòng thử lại'));

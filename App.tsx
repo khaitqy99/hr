@@ -19,6 +19,7 @@ const NotificationsPanel = lazy(() => import('./components/NotificationsPanel'))
 import { getCurrentUser, syncAllOfflineData, getNotifications, isSupabaseAvailable } from './services/db';
 import { supabase } from './services/supabase';
 import { sendOTP, verifyOTP, signOut } from './services/auth';
+import { ensurePushSubscription } from './services/push';
 import { useDataEvents } from './utils/useDataEvents';
 
 // Admin sub-routes: path segment cho từng trang admin (đồng bộ với AdminPanel)
@@ -556,6 +557,8 @@ const App: React.FC = () => {
     if (savedUser) {
       const parsedUser = JSON.parse(savedUser);
       setUser(parsedUser);
+      // Session cũ: đăng ký / làm mới Web Push subscription
+      void ensurePushSubscription(parsedUser.id);
 
       if (path === '/') {
         const redirectPath = parsedUser.role === UserRole.ADMIN ? `/admin/${DEFAULT_ADMIN_TAB}` : `/employee/${DEFAULT_EMPLOYEE_VIEW}`;
@@ -596,6 +599,8 @@ const App: React.FC = () => {
   const handleLogin = async (foundUser: User) => {
     setUser(foundUser);
     localStorage.setItem('current_user', JSON.stringify(foundUser));
+    // Đăng ký Web Push (không chặn login nếu thất bại)
+    void ensurePushSubscription(foundUser.id);
     // Redirect đến URL phù hợp với role sau khi login
     // Truyền foundUser vào updateViewAndURL để tránh race condition với setUser
     if (foundUser.role === UserRole.ADMIN) {
