@@ -75,7 +75,10 @@ const InstallPrompt: React.FC = () => {
   }
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 p-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-2xl animate-slide-up">
+    <div
+      className="fixed bottom-0 left-0 right-0 z-50 p-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-2xl animate-slide-up"
+      style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+    >
       <div className="max-w-md mx-auto flex items-center justify-between gap-4">
         <div className="flex-1">
           {isIOS ? (

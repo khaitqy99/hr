@@ -238,7 +238,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
   };
 
   return (
-    <div className="flex h-screen bg-slate-50">
+    <div
+      className="flex app-viewport app-safe-x bg-slate-50"
+      style={{ paddingTop: 'env(safe-area-inset-top)' }}
+    >
       {/* Sidebar */}
       <div className={`bg-white border-r border-slate-200 flex flex-col shrink-0 transition-all duration-200 ${isSidebarCollapsed ? 'w-16' : 'w-52'}`}>
         <div className={`relative h-[56px] border-b border-slate-200 flex items-center shrink-0 ${isSidebarCollapsed ? 'px-2 justify-center' : 'px-4'} gap-2.5`}>

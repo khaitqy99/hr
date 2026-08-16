@@ -108,7 +108,10 @@ const UpdateNotification: React.FC = () => {
   if (!updateAvailable) return null;
 
   return (
-    <div className="fixed top-0 left-0 right-0 z-[100] p-4 bg-gradient-to-r from-green-500 to-green-600 text-white shadow-lg animate-slide-down">
+    <div
+      className="fixed top-0 left-0 right-0 z-[100] p-4 bg-gradient-to-r from-green-500 to-green-600 text-white shadow-lg animate-slide-down"
+      style={{ paddingTop: 'calc(1rem + env(safe-area-inset-top))' }}
+    >
       <div className="max-w-md mx-auto flex items-center justify-between gap-4">
         <div className="flex-1">
           <p className="font-semibold text-sm mb-1">

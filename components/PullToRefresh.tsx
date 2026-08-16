@@ -17,6 +17,9 @@ const PullToRefresh: React.FC<PullToRefreshProps> = ({
   const [pullDistance, setPullDistance] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const touchStartY = useRef<number | null>(null);
+  const touchStartX = useRef<number | null>(null);
+  const isPullingRef = useRef(false);
+  const pullDistanceRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -29,6 +32,9 @@ const PullToRefresh: React.FC<PullToRefreshProps> = ({
       // Only trigger if at the top of the scroll
       if (container.scrollTop === 0) {
         touchStartY.current = e.touches[0].clientY;
+        touchStartX.current = e.touches[0].clientX;
+        isPullingRef.current = false;
+        pullDistanceRef.current = 0;
       }
     };
 
@@ -41,27 +47,38 @@ const PullToRefresh: React.FC<PullToRefreshProps> = ({
 
       const currentY = e.touches[0].clientY;
       const distance = currentY - touchStartY.current;
+      const horizontalDistance = touchStartX.current === null
+        ? 0
+        : Math.abs(e.touches[0].clientX - touchStartX.current);
 
-      // Chỉ preventDefault khi kéo xuống (pull down), không chặn khi vuốt lên
-      if (distance > 0) {
+      // Không chặn click vì rung tay nhẹ; chỉ nhận một thao tác kéo dọc rõ ràng.
+      const pullSlop = 10;
+      if (distance > pullSlop && distance > horizontalDistance) {
         e.preventDefault();
+        const nextDistance = Math.min(distance, threshold * 1.5);
+        isPullingRef.current = true;
+        pullDistanceRef.current = nextDistance;
         setIsPulling(true);
-        setPullDistance(Math.min(distance, threshold * 1.5));
-      } else {
-        // Vuốt lên - reset và cho phép scroll bình thường
+        setPullDistance(nextDistance);
+      } else if (distance <= 0 || horizontalDistance > distance) {
+        // Vuốt lên/ngang - reset và cho phép scroll hoặc swipe tab bình thường.
         touchStartY.current = null;
+        touchStartX.current = null;
+        isPullingRef.current = false;
+        pullDistanceRef.current = 0;
         setIsPulling(false);
         setPullDistance(0);
       }
     };
 
     const handleTouchEnd = async () => {
-      if (touchStartY.current === null || !isPulling) {
+      if (touchStartY.current === null || !isPullingRef.current) {
         touchStartY.current = null;
+        touchStartX.current = null;
         return;
       }
 
-      if (pullDistance >= threshold) {
+      if (pullDistanceRef.current >= threshold) {
         setIsRefreshing(true);
         try {
           await onRefresh();
@@ -75,18 +92,32 @@ const PullToRefresh: React.FC<PullToRefreshProps> = ({
       setIsPulling(false);
       setPullDistance(0);
       touchStartY.current = null;
+      touchStartX.current = null;
+      isPullingRef.current = false;
+      pullDistanceRef.current = 0;
+    };
+
+    const handleTouchCancel = () => {
+      touchStartY.current = null;
+      touchStartX.current = null;
+      isPullingRef.current = false;
+      pullDistanceRef.current = 0;
+      setIsPulling(false);
+      setPullDistance(0);
     };
 
     container.addEventListener('touchstart', handleTouchStart, { passive: false });
     container.addEventListener('touchmove', handleTouchMove, { passive: false });
     container.addEventListener('touchend', handleTouchEnd);
+    container.addEventListener('touchcancel', handleTouchCancel);
 
     return () => {
       container.removeEventListener('touchstart', handleTouchStart);
       container.removeEventListener('touchmove', handleTouchMove);
       container.removeEventListener('touchend', handleTouchEnd);
+      container.removeEventListener('touchcancel', handleTouchCancel);
     };
-  }, [disabled, isRefreshing, isPulling, pullDistance, threshold, onRefresh]);
+  }, [disabled, isRefreshing, threshold, onRefresh]);
 
   const pullProgress = Math.min(pullDistance / threshold, 1);
   const shouldShowSpinner = pullProgress > 0.5;

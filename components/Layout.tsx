@@ -10,9 +10,10 @@ interface LayoutProps {
 }
 
 const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, onLogout }) => {
-  // Swipe Logic State
-  const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
-  const [touchEnd, setTouchEnd] = useState<{ x: number; y: number } | null>(null);
+  // Giữ tọa độ swipe trong refs để một cú chạm không gây re-render giữa
+  // touchstart/touchend (iOS có thể hủy click tổng hợp trong trường hợp đó).
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const touchEndRef = useRef<{ x: number; y: number } | null>(null);
   const minSwipeDistance = 80; // px required to trigger swipe
   const maxVerticalRatio = 0.5; // vuốt ngang phải rõ: |dx| > |dy| * (1/0.5) = 2 lần
 
@@ -54,29 +55,29 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
     setView(newView);
   };
 
-  // Tối ưu touch events cho iOS - sử dụng passive listeners khi có thể
   const onTouchStart = (e: React.TouchEvent) => {
-    // Chỉ xử lý nếu không phải scroll
-    if (e.target instanceof HTMLElement && e.target.closest('.no-scrollbar')) {
-      setTouchEnd(null);
-      const t = e.targetTouches[0];
-      if (t) {
-        setTouchStart({ x: t.clientX, y: t.clientY });
-      }
+    touchEndRef.current = null;
+    const t = e.targetTouches[0];
+    if (t) {
+      touchStartRef.current = { x: t.clientX, y: t.clientY };
     }
   };
 
   const onTouchMove = (e: React.TouchEvent) => {
-    // Chỉ update nếu đã có touchStart
-    if (touchStart) {
+    if (touchStartRef.current) {
       const t = e.targetTouches[0];
       if (t) {
-        setTouchEnd({ x: t.clientX, y: t.clientY });
+        touchEndRef.current = { x: t.clientX, y: t.clientY };
       }
     }
   };
 
   const onTouchEnd = () => {
+    const touchStart = touchStartRef.current;
+    const touchEnd = touchEndRef.current;
+    touchStartRef.current = null;
+    touchEndRef.current = null;
+
     if (!touchStart || !touchEnd) return;
 
     const dx = touchStart.x - touchEnd.x;
@@ -104,6 +105,11 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
             handleSetView(views[currentIndex - 1]);
         }
     }
+  };
+
+  const onTouchCancel = () => {
+    touchStartRef.current = null;
+    touchEndRef.current = null;
   };
 
   // Sliding pill: vị trí theo tab đang active
@@ -236,9 +242,13 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
   }
 
   return (
-    <div className="layout-employee flex flex-col h-screen bg-sky-50 overflow-hidden">
+    <div className="layout-employee app-viewport app-safe-x flex flex-col bg-sky-50 overflow-hidden">
       {/* Header - Glassmorphism */}
-      <header className="px-5 py-2.5 flex justify-between items-center sticky top-0 z-30 bg-white border-b border-sky-100" ref={profileMenuRef}>
+      <header
+        className="px-5 py-2.5 flex justify-between items-center sticky top-0 z-30 bg-white border-b border-sky-100"
+        style={{ paddingTop: 'calc(0.625rem + env(safe-area-inset-top))' }}
+        ref={profileMenuRef}
+      >
         <button
           type="button"
           onClick={() => setShowProfileMenu(!showProfileMenu)}
@@ -315,10 +325,8 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
-        style={{
-          WebkitOverflowScrolling: 'touch',
-          transform: 'translateZ(0)',
-        }}
+        onTouchCancel={onTouchCancel}
+        style={{ WebkitOverflowScrolling: 'touch' }}
       >
         <div className="w-full min-h-full">
           {children}

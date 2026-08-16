@@ -116,7 +116,10 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
   };
 
   return (
-    <div className="flex h-screen bg-slate-50">
+    <div
+      className="flex app-viewport app-safe-x bg-slate-50"
+      style={{ paddingTop: 'env(safe-area-inset-top)' }}
+    >
       {/* Sidebar */}
       <div className="w-64 bg-white border-r border-slate-200 flex flex-col">
         <div className="px-6 h-[73px] border-b border-slate-200 flex flex-col justify-center">
