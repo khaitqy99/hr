@@ -2,28 +2,27 @@
 @tailwind components;
 @tailwind utilities;
 
-/* iOS PWA: khoá document lại đúng khung viewport. Nếu để document tự cuộn,
-   lúc mở app từ Home Screen nó thường giữ một offset scroll khiến splash, nav và
-   layout đều bị đẩy lên và hở chân cho tới khi người dùng chạm kéo. */
-html,
-body {
+/* iOS PWA: khoá document, không cho scroll cấp trang.
+   Chiều cao thật do utils/viewportLock.ts ghi vào --app-height (tự cập nhật qua SW,
+   không cần nhân viên cài lại app). */
+html {
   height: 100%;
+  height: -webkit-fill-available;
   overflow: hidden;
   overscroll-behavior: none;
-  /* Nền trùng màu app để không lộ dải trắng ở vùng home indicator */
   background-color: #f0f9ff;
 }
 
-/* Neo body theo 4 cạnh thay vì height: 100%. Trong standalone, phần trăm chiều cao
-   có thể quy về vùng "safe" nhỏ hơn màn hình, còn top/bottom luôn bám mép thật. */
 body {
   position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  inset: 0;
   width: auto;
-  height: auto;
+  height: var(--app-height, 100%);
+  min-height: 100%;
+  min-height: -webkit-fill-available;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background-color: #f0f9ff;
   font-family: 'Plus Jakarta Sans', sans-serif;
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;
@@ -34,16 +33,17 @@ body {
 }
 
 #root {
-  height: 100%;
+  height: var(--app-height, 100%);
+  min-height: 100%;
 }
 
-/* body đã được khoá đúng bằng khung viewport (position: fixed), nên app chỉ cần
-   kế thừa 100% thay vì đoán bằng vh/svh/dvh — vốn hay sai trên iOS PWA. */
+/* Kế thừa chiều cao đã khóa — không dùng vh/dvh (hay sai trên standalone). */
 .app-viewport {
-  height: 100%;
+  height: var(--app-height, 100%);
+  min-height: 100%;
 }
 .app-min-viewport {
-  min-height: 100%;
+  min-height: var(--app-height, 100%);
 }
 .app-safe-x {
   padding-left: env(safe-area-inset-left);

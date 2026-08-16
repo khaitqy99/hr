@@ -23,7 +23,14 @@ const UpdateNotification: React.FC = () => {
       refreshing = true;
       setIsUpdating(true);
       setMessage('reloading');
-      window.location.reload();
+
+      // Ép SW mới nhận việc ngay (phòng khi skipWaiting mặc định chưa chạy)
+      navigator.serviceWorker.getRegistration().then((registration) => {
+        registration?.waiting?.postMessage({ type: 'SKIP_WAITING' });
+        window.location.reload();
+      }).catch(() => {
+        window.location.reload();
+      });
     };
 
     const onUpdateReady = () => {
