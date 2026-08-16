@@ -14,14 +14,16 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Chiều cao viewport thật trên iOS: dvh không tính thanh công cụ Safari.
-   Safe-area được đặt bên trong container này để không cộng thêm chiều cao trang. */
+/* Chiều cao viewport thật trên iOS.
+   Ưu tiên svh (ổn định lúc mở app) rồi dvh; tránh 100vh lớn khiến fixed/absolute nhảy. */
 .app-viewport {
   height: 100vh;
+  height: 100svh;
   height: 100dvh;
 }
 .app-min-viewport {
   min-height: 100vh;
+  min-height: 100svh;
   min-height: 100dvh;
 }
 .app-safe-x {

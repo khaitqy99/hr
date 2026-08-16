@@ -273,7 +273,7 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
   }
 
   return (
-    <div className="layout-employee app-viewport app-safe-x flex flex-col bg-sky-50 overflow-hidden">
+    <div className="layout-employee app-viewport app-safe-x relative flex flex-col bg-sky-50 overflow-hidden">
       {/* Header - Glassmorphism */}
       <header
         className="px-5 py-2.5 flex justify-between items-center sticky top-0 z-30 bg-white border-b border-sky-100"
@@ -364,12 +364,11 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
         </div>
       </main>
 
-      {/* Bottom Navigation - Pill trượt khi chuyển tab, safe-area cho iOS notch */}
-      {/* Safari iOS báo inset-bottom lớn hơn khi thanh công cụ đang mở, nên chặn trần
-          để thanh nav không bị đẩy lên cao trước lần vuốt đầu tiên. */}
+      {/* Bottom Navigation — dùng absolute trong khung 100dvh, tránh position:fixed
+          trên iOS PWA bị neo sai lúc mở app rồi nhảy xuống sau khi kéo. */}
       <nav
-        className="fixed left-1/2 -translate-x-1/2 w-[92%] max-w-[400px] z-40"
-        style={{ bottom: 'max(1.5rem, min(env(safe-area-inset-bottom, 0px), 2.125rem))' }}
+        className="absolute left-1/2 -translate-x-1/2 w-[92%] max-w-[400px] z-40"
+        style={{ bottom: 'max(1.5rem, env(safe-area-inset-bottom, 0px))' }}
       >
         <div ref={navContainerRef} className="nav-bar-wrap relative bg-white rounded-full shadow-[0_20px_40px_-12px_rgba(0,0,0,0.12)] border-2 border-sky-200 p-1.5 flex justify-between items-center gap-0.5">
           {/* Pill trượt theo tab active — blue/cyan đồng bộ với dự án */}
