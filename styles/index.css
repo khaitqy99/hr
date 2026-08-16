@@ -10,6 +10,8 @@ body {
   height: 100%;
   overflow: hidden;
   overscroll-behavior: none;
+  /* Nền trùng màu app để không lộ dải trắng ở vùng home indicator */
+  background-color: #f0f9ff;
 }
 
 body {
@@ -30,20 +32,13 @@ body {
   height: 100%;
 }
 
-/* Chiều cao viewport thật trên iOS.
-   Ưu tiên svh (ổn định lúc mở app) rồi dvh; tránh 100vh lớn khiến fixed/absolute nhảy. */
+/* body đã được khoá đúng bằng khung viewport (position: fixed), nên app chỉ cần
+   kế thừa 100% thay vì đoán bằng vh/svh/dvh — vốn hay sai trên iOS PWA. */
 .app-viewport {
-  height: 100vh;
-  height: 100svh;
-  height: 100dvh;
-  /* --app-height do utils/appHeight.ts ghi, chính xác nhất trên iOS PWA */
-  height: var(--app-height, 100dvh);
+  height: 100%;
 }
 .app-min-viewport {
-  min-height: 100vh;
-  min-height: 100svh;
-  min-height: 100dvh;
-  min-height: var(--app-height, 100dvh);
+  min-height: 100%;
 }
 .app-safe-x {
   padding-left: env(safe-area-inset-left);
