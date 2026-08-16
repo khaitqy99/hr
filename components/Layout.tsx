@@ -365,11 +365,9 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
       </main>
 
       {/* Bottom Navigation — dùng absolute trong khung 100dvh, tránh position:fixed
-          trên iOS PWA bị neo sai lúc mở app rồi nhảy xuống sau khi kéo. */}
-      <nav
-        className="absolute left-1/2 -translate-x-1/2 w-[92%] max-w-[400px] z-40"
-        style={{ bottom: 'max(1.5rem, env(safe-area-inset-bottom, 0px))' }}
-      >
+          trên iOS PWA bị neo sai lúc mở app rồi nhảy xuống sau khi kéo.
+          Khoảng cách lề dưới cố định 1.5rem để iPhone không bị đẩy lên hở chân. */}
+      <nav className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[92%] max-w-[400px] z-40">
         <div ref={navContainerRef} className="nav-bar-wrap relative bg-white rounded-full shadow-[0_20px_40px_-12px_rgba(0,0,0,0.12)] border-2 border-sky-200 p-1.5 flex justify-between items-center gap-0.5">
           {/* Pill trượt theo tab active — blue/cyan đồng bộ với dự án */}
           <div
