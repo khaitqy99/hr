@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import './styles/index.css';
+import ViewportDebug from './components/ViewportDebug';
 import { setupViewportLock } from './utils/viewportLock';
 
 setupViewportLock();
@@ -84,11 +85,14 @@ class ErrorBoundary extends React.Component<
   }
 }
 
+const showViewportDebug = new URLSearchParams(window.location.search).has('vpdebug');
+
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
     <ErrorBoundary>
       <App />
+      {showViewportDebug && <ViewportDebug />}
     </ErrorBoundary>
   </React.StrictMode>
 );

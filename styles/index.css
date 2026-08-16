@@ -14,11 +14,16 @@ body {
   background-color: #f0f9ff;
 }
 
+/* Neo body theo 4 cạnh thay vì height: 100%. Trong standalone, phần trăm chiều cao
+   có thể quy về vùng "safe" nhỏ hơn màn hình, còn top/bottom luôn bám mép thật. */
 body {
   position: fixed;
   top: 0;
+  right: 0;
+  bottom: 0;
   left: 0;
-  width: 100%;
+  width: auto;
+  height: auto;
   font-family: 'Plus Jakarta Sans', sans-serif;
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;
