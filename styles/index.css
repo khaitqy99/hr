@@ -2,16 +2,32 @@
 @tailwind components;
 @tailwind utilities;
 
+/* iOS PWA: khoá document lại đúng khung viewport. Nếu để document tự cuộn,
+   lúc mở app từ Home Screen nó thường giữ một offset scroll khiến splash, nav và
+   layout đều bị đẩy lên và hở chân cho tới khi người dùng chạm kéo. */
+html,
 body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
   font-family: 'Plus Jakarta Sans', sans-serif;
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
-  overscroll-behavior-y: none;
-  overscroll-behavior-x: none;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  height: 100%;
 }
 
 /* Chiều cao viewport thật trên iOS.

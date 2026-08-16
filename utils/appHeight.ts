@@ -11,6 +11,10 @@ const applyHeight = () => {
   if (height > 0) {
     document.documentElement.style.setProperty('--app-height', `${height}px`);
   }
+  // Xoá offset scroll mà iOS giữ lại lúc mở app từ Home Screen
+  if (window.scrollY !== 0 || window.scrollX !== 0) {
+    window.scrollTo(0, 0);
+  }
 };
 
 export const setupAppHeight = (): void => {
