@@ -58,7 +58,7 @@ export default defineConfig(({ mode }) => {
             name: 'Y99 HR',
             short_name: 'Y99 HR',
             description: 'Hệ thống quản lý nhân sự 4.0 - Check-in, lịch làm việc và quản trị HR',
-            theme_color: '#0c4a6e',
+            theme_color: '#ffffff',
             background_color: '#f0f9ff',
             display: 'standalone',
             orientation: 'portrait',
