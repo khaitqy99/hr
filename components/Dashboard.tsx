@@ -1,6 +1,6 @@
 import React, { useEffect, useState, lazy, Suspense, useMemo, useCallback } from 'react';
-import { User, AttendanceRecord, AttendanceType, ShiftRegistration, ShiftTime, OFF_TYPE_LABELS, RequestStatus } from '../types';
-import { getAttendance, getShiftRegistrations, getNotifications } from '../services/db';
+import { User, AttendanceRecord, AttendanceType, ShiftRegistration, ShiftTime, OFF_TYPE_LABELS, RequestStatus, ContractType, AnnualLeaveSummary } from '../types';
+import { getAttendance, getShiftRegistrations, getNotifications, getAnnualLeaveSummary } from '../services/db';
 import { supabase } from '../services/supabase';
 import { isSupabaseAvailable } from '../services/db';
 import PullToRefresh from './PullToRefresh';
@@ -22,6 +22,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
   const [shifts, setShifts] = useState<ShiftRegistration[]>([]);
   const [todayShift, setTodayShift] = useState<ShiftRegistration | null>(null);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [annualLeave, setAnnualLeave] = useState<AnnualLeaveSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Memoize loadData để tránh re-create function mỗi lần render
@@ -32,20 +33,28 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
       
       // Network-aware loading: giảm số lượng requests khi mạng chậm
       const slowNetwork = isSlowNetwork();
+      const year = new Date().getFullYear();
       const requests = [
         getAttendance(user.id),
         getShiftRegistrations(user.id),
-        getNotifications(user.id)
+        getNotifications(user.id),
+        user.contractType === ContractType.TRIAL
+          ? Promise.resolve(null)
+          : getAnnualLeaveSummary(user.id, year).catch(() => null),
       ];
       
       // Nếu mạng chậm, thêm error handling tốt hơn
       // Vẫn load parallel nhưng có fallback nếu một request fail
-      const [attendanceData, shiftsData, notifications] = await Promise.all(
-        requests.map(req => req.catch(() => []))
-      );
+      const [attendanceData, shiftsData, notifications, leaveSummary] = await Promise.all([
+        requests[0].catch(() => []),
+        requests[1].catch(() => []),
+        requests[2].catch(() => []),
+        requests[3],
+      ]);
       
       setAttendance(attendanceData || []);
       setShifts(shiftsData || []);
+      setAnnualLeave(leaveSummary);
       
       // Tìm ca đăng ký hôm nay
       const today = new Date();
@@ -66,7 +75,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
     } finally {
       setIsLoading(false);
     }
-  }, [user.id]);
+  }, [user.id, user.contractType]);
 
   // Load data khi mount và khi tab trở lại visible (không polling)
   useEffect(() => {
@@ -435,6 +444,32 @@ const Dashboard: React.FC<DashboardProps> = ({ user, setView }) => {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 gap-4 fade-up" style={{animationDelay: '100ms'}}>
+         {annualLeave && user.contractType !== ContractType.TRIAL && (
+           <div className="col-span-2 bg-white p-4 rounded-3xl shadow-sm border border-sky-50">
+             <div className="flex items-start justify-between gap-3">
+               <div className="flex items-center gap-3">
+                 <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                     <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                   </svg>
+                 </div>
+                 <div>
+                   <p className="text-sm font-bold text-slate-800">Phép năm {annualLeave.year}</p>
+                   <p className="text-xs text-slate-400 mt-0.5">
+                     Đã dùng {annualLeave.usedDays}
+                     {annualLeave.pendingDays > 0 ? ` · chờ duyệt ${annualLeave.pendingDays}` : ''}
+                   </p>
+                 </div>
+               </div>
+               <div className="text-right">
+                 <p className="text-2xl font-bold text-emerald-600">{annualLeave.remainingDays}</p>
+                 <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
+                   còn / {annualLeave.entitlementDays} ngày
+                 </p>
+               </div>
+             </div>
+           </div>
+         )}
          <div className="bg-white p-4 rounded-3xl shadow-sm border border-sky-50">
              <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mb-2">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>

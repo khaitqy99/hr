@@ -29,6 +29,8 @@ export interface Database {
           gross_salary: number | null
           social_insurance_salary: number | null
           trainee_salary: number | null
+          personal_income_tax: number | null
+          other_deductions: number | null
           created_at: string
           updated_at: string
         }
@@ -47,6 +49,8 @@ export interface Database {
           gross_salary?: number | null
           social_insurance_salary?: number | null
           trainee_salary?: number | null
+          personal_income_tax?: number | null
+          other_deductions?: number | null
           created_at?: string
           updated_at?: string
         }
@@ -65,6 +69,8 @@ export interface Database {
           gross_salary?: number | null
           social_insurance_salary?: number | null
           trainee_salary?: number | null
+          personal_income_tax?: number | null
+          other_deductions?: number | null
           created_at?: string
           updated_at?: string
         }
@@ -190,6 +196,9 @@ export interface Database {
           allowance: number
           bonus: number
           deductions: number
+          social_insurance_deduction: number | null
+          personal_income_tax: number | null
+          other_deductions: number | null
           net_salary: number
           status: string
           no_lunch_break_dates: number[]
@@ -208,6 +217,9 @@ export interface Database {
           allowance?: number
           bonus?: number
           deductions: number
+          social_insurance_deduction?: number | null
+          personal_income_tax?: number | null
+          other_deductions?: number | null
           net_salary: number
           status?: string
           no_lunch_break_dates?: number[]
@@ -226,6 +238,9 @@ export interface Database {
           allowance?: number
           bonus?: number
           deductions?: number
+          social_insurance_deduction?: number | null
+          personal_income_tax?: number | null
+          other_deductions?: number | null
           net_salary?: number
           status?: string
           no_lunch_break_dates?: number[]

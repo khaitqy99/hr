@@ -45,6 +45,8 @@ export interface User {
   grossSalary?: number;            // Lương thỏa thuận (gross)
   socialInsuranceSalary?: number;  // Lương BHXH
   traineeSalary?: number;         // Lương học việc (nếu có)
+  personalIncomeTax?: number;     // Khấu trừ thuế TNCN / tháng
+  otherDeductions?: number;       // Khấu trừ khác / tháng
   branchId?: string;              // Chi nhánh
 }
 
@@ -155,7 +157,10 @@ export interface PayrollRecord {
   otPay: number;
   allowance: number; // Phụ cấp
   bonus: number;
-  deductions: number; // BHXH, Tax, Fine
+  deductions: number; // Tổng khấu trừ (BHXH + TNCN + khác)
+  socialInsuranceDeduction?: number; // BHXH trong kỳ
+  personalIncomeTax?: number; // Thuế TNCN trong kỳ
+  otherDeductions?: number; // Khấu trừ khác trong kỳ
   netSalary: number; // Thực nhận
   status: 'PAID' | 'PENDING';
   /** Phương thức tính lương: SHIFT (đăng ký ca) hoặc ATTENDANCE (chấm công) */

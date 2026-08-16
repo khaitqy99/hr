@@ -24,6 +24,48 @@ const parseNoLunchBreakDatesFromDb = (raw: unknown): number[] => {
   return [];
 };
 
+const mapUserFromDb = (data: any): User => ({
+  id: data.id,
+  name: data.name,
+  email: data.email,
+  role: data.role as UserRole,
+  department: data.department,
+  avatarUrl: data.avatar_url || undefined,
+  employeeCode: data.employee_code || undefined,
+  jobTitle: data.job_title || undefined,
+  contractType: data.contract_type as ContractType | undefined,
+  startDate: data.start_date || undefined,
+  status: data.status as EmployeeStatus | undefined,
+  grossSalary: data.gross_salary != null ? Number(data.gross_salary) : undefined,
+  socialInsuranceSalary: data.social_insurance_salary != null ? Number(data.social_insurance_salary) : undefined,
+  traineeSalary: data.trainee_salary != null ? Number(data.trainee_salary) : undefined,
+  personalIncomeTax: data.personal_income_tax != null ? Number(data.personal_income_tax) : undefined,
+  otherDeductions: data.other_deductions != null ? Number(data.other_deductions) : undefined,
+  branchId: data.branch_id || undefined,
+});
+
+const mapPayrollFromDb = (record: any): PayrollRecord => ({
+  id: record.id,
+  userId: record.user_id,
+  month: record.month,
+  baseSalary: Number(record.base_salary),
+  standardWorkDays: record.standard_work_days,
+  actualWorkDays: Number(record.actual_work_days),
+  otHours: Number(record.ot_hours),
+  otPay: Number(record.ot_pay),
+  allowance: Number(record.allowance),
+  bonus: Number(record.bonus),
+  deductions: Number(record.deductions),
+  socialInsuranceDeduction:
+    record.social_insurance_deduction != null ? Number(record.social_insurance_deduction) : undefined,
+  personalIncomeTax: record.personal_income_tax != null ? Number(record.personal_income_tax) : undefined,
+  otherDeductions: record.other_deductions != null ? Number(record.other_deductions) : undefined,
+  netSalary: Number(record.net_salary),
+  status: record.status as 'PAID' | 'PENDING',
+  calcMethod: (record.calc_method as 'SHIFT' | 'ATTENDANCE' | 'MANUAL') ?? 'SHIFT',
+  noLunchBreakDates: parseNoLunchBreakDatesFromDb(record.no_lunch_break_dates),
+});
+
 // Initial Admin User Only
 const ADMIN_USER: User = {
   id: '00000000-0000-0000-0000-000000000001',
@@ -148,23 +190,7 @@ export const getCurrentUser = async (email: string): Promise<User | undefined> =
 
       if (error || !data) return undefined;
 
-      return {
-        id: data.id,
-        name: data.name,
-        email: data.email,
-        role: data.role as UserRole,
-        department: data.department,
-        avatarUrl: data.avatar_url || undefined,
-        employeeCode: data.employee_code || undefined,
-        jobTitle: data.job_title || undefined,
-        contractType: data.contract_type as ContractType | undefined,
-        startDate: data.start_date || undefined,
-        status: data.status as EmployeeStatus | undefined,
-        grossSalary: data.gross_salary ? Number(data.gross_salary) : undefined,
-        socialInsuranceSalary: data.social_insurance_salary ? Number(data.social_insurance_salary) : undefined,
-        traineeSalary: data.trainee_salary ? Number(data.trainee_salary) : undefined,
-        branchId: data.branch_id || undefined,
-      };
+      return mapUserFromDb(data);
     } catch (error) {
       console.error('Error getting user from Supabase:', error);
       return undefined;
@@ -186,23 +212,7 @@ export const getAllUsers = async (): Promise<User[]> => {
 
       if (error || !data) return [];
 
-      return data.map(user => ({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role as UserRole,
-        department: user.department,
-        avatarUrl: user.avatar_url || undefined,
-        employeeCode: user.employee_code || undefined,
-        jobTitle: user.job_title || undefined,
-        contractType: user.contract_type as ContractType | undefined,
-        startDate: user.start_date || undefined,
-        status: user.status as EmployeeStatus | undefined,
-        grossSalary: user.gross_salary ? Number(user.gross_salary) : undefined,
-        socialInsuranceSalary: user.social_insurance_salary ? Number(user.social_insurance_salary) : undefined,
-        traineeSalary: user.trainee_salary ? Number(user.trainee_salary) : undefined,
-        branchId: user.branch_id || undefined,
-      }));
+      return data.map(mapUserFromDb);
     } catch (error) {
       console.error('Error getting users from Supabase:', error);
       return [];
@@ -241,6 +251,8 @@ export const createUser = async (data: Omit<User, 'id'> & { id?: string }): Prom
           gross_salary: data.grossSalary || null,
           social_insurance_salary: data.socialInsuranceSalary || null,
           trainee_salary: data.traineeSalary || null,
+          personal_income_tax: data.personalIncomeTax ?? null,
+          other_deductions: data.otherDeductions ?? null,
         })
         .select()
         .single();
@@ -285,22 +297,7 @@ export const createUser = async (data: Omit<User, 'id'> & { id?: string }): Prom
       }
       if (!newUser) throw new Error('Không thể tạo user');
 
-      const createdUser = {
-        id: newUser.id,
-        name: newUser.name,
-        email: newUser.email,
-        role: newUser.role as UserRole,
-        department: newUser.department,
-        avatarUrl: newUser.avatar_url || undefined,
-        employeeCode: newUser.employee_code || undefined,
-        jobTitle: newUser.job_title || undefined,
-        contractType: newUser.contract_type as ContractType | undefined,
-        startDate: newUser.start_date || undefined,
-        status: newUser.status as EmployeeStatus | undefined,
-        grossSalary: newUser.gross_salary ? Number(newUser.gross_salary) : undefined,
-        socialInsuranceSalary: newUser.social_insurance_salary ? Number(newUser.social_insurance_salary) : undefined,
-        traineeSalary: newUser.trainee_salary ? Number(newUser.trainee_salary) : undefined,
-      };
+      const createdUser = mapUserFromDb(newUser);
 
       // Emit event và invalidate cache
       invalidateUsersCache();
@@ -333,6 +330,8 @@ export const createUser = async (data: Omit<User, 'id'> & { id?: string }): Prom
     grossSalary: data.grossSalary,
     socialInsuranceSalary: data.socialInsuranceSalary,
     traineeSalary: data.traineeSalary,
+    personalIncomeTax: data.personalIncomeTax,
+    otherDeductions: data.otherDeductions,
   };
   users.push(user);
   localStorage.setItem(USERS_KEY, JSON.stringify(users));
@@ -367,6 +366,8 @@ export const updateUser = async (id: string, data: Partial<User>): Promise<User>
       if (data.grossSalary !== undefined) updateData.gross_salary = data.grossSalary || null;
       if (data.socialInsuranceSalary !== undefined) updateData.social_insurance_salary = data.socialInsuranceSalary || null;
       if (data.traineeSalary !== undefined) updateData.trainee_salary = data.traineeSalary || null;
+      if (data.personalIncomeTax !== undefined) updateData.personal_income_tax = data.personalIncomeTax || null;
+      if (data.otherDeductions !== undefined) updateData.other_deductions = data.otherDeductions || null;
       if (data.branchId !== undefined) updateData.branch_id = data.branchId || null;
 
       const { data: updatedUser, error } = await supabase
@@ -383,23 +384,7 @@ export const updateUser = async (id: string, data: Partial<User>): Promise<User>
       invalidateUsersCache();
       await emitUserEvent('updated', updatedUser.id);
 
-      return {
-        id: updatedUser.id,
-        name: updatedUser.name,
-        email: updatedUser.email,
-        role: updatedUser.role as UserRole,
-        department: updatedUser.department,
-        avatarUrl: updatedUser.avatar_url || undefined,
-        employeeCode: updatedUser.employee_code || undefined,
-        jobTitle: updatedUser.job_title || undefined,
-        contractType: updatedUser.contract_type as ContractType | undefined,
-        startDate: updatedUser.start_date || undefined,
-        status: updatedUser.status as EmployeeStatus | undefined,
-        grossSalary: updatedUser.gross_salary ? Number(updatedUser.gross_salary) : undefined,
-        socialInsuranceSalary: updatedUser.social_insurance_salary ? Number(updatedUser.social_insurance_salary) : undefined,
-        traineeSalary: updatedUser.trainee_salary ? Number(updatedUser.trainee_salary) : undefined,
-        branchId: updatedUser.branch_id || undefined,
-      };
+      return mapUserFromDb(updatedUser);
     } catch (error) {
       console.error('Error updating user in Supabase:', error);
       throw error;
@@ -699,14 +684,23 @@ const calculateAnnualLeaveEntitlement = (
 };
 
 export const getAnnualLeaveSummary = async (userId: string, year: number = new Date().getFullYear()): Promise<AnnualLeaveSummary> => {
-  const [users, shifts, annualLeaveDaysPerYear] = await Promise.all([
-    getAllUsers(),
+  const [userRow, shifts, annualLeaveDaysPerYear] = await Promise.all([
+    isSupabaseAvailable()
+      ? supabase.from('users').select('start_date').eq('id', userId).maybeSingle().then(({ data }) => data)
+      : Promise.resolve(null),
     getShiftRegistrations(userId),
     getConfigNumber('annual_leave_days_per_year', 12),
   ]);
 
-  const user = users.find(u => u.id === userId);
-  const entitlementDays = calculateAnnualLeaveEntitlement(annualLeaveDaysPerYear, user?.startDate, year);
+  let startDate: number | undefined;
+  if (userRow?.start_date) {
+    startDate = Number(userRow.start_date);
+  } else {
+    const users = await getAllUsers();
+    startDate = users.find(u => u.id === userId)?.startDate;
+  }
+
+  const entitlementDays = calculateAnnualLeaveEntitlement(annualLeaveDaysPerYear, startDate, year);
   const usedDays = countOffPnDays(shifts, year, RequestStatus.APPROVED);
   const pendingDays = countOffPnDays(shifts, year, RequestStatus.PENDING);
 
@@ -1352,23 +1346,7 @@ export const getPayroll = async (userId: string, month?: string): Promise<Payrol
 
       if (error || !data) return [];
 
-      return data.map(record => ({
-        id: record.id,
-        userId: record.user_id,
-        month: record.month,
-        baseSalary: Number(record.base_salary),
-        standardWorkDays: record.standard_work_days,
-        actualWorkDays: record.actual_work_days,
-        otHours: Number(record.ot_hours),
-        otPay: Number(record.ot_pay),
-        allowance: Number(record.allowance),
-        bonus: Number(record.bonus),
-        deductions: Number(record.deductions),
-        netSalary: Number(record.net_salary),
-        status: record.status as 'PAID' | 'PENDING',
-        calcMethod: ((record as any).calc_method as 'SHIFT' | 'ATTENDANCE' | 'MANUAL') ?? 'SHIFT',
-        noLunchBreakDates: parseNoLunchBreakDatesFromDb((record as { no_lunch_break_dates?: unknown }).no_lunch_break_dates),
-      }));
+      return data.map(mapPayrollFromDb);
     } catch (error) {
       console.error('Error getting payroll from Supabase:', error);
       return [];
@@ -1428,23 +1406,7 @@ export const getAllPayrolls = async (month: string): Promise<PayrollRecord[]> =>
 
       if (error || !data) return [];
 
-      return data.map(record => ({
-        id: record.id,
-        userId: record.user_id,
-        month: record.month,
-        baseSalary: Number(record.base_salary),
-        standardWorkDays: record.standard_work_days,
-        actualWorkDays: record.actual_work_days,
-        otHours: Number(record.ot_hours),
-        otPay: Number(record.ot_pay),
-        allowance: Number(record.allowance),
-        bonus: Number(record.bonus),
-        deductions: Number(record.deductions),
-        netSalary: Number(record.net_salary),
-        status: record.status as 'PAID' | 'PENDING',
-        calcMethod: ((record as any).calc_method as 'SHIFT' | 'ATTENDANCE' | 'MANUAL') ?? 'SHIFT',
-        noLunchBreakDates: parseNoLunchBreakDatesFromDb((record as { no_lunch_break_dates?: unknown }).no_lunch_break_dates),
-      }));
+      return data.map(mapPayrollFromDb);
     } catch (error) {
       console.error('Error getting all payrolls from Supabase:', error);
       return [];
@@ -1479,6 +1441,9 @@ export const createOrUpdatePayroll = async (record: PayrollRecord): Promise<Payr
           allowance: record.allowance,
           bonus: record.bonus,
           deductions: record.deductions,
+          social_insurance_deduction: record.socialInsuranceDeduction ?? null,
+          personal_income_tax: record.personalIncomeTax ?? null,
+          other_deductions: record.otherDeductions ?? null,
           net_salary: record.netSalary,
           status: record.status,
           no_lunch_break_dates: noLunch,
@@ -1495,23 +1460,7 @@ export const createOrUpdatePayroll = async (record: PayrollRecord): Promise<Payr
       invalidatePayrollCache(record.month);
       await emitPayrollEvent(record.id ? 'updated' : 'created', data.id);
 
-      return {
-        id: data.id,
-        userId: data.user_id,
-        month: data.month,
-        baseSalary: Number(data.base_salary),
-        standardWorkDays: data.standard_work_days,
-        actualWorkDays: data.actual_work_days,
-        otHours: Number(data.ot_hours),
-        otPay: Number(data.ot_pay),
-        allowance: Number(data.allowance),
-        bonus: Number(data.bonus),
-        deductions: Number(data.deductions),
-        netSalary: Number(data.net_salary),
-        status: data.status as 'PAID' | 'PENDING',
-        calcMethod: ((data as any).calc_method as 'SHIFT' | 'ATTENDANCE' | 'MANUAL') ?? 'SHIFT',
-        noLunchBreakDates: parseNoLunchBreakDatesFromDb((data as { no_lunch_break_dates?: unknown }).no_lunch_break_dates),
-      };
+      return mapPayrollFromDb(data);
     } catch (error) {
       console.error('Error saving payroll to Supabase:', error);
       throw error;
@@ -1584,9 +1533,10 @@ export const calculatePayroll = async (
 ): Promise<PayrollRecord> => {
   const baseSalary = employee.grossSalary || employee.traineeSalary || 0;
   // Lấy các config từ system configs
-  const [standardWorkDays, socialInsuranceAmount, overtimeRate, workHoursPerDay] = await Promise.all([
+  const [standardWorkDays, socialInsuranceAmount, socialInsuranceRate, overtimeRate, workHoursPerDay] = await Promise.all([
     getConfigNumber('standard_work_days', 27),
     getConfigNumber('social_insurance_amount', 0),
+    getConfigNumber('social_insurance_rate', 10.5),
     getConfigNumber('overtime_rate', 1.5),
     getConfigNumber('work_hours_per_day', 8)
   ]);
@@ -1694,16 +1644,32 @@ export const calculatePayroll = async (
   // Tổng thu nhập: lương nền (theo giờ ca hoặc theo ngày công) + OT + phụ cấp + thưởng
   const totalIncome = workDaySalary + otPay + allowance + bonus;
 
-  // Tính khấu trừ: Chỉ nhân viên chính thức mới có khấu trừ BHXH
+  // Tính khấu trừ: Chỉ nhân viên chính thức mới có khấu trừ BHXH tự động
+  // + TNCN / khấu trừ khác theo từng người (mọi loại HĐ nếu có cấu hình)
+  let socialInsuranceDeduction = 0;
+  let personalIncomeTax = Math.max(0, employee.personalIncomeTax || 0);
+  let otherDeductions = Math.max(0, employee.otherDeductions || 0);
   let deductions = 0;
+
   if (customDeductions !== undefined && customDeductions !== null) {
-    // Nếu có nhập tay thì dùng giá trị nhập tay
+    // Nếu có nhập tay thì dùng giá trị nhập tay (ghi vào otherDeductions để hiển thị)
     deductions = customDeductions;
-  } else if (employee.contractType === ContractType.OFFICIAL) {
-    // Chỉ nhân viên chính thức mới tự động khấu trừ BHXH
-    deductions = socialInsuranceAmount;
+    socialInsuranceDeduction = 0;
+    personalIncomeTax = 0;
+    otherDeductions = customDeductions;
+  } else {
+    if (employee.contractType === ContractType.OFFICIAL) {
+      const rate = socialInsuranceRate > 0 ? socialInsuranceRate : 10.5;
+      const personalBase = employee.socialInsuranceSalary;
+      if (personalBase != null && personalBase > 0) {
+        socialInsuranceDeduction = (personalBase * rate) / 100;
+      } else {
+        socialInsuranceDeduction = socialInsuranceAmount;
+      }
+    }
+    deductions = socialInsuranceDeduction + personalIncomeTax + otherDeductions;
   }
-  // Nhân viên học việc (TRIAL) không có khấu trừ, deductions = 0
+  // Nhân viên học việc (TRIAL): không BHXH tự động; vẫn trừ TNCN/khác nếu có
 
   const netSalary = totalIncome - deductions;
 
@@ -1730,6 +1696,9 @@ export const calculatePayroll = async (
     allowance,
     bonus,
     deductions: Math.round(deductions),
+    socialInsuranceDeduction: Math.round(socialInsuranceDeduction),
+    personalIncomeTax: Math.round(personalIncomeTax),
+    otherDeductions: Math.round(otherDeductions),
     netSalary: calculatedNetSalary, // Sử dụng giá trị đã tính lại để đảm bảo chính xác
     status: 'PENDING',
     noLunchBreakDates: [],

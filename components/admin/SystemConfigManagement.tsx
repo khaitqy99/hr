@@ -49,9 +49,15 @@ const DEFAULT_SYSTEM_CONFIGS = [
     category: 'PAYROLL'
   },
   {
+    key: 'social_insurance_rate',
+    value: '10.5',
+    description: 'Tỷ lệ khấu trừ BHXH (%) — áp trên Lương BHXH từng nhân viên',
+    category: 'PAYROLL'
+  },
+  {
     key: 'social_insurance_amount',
     value: '0',
-    description: 'Số tiền đóng BHXH cố định',
+    description: 'Số tiền BHXH fallback (khi nhân viên chưa có Lương BHXH)',
     category: 'PAYROLL'
   },
   {

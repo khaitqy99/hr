@@ -1631,10 +1631,36 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                     )}
 
                     {selectedPayrollDetail.payroll.deductions > 0 && (
-                      <div className="flex justify-between items-center py-2 border-b border-slate-200">
-                        <span className="text-sm text-slate-600">{language === 'vi' ? 'Khấu trừ (BHXH, v.v.)' : 'Deductions (Social Insurance, etc.)'}</span>
-                        <span className="text-sm font-bold text-red-600">-{formatCurrency(selectedPayrollDetail.payroll.deductions)}</span>
-                      </div>
+                      <>
+                        {selectedPayrollDetail.payroll.socialInsuranceDeduction != null && selectedPayrollDetail.payroll.socialInsuranceDeduction > 0 && (
+                          <div className="flex justify-between items-center py-2 border-b border-slate-200">
+                            <span className="text-sm text-slate-600">{language === 'vi' ? 'BHXH' : 'Social insurance'}</span>
+                            <span className="text-sm font-bold text-red-600">-{formatCurrency(selectedPayrollDetail.payroll.socialInsuranceDeduction)}</span>
+                          </div>
+                        )}
+                        {selectedPayrollDetail.payroll.personalIncomeTax != null && selectedPayrollDetail.payroll.personalIncomeTax > 0 && (
+                          <div className="flex justify-between items-center py-2 border-b border-slate-200">
+                            <span className="text-sm text-slate-600">{language === 'vi' ? 'Thuế TNCN' : 'Personal income tax'}</span>
+                            <span className="text-sm font-bold text-red-600">-{formatCurrency(selectedPayrollDetail.payroll.personalIncomeTax)}</span>
+                          </div>
+                        )}
+                        {selectedPayrollDetail.payroll.otherDeductions != null && selectedPayrollDetail.payroll.otherDeductions > 0 && (
+                          <div className="flex justify-between items-center py-2 border-b border-slate-200">
+                            <span className="text-sm text-slate-600">{language === 'vi' ? 'Khấu trừ khác' : 'Other deductions'}</span>
+                            <span className="text-sm font-bold text-red-600">-{formatCurrency(selectedPayrollDetail.payroll.otherDeductions)}</span>
+                          </div>
+                        )}
+                        {!(
+                          (selectedPayrollDetail.payroll.socialInsuranceDeduction != null && selectedPayrollDetail.payroll.socialInsuranceDeduction > 0) ||
+                          (selectedPayrollDetail.payroll.personalIncomeTax != null && selectedPayrollDetail.payroll.personalIncomeTax > 0) ||
+                          (selectedPayrollDetail.payroll.otherDeductions != null && selectedPayrollDetail.payroll.otherDeductions > 0)
+                        ) && (
+                          <div className="flex justify-between items-center py-2 border-b border-slate-200">
+                            <span className="text-sm text-slate-600">{language === 'vi' ? 'Khấu trừ (BHXH, TNCN, khác)' : 'Deductions'}</span>
+                            <span className="text-sm font-bold text-red-600">-{formatCurrency(selectedPayrollDetail.payroll.deductions)}</span>
+                          </div>
+                        )}
+                      </>
                     )}
 
                     <div className="flex justify-between items-center py-3 bg-blue-50 rounded-lg px-4 mt-4">

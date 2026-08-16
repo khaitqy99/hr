@@ -470,7 +470,7 @@ const SalaryManagement: React.FC<SalaryManagementProps> = ({ user, setView }) =>
                           <input
                             type="number"
                             min={0}
-                            placeholder="Để trống sẽ tự tính theo % BHXH"
+                            placeholder="Trống = Lương BHXH × tỷ lệ"
                             value={salaryForm.deductions === undefined ? '' : salaryForm.deductions}
                             onChange={(e) => {
                               const value = e.target.value === '' ? undefined : Number(e.target.value);

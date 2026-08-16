@@ -88,7 +88,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onRegisterReload }) => {
             </div>
 
             <div className="p-4 bg-sky-50 rounded-xl">
-              <label className="block text-xs font-bold text-slate-500 mb-2">Số tiền đóng BHXH cố định</label>
+              <label className="block text-xs font-bold text-slate-500 mb-2">Tỷ lệ khấu trừ BHXH</label>
+              <div className="text-sm text-slate-700 font-medium">
+                {configs.social_insurance_rate || '10.5'}% × Lương BHXH từng người
+              </div>
+            </div>
+
+            <div className="p-4 bg-sky-50 rounded-xl">
+              <label className="block text-xs font-bold text-slate-500 mb-2">BHXH fallback (chưa có Lương BHXH)</label>
               <div className="text-sm text-slate-700 font-medium">
                 {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(parseFloat(configs.social_insurance_amount || '0'))}
               </div>

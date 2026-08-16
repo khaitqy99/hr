@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { User, UserRole, ContractType, EmployeeStatus, CONTRACT_TYPE_LABELS, EMPLOYEE_STATUS_LABELS, Department, Branch } from '../types';
-import { getAllUsers, updateUser, getDepartments, getBranches } from '../services/db';
+import { User, UserRole, ContractType, EmployeeStatus, CONTRACT_TYPE_LABELS, EMPLOYEE_STATUS_LABELS, Department, Branch, AnnualLeaveSummary } from '../types';
+import { getAllUsers, updateUser, getDepartments, getBranches, getAnnualLeaveSummary } from '../services/db';
 
 interface EmployeeProfileProps {
   employeeId: string;
@@ -48,6 +48,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
   };
 
   const [employee, setEmployee] = useState<User | null>(null);
+  const [annualLeave, setAnnualLeave] = useState<AnnualLeaveSummary | null>(null);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [editForm, setEditForm] = useState({
@@ -60,6 +61,8 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
     grossSalary: '' as number | '',
     socialInsuranceSalary: '' as number | '',
     traineeSalary: '' as number | '',
+    personalIncomeTax: '' as number | '',
+    otherDeductions: '' as number | '',
     contractType: ContractType.OFFICIAL,
     startDate: '' as string | '',
     status: EmployeeStatus.ACTIVE,
@@ -90,11 +93,18 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
           grossSalary: found.grossSalary ?? '',
           socialInsuranceSalary: found.socialInsuranceSalary ?? '',
           traineeSalary: found.traineeSalary ?? '',
+          personalIncomeTax: found.personalIncomeTax ?? '',
+          otherDeductions: found.otherDeductions ?? '',
         contractType: found.contractType ?? ContractType.OFFICIAL,
         startDate: formatDateForInput(found.startDate),
         status: found.status ?? EmployeeStatus.ACTIVE,
         role: found.role,
       });
+        if (found.contractType !== ContractType.TRIAL) {
+          getAnnualLeaveSummary(found.id).then(setAnnualLeave).catch(() => setAnnualLeave(null));
+        } else {
+          setAnnualLeave(null);
+        }
       }
     };
     loadEmployee();
@@ -110,6 +120,8 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
     const gross = typeof editForm.grossSalary === 'number' ? editForm.grossSalary : (editForm.grossSalary === '' ? undefined : Number(String(editForm.grossSalary).replace(/\D/g, '')));
     const bhxh = typeof editForm.socialInsuranceSalary === 'number' ? editForm.socialInsuranceSalary : (editForm.socialInsuranceSalary === '' ? undefined : Number(String(editForm.socialInsuranceSalary).replace(/\D/g, '')));
     const trainee = typeof editForm.traineeSalary === 'number' ? editForm.traineeSalary : (editForm.traineeSalary === '' ? undefined : Number(String(editForm.traineeSalary).replace(/\D/g, '')));
+    const pit = typeof editForm.personalIncomeTax === 'number' ? editForm.personalIncomeTax : (editForm.personalIncomeTax === '' ? undefined : Number(String(editForm.personalIncomeTax).replace(/\D/g, '')));
+    const otherDed = typeof editForm.otherDeductions === 'number' ? editForm.otherDeductions : (editForm.otherDeductions === '' ? undefined : Number(String(editForm.otherDeductions).replace(/\D/g, '')));
     const startDate = parseDisplayDateToTimestamp(editForm.startDate);
     if (editForm.startDate && startDate === undefined) {
       setEditFormError('Ngày vào làm không hợp lệ. Vui lòng nhập theo định dạng dd/mm/yyyy');
@@ -130,6 +142,8 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
         grossSalary: gross,
         socialInsuranceSalary: bhxh,
         traineeSalary: trainee,
+        personalIncomeTax: pit,
+        otherDeductions: otherDed,
       });
       // Reload employee data
       const employees = await getAllUsers();
@@ -242,7 +256,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
             </div>
 
             {/* Thông tin lương */}
-            {(employee.grossSalary != null || employee.socialInsuranceSalary != null || employee.traineeSalary != null) && (
+            {(employee.grossSalary != null || employee.socialInsuranceSalary != null || employee.traineeSalary != null || employee.personalIncomeTax != null || employee.otherDeductions != null) && (
               <div className="pb-3 border-b border-slate-100">
                 <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Thông tin lương</h4>
                 <div className="space-y-2">
@@ -264,6 +278,44 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                       <span className="text-sm font-medium text-slate-800">{formatCurrency(employee.traineeSalary)}</span>
                     </div>
                   )}
+                  {employee.personalIncomeTax != null && employee.personalIncomeTax > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-xs text-slate-500">Thuế TNCN / tháng:</span>
+                      <span className="text-sm font-medium text-red-600">-{formatCurrency(employee.personalIncomeTax)}</span>
+                    </div>
+                  )}
+                  {employee.otherDeductions != null && employee.otherDeductions > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-xs text-slate-500">Khấu trừ khác / tháng:</span>
+                      <span className="text-sm font-medium text-red-600">-{formatCurrency(employee.otherDeductions)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {annualLeave && employee.contractType !== ContractType.TRIAL && (
+              <div className="pb-3 border-b border-slate-100">
+                <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Phép năm {annualLeave.year}</h4>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-xs text-slate-500">Được hưởng:</span>
+                    <span className="text-sm font-medium text-slate-800">{annualLeave.entitlementDays} ngày</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-xs text-slate-500">Đã dùng:</span>
+                    <span className="text-sm font-medium text-slate-800">{annualLeave.usedDays} ngày</span>
+                  </div>
+                  {annualLeave.pendingDays > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-xs text-slate-500">Chờ duyệt:</span>
+                      <span className="text-sm font-medium text-amber-600">{annualLeave.pendingDays} ngày</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-xs text-slate-500">Còn lại:</span>
+                    <span className="text-sm font-bold text-emerald-600">{annualLeave.remainingDays} ngày</span>
+                  </div>
                 </div>
               </div>
             )}
@@ -507,6 +559,17 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                     <label className="block text-xs font-bold text-slate-500 mb-1">Lương học việc (nếu có)</label>
                     <input type="number" min={0} value={editForm.traineeSalary === '' ? '' : editForm.traineeSalary} onChange={e => setEditForm(f => ({ ...f, traineeSalary: e.target.value === '' ? '' : Number(e.target.value) }))} placeholder="VNĐ" className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm" />
                   </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1">Thuế TNCN / tháng</label>
+                      <input type="number" min={0} value={editForm.personalIncomeTax === '' ? '' : editForm.personalIncomeTax} onChange={e => setEditForm(f => ({ ...f, personalIncomeTax: e.target.value === '' ? '' : Number(e.target.value) }))} placeholder="VNĐ" className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1">Khấu trừ khác / tháng</label>
+                      <input type="number" min={0} value={editForm.otherDeductions === '' ? '' : editForm.otherDeductions} onChange={e => setEditForm(f => ({ ...f, otherDeductions: e.target.value === '' ? '' : Number(e.target.value) }))} placeholder="VNĐ" className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm" />
+                    </div>
+                  </div>
                   
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -559,6 +622,8 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                           grossSalary: employee.grossSalary ?? '',
                           socialInsuranceSalary: employee.socialInsuranceSalary ?? '',
                           traineeSalary: employee.traineeSalary ?? '',
+                          personalIncomeTax: employee.personalIncomeTax ?? '',
+                          otherDeductions: employee.otherDeductions ?? '',
                           contractType: employee.contractType ?? ContractType.OFFICIAL,
                           startDate: formatDateForInput(employee.startDate),
                           status: employee.status ?? EmployeeStatus.ACTIVE,
@@ -683,8 +748,46 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                             {employee.traineeSalary != null ? formatCurrency(employee.traineeSalary) : <span className="text-slate-400 italic">Chưa cập nhật</span>}
                           </span>
                         </div>
+                        <div className="flex justify-between">
+                          <span className="text-xs text-slate-500">Thuế TNCN / tháng:</span>
+                          <span className="text-sm font-medium text-slate-800">
+                            {employee.personalIncomeTax != null ? formatCurrency(employee.personalIncomeTax) : <span className="text-slate-400 italic">Chưa cập nhật</span>}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-xs text-slate-500">Khấu trừ khác / tháng:</span>
+                          <span className="text-sm font-medium text-slate-800">
+                            {employee.otherDeductions != null ? formatCurrency(employee.otherDeductions) : <span className="text-slate-400 italic">Chưa cập nhật</span>}
+                          </span>
+                        </div>
                       </div>
                     </div>
+
+                    {annualLeave && employee.contractType !== ContractType.TRIAL && (
+                      <div className="pb-3 border-b border-slate-100">
+                        <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Phép năm {annualLeave.year}</h4>
+                        <div className="space-y-2">
+                          <div className="flex justify-between">
+                            <span className="text-xs text-slate-500">Được hưởng:</span>
+                            <span className="text-sm font-medium text-slate-800">{annualLeave.entitlementDays} ngày</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-xs text-slate-500">Đã dùng:</span>
+                            <span className="text-sm font-medium text-slate-800">{annualLeave.usedDays} ngày</span>
+                          </div>
+                          {annualLeave.pendingDays > 0 && (
+                            <div className="flex justify-between">
+                              <span className="text-xs text-slate-500">Chờ duyệt:</span>
+                              <span className="text-sm font-medium text-amber-600">{annualLeave.pendingDays} ngày</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between">
+                            <span className="text-xs text-slate-500">Còn lại:</span>
+                            <span className="text-sm font-bold text-emerald-600">{annualLeave.remainingDays} ngày</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Thông tin hợp đồng */}
                     <div>

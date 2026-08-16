@@ -693,10 +693,37 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                 </div>
               )}
               {data.deductions > 0 && (
-                <div className="p-4 flex justify-between items-center bg-red-50/30">
-                    <p className="text-xs text-slate-500 font-medium">Khấu trừ (BHXH/Thuế)</p>
-                    <p className="text-sm font-bold text-red-500">-{formatCurrency(data.deductions)}</p>
-                </div>
+                <>
+                  {(data.socialInsuranceDeduction != null && data.socialInsuranceDeduction > 0) ||
+                  (data.personalIncomeTax != null && data.personalIncomeTax > 0) ||
+                  (data.otherDeductions != null && data.otherDeductions > 0) ? (
+                    <>
+                      {data.socialInsuranceDeduction != null && data.socialInsuranceDeduction > 0 && (
+                        <div className="p-4 flex justify-between items-center bg-red-50/20">
+                          <p className="text-xs text-slate-500 font-medium">BHXH</p>
+                          <p className="text-sm font-bold text-red-500">-{formatCurrency(data.socialInsuranceDeduction)}</p>
+                        </div>
+                      )}
+                      {data.personalIncomeTax != null && data.personalIncomeTax > 0 && (
+                        <div className="p-4 flex justify-between items-center bg-red-50/20">
+                          <p className="text-xs text-slate-500 font-medium">Thuế TNCN</p>
+                          <p className="text-sm font-bold text-red-500">-{formatCurrency(data.personalIncomeTax)}</p>
+                        </div>
+                      )}
+                      {data.otherDeductions != null && data.otherDeductions > 0 && (
+                        <div className="p-4 flex justify-between items-center bg-red-50/20">
+                          <p className="text-xs text-slate-500 font-medium">Khấu trừ khác</p>
+                          <p className="text-sm font-bold text-red-500">-{formatCurrency(data.otherDeductions)}</p>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="p-4 flex justify-between items-center bg-red-50/30">
+                      <p className="text-xs text-slate-500 font-medium">Khấu trừ (BHXH/TNCN/Khác)</p>
+                      <p className="text-sm font-bold text-red-500">-{formatCurrency(data.deductions)}</p>
+                    </div>
+                  )}
+                </>
               )}
               <div className="p-4 flex justify-between items-center bg-blue-50/30">
                   <p className="text-sm font-bold text-slate-800 uppercase">Tổng nhận</p>
