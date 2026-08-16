@@ -1,5 +1,54 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
 import { User, UserRole } from '../types';
+
+interface PillRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+interface NavItemProps {
+  view: string;
+  label: string;
+  icon: React.ReactNode;
+  isActive: boolean;
+  /** Chỉ tô màu trắng khi pill đã được đo xong, tránh icon trắng trên nền trắng. */
+  showActiveStyle: boolean;
+  onSelect: (view: string) => void;
+  registerRef: (el: HTMLButtonElement | null) => void;
+}
+
+// Khai báo ngoài Layout để component không bị đổi identity mỗi lần render
+// (identity đổi làm React unmount/mount lại các nút nav ở mỗi lần render).
+const NavItem = React.memo<NavItemProps>(({ view, label, icon, isActive, showActiveStyle, onSelect, registerRef }) => (
+  <button
+    ref={registerRef}
+    type="button"
+    onClick={() => onSelect(view)}
+    title={label}
+    className={`nav-item relative flex items-center justify-center h-12 min-w-[3rem] select-none touch-manipulation z-10 rounded-full ${
+      isActive
+        ? 'w-12 sm:flex-grow sm:w-auto sm:px-5'
+        : 'w-12 hover:bg-sky-50 active:scale-95'
+    }`}
+  >
+    <div className={`nav-icon flex items-center justify-center shrink-0 w-6 h-6 leading-none [&_svg]:block [&_svg]:shrink-0 ${
+      showActiveStyle ? 'scale-100 text-white translate-y-0' : isActive ? 'scale-100 text-blue-600' : 'scale-90 text-slate-400'
+    }`}>
+      {icon}
+    </div>
+    <span
+      className={`nav-label whitespace-nowrap overflow-hidden font-bold text-xs ${showActiveStyle ? 'text-white' : 'text-blue-600'} ${
+        isActive
+          ? 'hidden sm:inline sm:max-w-[100px] sm:ml-2 opacity-100 translate-x-0'
+          : 'max-w-0 ml-0 opacity-0 -translate-x-2'
+      }`}
+    >
+      {label}
+    </span>
+  </button>
+));
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -37,23 +86,26 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
   // Define View Order
   // Admin chỉ có các tab quản lý, không có tab chức năng nhân viên
   // Nhân viên có các tab chức năng nhân viên
-  let views: string[];
-  if (user.role === UserRole.ADMIN) {
-    views = ['admin', 'salary-management'];
-  } else {
-    // Nhân viên có các tab chức năng nhân viên
-    views = ['dashboard', 'checkin', 'shifts', 'payroll', 'notifications'];
-  }
+  const views = useMemo(
+    () =>
+      user.role === UserRole.ADMIN
+        ? ['admin', 'salary-management']
+        : ['dashboard', 'checkin', 'shifts', 'payroll', 'notifications'],
+    [user.role]
+  );
 
   // Scroll về đầu khi chuyển tab — giống app native
   useEffect(() => {
     if (mainRef.current) mainRef.current.scrollTop = 0;
   }, [currentView]);
 
-  const handleSetView = (newView: string) => {
-    if (newView === currentView) return;
-    setView(newView);
-  };
+  const handleSetView = useCallback(
+    (newView: string) => {
+      if (newView === currentView) return;
+      setView(newView);
+    },
+    [currentView, setView]
+  );
 
   const onTouchStart = (e: React.TouchEvent) => {
     touchEndRef.current = null;
@@ -115,56 +167,55 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
   // Sliding pill: vị trí theo tab đang active
   const navContainerRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const [indicatorPos, setIndicatorPos] = useState({ left: 0, top: 0, width: 48, height: 48 });
+  const [pill, setPill] = useState<PillRect | null>(null);
 
-  // Tối ưu updateIndicatorPos với requestAnimationFrame để tránh lag trên iOS
-  const updateIndicatorPos = () => {
-    requestAnimationFrame(() => {
-      const idx = views.indexOf(currentView);
-      const btn = itemRefs.current[idx];
-      const container = navContainerRef.current;
-      if (btn && container) {
-        const cr = container.getBoundingClientRect();
-        const br = btn.getBoundingClientRect();
-        // Trừ border của container vì pill được đặt relative to padding edge
-        const borderLeft = container.clientLeft || 0;
-        const borderTop = container.clientTop || 0;
-        setIndicatorPos({
-          left: br.left - cr.left - borderLeft,
-          top: br.top - cr.top - borderTop,
-          width: br.width,
-          height: br.height,
-        });
-      }
-    });
-  };
+  const registerItemRefs = useMemo(
+    () => views.map((_, index) => (el: HTMLButtonElement | null) => { itemRefs.current[index] = el; }),
+    [views]
+  );
 
+  const measurePill = useCallback(() => {
+    const container = navContainerRef.current;
+    const btn = itemRefs.current[views.indexOf(currentView)];
+    if (!container || !btn) return;
+
+    const cr = container.getBoundingClientRect();
+    const br = btn.getBoundingClientRect();
+    // Tailwind nạp qua CDN nên có thể chưa áp dụng ở lần đo đầu tiên
+    if (br.width === 0 || br.height === 0) return;
+
+    // Trừ border của container vì pill được đặt relative to padding edge
+    const next: PillRect = {
+      left: br.left - cr.left - (container.clientLeft || 0),
+      top: br.top - cr.top - (container.clientTop || 0),
+      width: br.width,
+      height: br.height,
+    };
+    setPill(prev =>
+      prev && prev.left === next.left && prev.top === next.top && prev.width === next.width && prev.height === next.height
+        ? prev
+        : next
+    );
+  }, [currentView, views]);
+
+  // Đo trước khi paint để pill không nhảy vị trí sau khi đổi tab
+  useLayoutEffect(() => {
+    measurePill();
+  }, [measurePill]);
+
+  // Đo lại khi CSS/font nạp muộn hoặc kích thước nav đổi (xoay máy, thanh Safari co lại)
   useEffect(() => {
-    const raf = requestAnimationFrame(() => {
-      requestAnimationFrame(updateIndicatorPos);
-    });
-    const lateUpdate = setTimeout(updateIndicatorPos, 120);
-    return () => {
-      cancelAnimationFrame(raf);
-      clearTimeout(lateUpdate);
-    };
-  }, [currentView, views.length]);
+    const container = navContainerRef.current;
+    if (!container) return;
 
-  // Debounce resize để tránh lag trên iOS
-  useEffect(() => {
-    let resizeTimeout: NodeJS.Timeout;
-    const handleResize = () => {
-      clearTimeout(resizeTimeout);
-      resizeTimeout = setTimeout(() => {
-        updateIndicatorPos();
-      }, 150); // Debounce 150ms
-    };
-    window.addEventListener('resize', handleResize, { passive: true });
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      clearTimeout(resizeTimeout);
-    };
-  }, [currentView, views.length]);
+    const observer = new ResizeObserver(() => measurePill());
+    observer.observe(container);
+    itemRefs.current.forEach(el => el && observer.observe(el));
+
+    document.fonts?.ready.then(measurePill).catch(() => {});
+
+    return () => observer.disconnect();
+  }, [measurePill]);
 
   // Tắt menu nhấn giữ & chọn text (giống app mobile), trừ input/textarea
   useEffect(() => {
@@ -205,36 +256,6 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
       { view: 'notifications', label: 'Thông báo', icon: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6"><path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" /></svg> }
     );
   }
-
-  const NavItem = React.memo(({ view, icon, label, index }: { view: string; icon: React.ReactNode; label: string; index: number }) => {
-    const isActive = currentView === view;
-    return (
-      <button
-        ref={(el) => { itemRefs.current[index] = el; }}
-        type="button"
-        onClick={() => handleSetView(view)}
-        title={label}
-        className={`nav-item relative flex items-center justify-center h-12 min-w-[3rem] select-none touch-manipulation z-10 rounded-full ${
-          isActive
-            ? 'w-12 sm:flex-grow sm:w-auto sm:px-5'
-            : 'w-12 hover:bg-sky-50 active:scale-95'
-        }`}
-      >
-        <div className={`nav-icon flex items-center justify-center shrink-0 w-6 h-6 leading-none [&_svg]:block [&_svg]:shrink-0 ${isActive ? 'scale-100 text-white translate-y-0' : 'scale-90 text-slate-400'}`}>
-          {icon}
-        </div>
-        <span
-          className={`nav-label whitespace-nowrap overflow-hidden font-bold text-xs text-white ${
-            isActive
-              ? 'hidden sm:inline sm:max-w-[100px] sm:ml-2 opacity-100 translate-x-0'
-              : 'max-w-0 ml-0 opacity-0 -translate-x-2'
-          }`}
-        >
-          {label}
-        </span>
-      </button>
-    );
-  });
 
   // Admin có layout riêng (desktop với sidebar), không cần layout mobile
   if (user.role === UserRole.ADMIN && (currentView === 'admin' || currentView === 'salary-management')) {
@@ -334,20 +355,37 @@ const Layout: React.FC<LayoutProps> = ({ children, user, currentView, setView, o
       </main>
 
       {/* Bottom Navigation - Pill trượt khi chuyển tab, safe-area cho iOS notch */}
-      <nav className="fixed left-1/2 -translate-x-1/2 w-[92%] max-w-[400px] z-40" style={{ bottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}>
+      {/* Safari iOS báo inset-bottom lớn hơn khi thanh công cụ đang mở, nên chặn trần
+          để thanh nav không bị đẩy lên cao trước lần vuốt đầu tiên. */}
+      <nav
+        className="fixed left-1/2 -translate-x-1/2 w-[92%] max-w-[400px] z-40"
+        style={{ bottom: 'max(1.5rem, min(env(safe-area-inset-bottom, 0px), 2.125rem))' }}
+      >
         <div ref={navContainerRef} className="nav-bar-wrap relative bg-white rounded-full shadow-[0_20px_40px_-12px_rgba(0,0,0,0.12)] border-2 border-sky-200 p-1.5 flex justify-between items-center gap-0.5">
           {/* Pill trượt theo tab active — blue/cyan đồng bộ với dự án */}
           <div
             className="nav-sliding-pill absolute left-0 top-0 rounded-full bg-gradient-to-r from-blue-600 to-cyan-500 shadow-lg shadow-blue-500/30 pointer-events-none"
             style={{
-              transform: `translate(${indicatorPos.left}px, ${indicatorPos.top}px)`,
-              width: indicatorPos.width,
-              height: indicatorPos.height,
-              transition: 'transform 0.32s cubic-bezier(0.4, 0, 0.2, 1), width 0.32s cubic-bezier(0.4, 0, 0.2, 1), height 0.32s cubic-bezier(0.4, 0, 0.2, 1)',
+              transform: pill ? `translate(${pill.left}px, ${pill.top}px)` : 'translate(0, 0)',
+              width: pill?.width ?? 0,
+              height: pill?.height ?? 0,
+              opacity: pill ? 1 : 0,
+              transition: pill
+                ? 'transform 0.32s cubic-bezier(0.4, 0, 0.2, 1), width 0.32s cubic-bezier(0.4, 0, 0.2, 1), height 0.32s cubic-bezier(0.4, 0, 0.2, 1)'
+                : 'none',
             }}
           />
           {navConfig.map((item, index) => (
-            <NavItem key={item.view} view={item.view} label={item.label} icon={item.icon} index={index} />
+            <NavItem
+              key={item.view}
+              view={item.view}
+              label={item.label}
+              icon={item.icon}
+              isActive={currentView === item.view}
+              showActiveStyle={currentView === item.view && pill !== null}
+              onSelect={handleSetView}
+              registerRef={registerItemRefs[index]}
+            />
           ))}
         </div>
       </nav>

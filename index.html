@@ -196,11 +196,9 @@
 
       /* Bottom bar - Tối ưu transitions cho iOS */
       .nav-sliding-pill {
-        /* Chỉ dùng will-change khi đang animate, không dùng liên tục */
         transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-          width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        /* Force GPU acceleration chỉ khi cần */
-        transform: translateZ(0);
+          width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+          opacity 0.2s ease-out;
       }
       .nav-item {
         transition: flex-grow 0.25s ease-out,
