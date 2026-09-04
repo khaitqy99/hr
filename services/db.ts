@@ -1339,7 +1339,9 @@ export const updateShiftRegistration = async (
       }
       
       if (setPending) {
-        (payload as Record<string, RequestStatus>).status = RequestStatus.PENDING;
+        payload.status = RequestStatus.PENDING;
+        payload.reviewed_at = null;
+        payload.reviewed_by = null;
       }
       const { error } = await supabase
         .from('shift_registrations')
@@ -1367,8 +1369,10 @@ export const updateShiftRegistration = async (
       endTime: data.endTime || undefined,
       offType: (data.offType as OffType) || undefined,
       reason: data.reason || undefined,
-      status: setPending ? RequestStatus.PENDING : all[idx].status,
       rejectionReason: undefined,
+      status: setPending ? RequestStatus.PENDING : all[idx].status,
+      updatedAt: Date.now(),
+      ...(setPending ? { reviewedAt: undefined, reviewedBy: undefined } : {}),
     };
     
     // Update note if provided

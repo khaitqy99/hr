@@ -285,7 +285,8 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       lastUpdated: 'Cập nhật lần cuối',
       reviewedAt: 'Thời gian duyệt',
       reviewedBy: 'Người duyệt',
-      reviewedAtUnknown: 'Chưa ghi nhận (ca duyệt trước khi hệ thống lưu thời điểm)',
+      reviewedAtUnknown: 'Chưa lưu giờ bấm duyệt (đăng ký trước, duyệt sau nhưng bản cũ không ghi mốc)',
+      reviewedAtSameMoment: 'duyệt ngay lúc tạo ca',
       history: 'Lịch sử',
       viewHistory: 'Xem lịch sử',
       configHistory: 'Lịch sử bật/tắt đăng ký ca',
@@ -416,7 +417,8 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       lastUpdated: 'Last updated',
       reviewedAt: 'Reviewed at',
       reviewedBy: 'Reviewed by',
-      reviewedAtUnknown: 'Not recorded (approved before review tracking)',
+      reviewedAtUnknown: 'Approval click time was not saved (older app version)',
+      reviewedAtSameMoment: 'approved when the shift was created',
       history: 'History',
       viewHistory: 'View history',
       configHistory: 'Shift registration config history',
@@ -714,6 +716,11 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       setEmployees(users);
       setBranches(branchesData.filter(b => b.isActive));
       setAnnualLeaveByUser(summaryMap);
+      setCellDetail(prev => {
+        if (!prev?.reg) return prev;
+        const fresh = shifts.find(s => s.id === prev.reg!.id);
+        return fresh ? { ...prev, reg: fresh } : prev;
+      });
     } catch (e) {
       setMessage({ type: 'error', text: text.loadFailed });
     } finally {
@@ -1763,6 +1770,9 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                                 hour: '2-digit',
                                 minute: '2-digit'
                               })}
+                              {Math.abs(cellDetail.reg.reviewedAt - cellDetail.reg.createdAt) < 60_000
+                                ? ` (${text.reviewedAtSameMoment})`
+                                : ''}
                             </p>
                             {cellDetail.reg.reviewedBy && (
                               <p className="text-[11px] text-slate-500">
