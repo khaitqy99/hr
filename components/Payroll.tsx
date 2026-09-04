@@ -179,6 +179,13 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
 
   // Show no data message
   if (!data) {
+    // Debug log
+    console.log('🔍 Payroll No Data:', {
+      selectedMonth,
+      formatted: formatMonthDisplay(selectedMonth),
+      availableMonths
+    });
+    
     return (
       <div className="space-y-6 fade-up">
         {/* Header Selector */}
@@ -206,6 +213,10 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
             Chưa có bảng lương cho tháng {formatMonthDisplay(selectedMonth)}.
             <br />
             Vui lòng liên hệ bộ phận HR để được hỗ trợ.
+          </p>
+          {/* Debug info (remove in production) */}
+          <p className="text-xs text-slate-400 mt-4">
+            Debug: {selectedMonth} → {formatMonthDisplay(selectedMonth)}
           </p>
         </div>
       </div>

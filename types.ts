@@ -144,6 +144,9 @@ export interface ShiftRegistration {
   rejectionReason?: string; // Lý do từ chối (khi status === REJECTED)
   note?: string; // Ghi chú từ admin cho ca làm việc
   createdAt: number;
+  updatedAt?: number; // Thời gian cập nhật gần nhất
+  reviewedAt?: number; // Thời gian admin duyệt/từ chối
+  reviewedBy?: string; // ID của admin đã duyệt/từ chối
 }
 
 export interface PayrollRecord {
@@ -252,4 +255,14 @@ export interface AllowedLocation {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Lịch sử bật/tắt đăng ký ca */
+export interface ShiftRegistrationConfigHistory {
+  id: string;
+  enabled: boolean;
+  changedBy: string;
+  changedAt: number;
+  reason?: string;
+  createdAt: string;
 }

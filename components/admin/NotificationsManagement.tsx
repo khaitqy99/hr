@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { Notification, User, Department } from '../../types';
 import { UserRole } from '../../types';
-import { getAllUsers, getAllNotifications, createNotification, deleteNotification, getDepartments } from '../../services/db';
+import { getAllUsers, getAllNotifications, createNotification, deleteNotification, deleteNotifications, getDepartments } from '../../services/db';
 import { sendLocalNotification } from '../../services/push';
 
 interface NotificationsManagementProps {
@@ -13,6 +13,9 @@ const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onReg
   const [employees, setEmployees] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const selectAllRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
     userId: 'ALL',
     departmentId: '',
@@ -40,6 +43,14 @@ const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onReg
     setEmployees(users);
     setDepartments(depts.filter(d => d.isActive));
     setNotifications(allNotifications);
+    setSelectedIds(prev => {
+      const valid = new Set(allNotifications.map(n => n.id));
+      const next = new Set<string>();
+      prev.forEach(id => {
+        if (valid.has(id)) next.add(id);
+      });
+      return next;
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -169,10 +180,57 @@ const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onReg
     if (confirm('Bạn có chắc muốn xóa thông báo này?')) {
       try {
         await deleteNotification(id);
+        setSelectedIds(prev => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
         loadData();
       } catch (error: any) {
         alert(error?.message || 'Có lỗi xảy ra khi xóa thông báo');
       }
+    }
+  };
+
+  const allSelected = notifications.length > 0 && selectedIds.size === notifications.length;
+  const someSelected = selectedIds.size > 0 && !allSelected;
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someSelected;
+    }
+  }, [someSelected]);
+
+  const toggleOne = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(notifications.map(n => n.id)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    if (!confirm(`Xóa ${ids.length} thông báo đã chọn?`)) return;
+    setBulkDeleting(true);
+    try {
+      await deleteNotifications(ids);
+      setSelectedIds(new Set());
+      await loadData();
+    } catch (error: any) {
+      alert(error?.message || 'Có lỗi xảy ra khi xóa thông báo');
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -209,13 +267,23 @@ const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onReg
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <button
           onClick={() => setShowForm(true)}
           className="px-6 py-3 rounded-xl text-sm font-bold bg-blue-600 text-white shadow-lg hover:bg-blue-700 transition-colors"
         >
           + Gửi thông báo
         </button>
+        {selectedIds.size > 0 && (
+          <button
+            type="button"
+            disabled={bulkDeleting}
+            onClick={() => void handleBulkDelete()}
+            className="px-4 py-2.5 rounded-xl text-sm font-bold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+          >
+            {bulkDeleting ? 'Đang xóa...' : `Xóa đã chọn (${selectedIds.size})`}
+          </button>
+        )}
       </div>
 
       {showForm && (
@@ -317,6 +385,16 @@ const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onReg
             <table className="w-full">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
+                  <th className="px-4 py-4 w-10">
+                    <input
+                      ref={selectAllRef}
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleAll}
+                      aria-label="Chọn tất cả thông báo"
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                  </th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Người nhận</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Tiêu đề</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">Loại</th>
@@ -327,7 +405,16 @@ const NotificationsManagement: React.FC<NotificationsManagementProps> = ({ onReg
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {notifications.map((notif) => (
-                  <tr key={notif.id} className="hover:bg-sky-50/50 transition-colors">
+                  <tr key={notif.id} className={`transition-colors ${selectedIds.has(notif.id) ? 'bg-sky-50' : 'hover:bg-sky-50/50'}`}>
+                    <td className="px-4 py-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(notif.id)}
+                        onChange={() => toggleOne(notif.id)}
+                        aria-label={`Chọn thông báo ${notif.title}`}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                    </td>
                     <td className="px-6 py-4">
                       <p className="text-sm text-slate-700">{getUserName(notif.userId)}</p>
                     </td>

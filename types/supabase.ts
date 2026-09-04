@@ -154,9 +154,14 @@ export interface Database {
           start_time: string | null
           end_time: string | null
           off_type: string | null
+          reason: string | null
+          note: string | null
           status: string
           rejection_reason: string | null
           created_at: number
+          updated_at: number | null
+          reviewed_at: number | null
+          reviewed_by: string | null
         }
         Insert: {
           id?: string
@@ -166,9 +171,14 @@ export interface Database {
           start_time?: string | null
           end_time?: string | null
           off_type?: string | null
+          reason?: string | null
+          note?: string | null
           status?: string
           rejection_reason?: string | null
           created_at?: number
+          updated_at?: number | null
+          reviewed_at?: number | null
+          reviewed_by?: string | null
         }
         Update: {
           id?: string
@@ -178,9 +188,14 @@ export interface Database {
           start_time?: string | null
           end_time?: string | null
           off_type?: string | null
+          reason?: string | null
+          note?: string | null
           status?: string
           rejection_reason?: string | null
           created_at?: number
+          updated_at?: number | null
+          reviewed_at?: number | null
+          reviewed_by?: string | null
         }
       }
       payroll_records: {

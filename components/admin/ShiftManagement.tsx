@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { ShiftRegistration, RequestStatus, User, UserRole, ShiftTime, OFF_TYPE_LABELS, Holiday, Department, OffType, EmployeeStatus, Branch, AnnualLeaveSummary, ContractType } from '../../types';
-import { getShiftRegistrations, updateShiftStatus, updateShiftRegistration, registerShift, getAllUsers, getHolidays, getDepartments, getBranches, getAnnualLeaveSummary, getSystemConfigs, updateSystemConfig, createSystemConfig, getConfigValue } from '../../services/db';
+import { getShiftRegistrations, updateShiftStatus, updateShiftRegistration, registerShift, getAllUsers, getHolidays, getDepartments, getBranches, getAnnualLeaveSummary, saveShiftRegistrationSchedule, getShiftRegistrationState, getShiftRegistrationConfigHistory, sendShiftRegistrationScheduleTestPush, sendShiftRegistrationSchedulePush, type ShiftRegSchedulePushTestKind } from '../../services/db';
+import { sendLocalNotification } from '../../services/push';
+import { toDatetimeLocalValue, fromDatetimeLocalValue, formatShiftRegCloseLabel, type ShiftRegistrationSchedule } from '../../services/shiftRegistrationSchedule';
 import { exportToCSV } from '../../utils/export';
 import CustomSelect from '../CustomSelect';
 
@@ -46,10 +48,56 @@ function dateToKey(ts: number): string {
 }
 
 const DAY_NAMES = ['Chủ nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
+const ISO_WEEKDAY_LABELS_VI = ['', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'CN'];
+const ISO_WEEKDAY_LABELS_EN = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+const SCHEDULE_TIME_OPTIONS: string[] = (() => {
+  const opts: string[] = ['00:00'];
+  for (let h = 0; h <= 23; h++) {
+    if (h > 0) opts.push(`${String(h).padStart(2, '0')}:00`);
+    opts.push(`${String(h).padStart(2, '0')}:30`);
+  }
+  opts.push('23:59');
+  return Array.from(new Set(opts));
+})();
+
 /** Format ngày để hiển thị: "Thứ 3, 10/2/2025" */
 function formatDateLabel(d: Date): string {
   return `${DAY_NAMES[d.getDay()]}, ${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
 }
+
+function formatDateTime(ms: number, locale: string): string {
+  return new Date(ms).toLocaleString(locale, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function defaultWindowLocals(): { enable: string; disable: string } {
+  const enable = new Date();
+  enable.setDate(enable.getDate() + 1);
+  enable.setHours(8, 0, 0, 0);
+  const disable = new Date(enable);
+  disable.setDate(disable.getDate() + 2);
+  disable.setHours(18, 0, 0, 0);
+  return {
+    enable: toDatetimeLocalValue(enable.getTime()),
+    disable: toDatetimeLocalValue(disable.getTime()),
+  };
+}
+
+type ScheduleFormState = {
+  mode: ShiftRegistrationSchedule['mode'];
+  enableLocal: string;
+  disableLocal: string;
+  weeklyStartDay: number;
+  weeklyStartTime: string;
+  weeklyEndDay: number;
+  weeklyEndTime: string;
+};
 
 interface ShiftManagementProps {
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
@@ -90,8 +138,30 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
   }>({ shift: ShiftTime.CUSTOM, startTime: '09:00', endTime: '18:00', offType: OffType.OFF_PN });
   const [cellActionLoading, setCellActionLoading] = useState(false);
   const [shiftRegEnabled, setShiftRegEnabled] = useState(true);
-  const [shiftRegConfigId, setShiftRegConfigId] = useState<string | null>(null);
+  const [shiftRegSchedule, setShiftRegSchedule] = useState<ShiftRegistrationSchedule>({ mode: 'manual' });
+  const [shiftRegNextChangeAt, setShiftRegNextChangeAt] = useState<number | null>(null);
+  const [shiftRegNextChangeEnabled, setShiftRegNextChangeEnabled] = useState<boolean | null>(null);
   const [shiftRegToggleLoading, setShiftRegToggleLoading] = useState(false);
+  const [showConfigHistory, setShowConfigHistory] = useState(false);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [scheduleForm, setScheduleForm] = useState<ScheduleFormState>(() => {
+    const defaults = defaultWindowLocals();
+    return {
+      mode: 'manual',
+      enableLocal: defaults.enable,
+      disableLocal: defaults.disable,
+      weeklyStartDay: 5,
+      weeklyStartTime: '08:00',
+      weeklyEndDay: 7,
+      weeklyEndTime: '23:00',
+    };
+  });
+  const [configHistory, setConfigHistory] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [schedulePushTesting, setSchedulePushTesting] = useState<ShiftRegSchedulePushTestKind | null>(null);
+  const [schedulePushFeedback, setSchedulePushFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const t = {
     vi: {
@@ -185,6 +255,45 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       shiftRegOff: 'Đang khóa — chỉ admin gán/sửa ca',
       shiftRegUpdated: 'Đã cập nhật cài đặt đăng ký ca.',
       shiftRegUpdateFailed: 'Không lưu được cài đặt. Thử lại.',
+      scheduleBtn: 'Lịch',
+      scheduleTitle: 'Lịch bật/tắt đăng ký ca',
+      scheduleHelp: 'Trong khung giờ NV mới đăng ký được. Bật/Tắt tay sẽ hủy lịch.',
+      scheduleModeManual: 'Thủ công',
+      scheduleModeWindow: 'Một lần',
+      scheduleModeWeekly: 'Hàng tuần',
+      scheduleEnableAt: 'Bật lúc',
+      scheduleDisableAt: 'Tắt lúc',
+      scheduleWeeklyStart: 'Bắt đầu',
+      scheduleWeeklyEnd: 'Kết thúc',
+      schedulePushHint: 'Thủ công: gửi khi bấm Bật. Một lần và hàng tuần: gửi lúc mở và trước khi đóng 30 phút. Nút thử chỉ gửi cho tài khoản đang đăng nhập.',
+      schedulePushTestOpen: 'Thử: đã mở',
+      schedulePushTestClose: 'Thử: sắp đóng',
+      schedulePushTestOk: 'Đã gửi thử. Kiểm tra chuông app / thông báo máy.',
+      schedulePushTestFail: 'Không gửi được thử. Thử lại.',
+      scheduleSave: 'Lưu lịch',
+      scheduleClear: 'Xóa lịch',
+      scheduleSaved: 'Đã lưu lịch bật/tắt đăng ký ca.',
+      scheduleCleared: 'Đã chuyển về bật/tắt thủ công.',
+      scheduleInvalidWindow: 'Giờ tắt phải sau giờ bật.',
+      scheduleInvalidWeekly: 'Khung giờ trong tuần không hợp lệ.',
+      scheduleNextOn: 'Sẽ bật',
+      scheduleNextOff: 'Sẽ tắt',
+      scheduleExpired: 'Lịch đã hết hạn — đang khóa',
+      scheduleSummaryWeekly: 'Hàng tuần',
+      scheduleSummaryWindow: 'Tự động',
+      registeredAt: 'Thời gian đăng ký',
+      lastUpdated: 'Cập nhật lần cuối',
+      reviewedAt: 'Thời gian duyệt',
+      reviewedBy: 'Người duyệt',
+      reviewedAtUnknown: 'Chưa ghi nhận (ca duyệt trước khi hệ thống lưu thời điểm)',
+      history: 'Lịch sử',
+      viewHistory: 'Xem lịch sử',
+      configHistory: 'Lịch sử bật/tắt đăng ký ca',
+      enabled: 'Bật',
+      disabled: 'Tắt',
+      changedBy: 'Thay đổi bởi',
+      changedAt: 'Thời gian',
+      noHistory: 'Chưa có lịch sử thay đổi',
     },
     en: {
       week: 'Week',
@@ -277,54 +386,268 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       shiftRegOff: 'Locked — only admins can assign shifts',
       shiftRegUpdated: 'Shift registration setting updated.',
       shiftRegUpdateFailed: 'Could not save setting. Try again.',
+      scheduleBtn: 'Schedule',
+      scheduleTitle: 'Shift signup on/off schedule',
+      scheduleHelp: 'Employees can sign up only inside the window. Manual On/Off clears it.',
+      scheduleModeManual: 'Manual',
+      scheduleModeWindow: 'Once',
+      scheduleModeWeekly: 'Weekly',
+      scheduleEnableAt: 'Turn on at',
+      scheduleDisableAt: 'Turn off at',
+      scheduleWeeklyStart: 'Starts',
+      scheduleWeeklyEnd: 'Ends',
+      schedulePushHint: 'Manual: sends when you tap On. Once/weekly: sends at open and 30 minutes before close. Test buttons only notify the signed-in account.',
+      schedulePushTestOpen: 'Test: opened',
+      schedulePushTestClose: 'Test: closing soon',
+      schedulePushTestOk: 'Test sent. Check the app bell / device banner.',
+      schedulePushTestFail: 'Could not send the test. Try again.',
+      scheduleSave: 'Save schedule',
+      scheduleClear: 'Clear schedule',
+      scheduleSaved: 'Shift signup schedule saved.',
+      scheduleCleared: 'Switched back to manual on/off.',
+      scheduleInvalidWindow: 'Turn-off time must be after turn-on time.',
+      scheduleInvalidWeekly: 'Weekly window is invalid.',
+      scheduleNextOn: 'Turns on',
+      scheduleNextOff: 'Turns off',
+      scheduleExpired: 'Schedule ended — currently locked',
+      scheduleSummaryWeekly: 'Weekly',
+      scheduleSummaryWindow: 'Automatic',
+      registeredAt: 'Registered at',
+      lastUpdated: 'Last updated',
+      reviewedAt: 'Reviewed at',
+      reviewedBy: 'Reviewed by',
+      reviewedAtUnknown: 'Not recorded (approved before review tracking)',
+      history: 'History',
+      viewHistory: 'View history',
+      configHistory: 'Shift registration config history',
+      enabled: 'Enabled',
+      disabled: 'Disabled',
+      changedBy: 'Changed by',
+      changedAt: 'Changed at',
+      noHistory: 'No history yet',
     }
   };
 
   const text = t[language];
 
-  const parseShiftRegEnabled = (raw: string | undefined): boolean => {
-    const v = (raw ?? 'true').toLowerCase().trim();
-    return v === 'true' || v === '1' || v === 'yes';
+  const applyShiftRegState = (state: Awaited<ReturnType<typeof getShiftRegistrationState>>) => {
+    setShiftRegEnabled(state.enabled);
+    setShiftRegSchedule(state.schedule);
+    setShiftRegNextChangeAt(state.nextChangeAt);
+    setShiftRegNextChangeEnabled(state.nextChangeEnabled);
   };
 
   const loadShiftRegistrationSetting = async () => {
     try {
-      const configs = await getSystemConfigs();
-      const row = configs.find(c => c.key === 'shift_registration_enabled');
-      const val = row?.value ?? (await getConfigValue('shift_registration_enabled', 'true'));
-      setShiftRegConfigId(row?.id ?? null);
-      setShiftRegEnabled(parseShiftRegEnabled(val));
+      applyShiftRegState(await getShiftRegistrationState());
     } catch {
       setShiftRegEnabled(true);
+      setShiftRegSchedule({ mode: 'manual' });
+      setShiftRegNextChangeAt(null);
+      setShiftRegNextChangeEnabled(null);
     }
   };
+
+  const weekdayLabel = (isoDay: number) =>
+    (language === 'vi' ? ISO_WEEKDAY_LABELS_VI : ISO_WEEKDAY_LABELS_EN)[isoDay] || String(isoDay);
+
+  const weekdayShort = (isoDay: number) => DAY_LABELS[isoDay - 1] || String(isoDay);
+
+  const formatCompactDateTime = (ms: number): string => {
+    const d = new Date(ms);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${pad(d.getHours())}:${pad(d.getMinutes())} ${d.getDate()}/${d.getMonth() + 1}`;
+  };
+
+  const formatScheduleSummary = (schedule: ShiftRegistrationSchedule): string | null => {
+    if (schedule.mode === 'window') {
+      const from = schedule.enableAt ? formatCompactDateTime(schedule.enableAt) : '—';
+      const to = schedule.disableAt ? formatCompactDateTime(schedule.disableAt) : '—';
+      return `${from}–${to}`;
+    }
+    if (schedule.mode === 'weekly' && schedule.weekly) {
+      const w = schedule.weekly;
+      return `${weekdayShort(w.startDay)} ${w.startTime}–${weekdayShort(w.endDay)} ${w.endTime}`;
+    }
+    return null;
+  };
+
+  const scheduleHint = (() => {
+    if (shiftRegSchedule.mode === 'manual') return text.scheduleTitle;
+    const summary = formatScheduleSummary(shiftRegSchedule) || '';
+    if (shiftRegNextChangeAt) {
+      const when = formatCompactDateTime(shiftRegNextChangeAt);
+      return `${summary} · ${shiftRegNextChangeEnabled ? text.scheduleNextOn : text.scheduleNextOff} ${when}`;
+    }
+    if (shiftRegSchedule.mode === 'window' && !shiftRegEnabled) return `${summary} · ${text.scheduleExpired}`;
+    return summary;
+  })();
 
   const handleShiftRegistrationChange = async (next: boolean) => {
     if (shiftRegToggleLoading || next === shiftRegEnabled) return;
     setShiftRegToggleLoading(true);
     setMessage(null);
     try {
-      const val = next ? 'true' : 'false';
-      if (shiftRegConfigId && !shiftRegConfigId.startsWith('temp_')) {
-        await updateSystemConfig(shiftRegConfigId, val);
-      } else {
-        const created = await createSystemConfig(
-          'shift_registration_enabled',
-          val,
-          language === 'vi'
-            ? 'Cho phép nhân viên đăng ký và đổi lịch ca'
-            : 'Allow employees to register and edit shifts',
-          'ATTENDANCE'
-        );
-        setShiftRegConfigId(created.id);
+      const hadSchedule = shiftRegSchedule.mode !== 'manual';
+      const reason = language === 'vi'
+        ? (hadSchedule
+          ? (next ? 'Hủy lịch tự động — mở đăng ký ca thủ công' : 'Hủy lịch tự động — khóa đăng ký ca thủ công')
+          : (next ? 'Mở lại đăng ký ca cho nhân viên' : 'Tạm khóa đăng ký ca để điều chỉnh lịch'))
+        : (hadSchedule
+          ? (next ? 'Cleared auto schedule — opened signup manually' : 'Cleared auto schedule — locked signup manually')
+          : (next ? 'Reopened shift registration for employees' : 'Temporarily locked shift registration for schedule adjustment'));
+      const state = await saveShiftRegistrationSchedule(
+        { mode: 'manual' },
+        { enabled: next, reason }
+      );
+      applyShiftRegState(state);
+      showMsg('success', hadSchedule ? text.scheduleCleared : text.shiftRegUpdated);
+      if (next) {
+        void sendShiftRegistrationSchedulePush('open').catch(err => {
+          console.error('Error sending shift registration open push:', err);
+        });
       }
-      setShiftRegEnabled(next);
-      showMsg('success', text.shiftRegUpdated);
-    } catch {
+      await loadConfigHistory();
+    } catch (err) {
+      console.error('Error updating shift registration setting:', err);
       showMsg('error', text.shiftRegUpdateFailed);
     } finally {
       setShiftRegToggleLoading(false);
     }
+  };
+
+  const openScheduleModal = () => {
+    const defaults = defaultWindowLocals();
+    setScheduleForm({
+      mode: shiftRegSchedule.mode,
+      enableLocal: shiftRegSchedule.enableAt ? toDatetimeLocalValue(shiftRegSchedule.enableAt) : defaults.enable,
+      disableLocal: shiftRegSchedule.disableAt ? toDatetimeLocalValue(shiftRegSchedule.disableAt) : defaults.disable,
+      weeklyStartDay: shiftRegSchedule.weekly?.startDay ?? 5,
+      weeklyStartTime: shiftRegSchedule.weekly?.startTime ?? '08:00',
+      weeklyEndDay: shiftRegSchedule.weekly?.endDay ?? 7,
+      weeklyEndTime: shiftRegSchedule.weekly?.endTime ?? '23:00',
+    });
+    setScheduleError(null);
+    setSchedulePushFeedback(null);
+    setShowScheduleModal(true);
+  };
+
+  const handleSaveSchedule = async () => {
+    if (scheduleSaving) return;
+    setScheduleSaving(true);
+    setScheduleError(null);
+    setMessage(null);
+    try {
+      let nextSchedule: ShiftRegistrationSchedule = { mode: 'manual' };
+      let reason: string;
+      const locale = language === 'vi' ? 'vi-VN' : 'en-US';
+      if (scheduleForm.mode === 'window') {
+        const enableAt = fromDatetimeLocalValue(scheduleForm.enableLocal);
+        const disableAt = fromDatetimeLocalValue(scheduleForm.disableLocal);
+        nextSchedule = { mode: 'window', enableAt, disableAt, weekly: null };
+        if (enableAt != null && disableAt != null && enableAt >= disableAt) {
+          setScheduleError(text.scheduleInvalidWindow);
+          return;
+        }
+        reason = language === 'vi'
+          ? `Đặt lịch khung giờ: bật ${enableAt ? formatDateTime(enableAt, locale) : '—'} — tắt ${disableAt ? formatDateTime(disableAt, locale) : '—'}`
+          : `Set one-time window: on ${enableAt ? formatDateTime(enableAt, locale) : '—'} — off ${disableAt ? formatDateTime(disableAt, locale) : '—'}`;
+      } else if (scheduleForm.mode === 'weekly') {
+        nextSchedule = {
+          mode: 'weekly',
+          weekly: {
+            startDay: scheduleForm.weeklyStartDay,
+            startTime: scheduleForm.weeklyStartTime,
+            endDay: scheduleForm.weeklyEndDay,
+            endTime: scheduleForm.weeklyEndTime,
+          },
+          enableAt: null,
+          disableAt: null,
+        };
+        const w = nextSchedule.weekly!;
+        reason = language === 'vi'
+          ? `Đặt lịch hàng tuần: ${weekdayLabel(w.startDay)} ${w.startTime} → ${weekdayLabel(w.endDay)} ${w.endTime}`
+          : `Set weekly window: ${weekdayLabel(w.startDay)} ${w.startTime} → ${weekdayLabel(w.endDay)} ${w.endTime}`;
+      } else {
+        reason = language === 'vi' ? 'Chuyển về bật/tắt thủ công' : 'Switched to manual on/off';
+      }
+      const wasEnabled = shiftRegEnabled;
+      const state = await saveShiftRegistrationSchedule(nextSchedule, { reason });
+      applyShiftRegState(state);
+      setShowScheduleModal(false);
+      showMsg('success', scheduleForm.mode === 'manual' ? text.scheduleCleared : text.scheduleSaved);
+      if (scheduleForm.mode !== 'manual' && !wasEnabled && state.enabled) {
+        void sendShiftRegistrationSchedulePush('open').catch(err => {
+          console.error('Error sending shift registration open push:', err);
+        });
+      }
+      await loadConfigHistory();
+    } catch (err) {
+      const code = err instanceof Error ? err.message : '';
+      if (code === 'window-order' || code === 'missing-window') {
+        setScheduleError(text.scheduleInvalidWindow);
+      } else if (code === 'weekly-same' || code === 'weekly-time' || code === 'weekly-day' || code === 'missing-weekly') {
+        setScheduleError(text.scheduleInvalidWeekly);
+      } else {
+        setScheduleError(text.shiftRegUpdateFailed);
+      }
+    } finally {
+      setScheduleSaving(false);
+    }
+  };
+
+  const handleTestSchedulePush = async (kind: ShiftRegSchedulePushTestKind) => {
+    if (schedulePushTesting || scheduleSaving) return;
+    setSchedulePushTesting(kind);
+    setSchedulePushFeedback(null);
+    setScheduleError(null);
+    try {
+      const closeLabel = kind === 'close_warn'
+        ? (shiftRegNextChangeAt && shiftRegNextChangeEnabled === false
+          ? formatShiftRegCloseLabel(shiftRegNextChangeAt)
+          : scheduleForm.mode === 'window' && scheduleForm.disableLocal
+            ? formatShiftRegCloseLabel(fromDatetimeLocalValue(scheduleForm.disableLocal) || Date.now())
+            : scheduleForm.mode === 'weekly'
+              ? `${weekdayShort(scheduleForm.weeklyEndDay)} ${scheduleForm.weeklyEndTime}`
+              : null)
+        : null;
+      const created = await sendShiftRegistrationScheduleTestPush(kind, closeLabel);
+      try {
+        await sendLocalNotification({
+          title: created.title,
+          body: created.message,
+          icon: '/icon-192.png',
+          badge: '/icon-192.png',
+          tag: `shift-reg-test-${kind}-${created.id}`,
+          data: { type: created.type, notificationId: created.id },
+        });
+      } catch {
+        // Máy này chưa cấp quyền — insert DB vẫn kích hoạt web push trên máy đã đăng ký.
+      }
+      setSchedulePushFeedback({ type: 'success', text: text.schedulePushTestOk });
+    } catch {
+      setSchedulePushFeedback({ type: 'error', text: text.schedulePushTestFail });
+    } finally {
+      setSchedulePushTesting(null);
+    }
+  };
+
+  const loadConfigHistory = async () => {
+    setLoadingHistory(true);
+    try {
+      const history = await getShiftRegistrationConfigHistory(50);
+      setConfigHistory(history);
+    } catch (error) {
+      console.error('Error loading config history:', error);
+      setConfigHistory([]);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleViewHistory = () => {
+    setShowConfigHistory(true);
+    loadConfigHistory();
   };
 
   useEffect(() => {
@@ -339,6 +662,32 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
       onRegisterReload(loadData);
     }
   }, [onRegisterReload]);
+
+  useEffect(() => {
+    if (!showConfigHistory && !showScheduleModal) return;
+    const prevBody = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevBody;
+    };
+  }, [showConfigHistory, showScheduleModal]);
+
+  useEffect(() => {
+    if (shiftRegNextChangeAt == null) return;
+    const delay = Math.min(Math.max(shiftRegNextChangeAt - Date.now() + 300, 800), 2147483647);
+    const id = window.setTimeout(() => {
+      void loadShiftRegistrationSetting();
+    }, delay);
+    return () => window.clearTimeout(id);
+  }, [shiftRegNextChangeAt]);
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void loadShiftRegistrationSetting();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
 
   const loadData = async () => {
     setLoading(true);
@@ -766,10 +1115,10 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
             </button>
           </div>
           <div className="flex flex-wrap items-center gap-3 text-sm">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50/80">
-              <span className="text-xs font-semibold text-slate-700 shrink-0">{text.shiftRegToggle}</span>
+            <div className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-200 bg-slate-50/80 whitespace-nowrap">
+              <span className="text-[11px] font-semibold text-slate-600 shrink-0">{text.shiftRegToggle}</span>
               <div
-                className="inline-flex rounded-xl border border-slate-200/80 bg-slate-100/90 p-0.5 shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)]"
+                className="inline-flex rounded-lg border border-slate-200/80 bg-slate-100/90 p-0.5"
                 role="group"
                 aria-label={text.shiftRegToggle}
               >
@@ -779,9 +1128,9 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                   aria-pressed={shiftRegEnabled}
                   title={text.shiftRegOn}
                   onClick={() => void handleShiftRegistrationChange(true)}
-                  className={`min-w-[4.25rem] px-3 py-1.5 rounded-[10px] text-xs font-bold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-1 disabled:opacity-50 ${
+                  className={`min-w-[2.75rem] px-2 py-1 rounded-md text-[11px] font-bold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 disabled:opacity-50 ${
                     shiftRegEnabled
-                      ? 'bg-white text-emerald-700 shadow-sm ring-1 ring-emerald-200/80'
+                      ? 'bg-white text-emerald-700 shadow-sm'
                       : 'text-slate-500 hover:text-slate-700 hover:bg-white/60'
                   }`}
                 >
@@ -793,15 +1142,40 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                   aria-pressed={!shiftRegEnabled}
                   title={text.shiftRegOff}
                   onClick={() => void handleShiftRegistrationChange(false)}
-                  className={`min-w-[4.25rem] px-3 py-1.5 rounded-[10px] text-xs font-bold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-1 disabled:opacity-50 ${
+                  className={`min-w-[2.75rem] px-2 py-1 rounded-md text-[11px] font-bold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 disabled:opacity-50 ${
                     !shiftRegEnabled
-                      ? 'bg-white text-slate-800 shadow-sm ring-1 ring-slate-300/90'
+                      ? 'bg-white text-slate-800 shadow-sm'
                       : 'text-slate-500 hover:text-slate-700 hover:bg-white/60'
                   }`}
                 >
                   {text.shiftRegSegmentOff}
                 </button>
               </div>
+              <button
+                type="button"
+                onClick={openScheduleModal}
+                className={`inline-flex items-center gap-1 max-w-[10.5rem] px-1.5 py-1 rounded-md border text-[10px] font-medium transition-colors whitespace-nowrap ${
+                  shiftRegSchedule.mode !== 'manual'
+                    ? 'border-sky-300 bg-sky-50 text-sky-800 hover:bg-sky-100'
+                    : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+                title={scheduleHint}
+              >
+                <span aria-hidden>⏱</span>
+                {shiftRegSchedule.mode !== 'manual' ? (
+                  <span className="truncate">{formatScheduleSummary(shiftRegSchedule)}</span>
+                ) : (
+                  <span>{text.scheduleBtn}</span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={handleViewHistory}
+                className="px-1.5 py-1 rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 text-[10px] font-medium transition-colors"
+                title={text.viewHistory}
+              >
+                📋
+              </button>
             </div>
             <span className="px-2.5 py-1 rounded-lg bg-amber-100 text-amber-800 font-medium">
               {text.pending}: {weekStats.pending}
@@ -1350,6 +1724,66 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                           <span className="text-red-700">{cellDetail.reg.rejectionReason}</span>
                         </p>
                       )}
+                      
+                      {/* Tracking info: Thời gian đăng ký, cập nhật, duyệt */}
+                      <div className="mt-3 pt-3 border-t border-slate-200 space-y-1.5">
+                        <p className="text-[11px] text-slate-500">
+                          <span className="font-semibold">📅 {text.registeredAt}:</span>{' '}
+                          {new Date(cellDetail.reg.createdAt).toLocaleString(language === 'vi' ? 'vi-VN' : 'en-US', {
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </p>
+                        {cellDetail.reg.updatedAt && cellDetail.reg.updatedAt !== cellDetail.reg.createdAt && (
+                          <p className="text-[11px] text-slate-500">
+                            <span className="font-semibold">🔄 {text.lastUpdated}:</span>{' '}
+                            {new Date(cellDetail.reg.updatedAt).toLocaleString(language === 'vi' ? 'vi-VN' : 'en-US', {
+                              year: 'numeric',
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </p>
+                        )}
+                        {cellDetail.reg.status === RequestStatus.APPROVED || cellDetail.reg.status === RequestStatus.REJECTED ? (
+                          cellDetail.reg.reviewedAt ? (
+                          <>
+                            <p className="text-[11px] text-slate-500">
+                              <span className="font-semibold">
+                                {cellDetail.reg.status === RequestStatus.APPROVED ? '✅' : '❌'} {text.reviewedAt}:
+                              </span>{' '}
+                              {new Date(cellDetail.reg.reviewedAt).toLocaleString(language === 'vi' ? 'vi-VN' : 'en-US', {
+                                year: 'numeric',
+                                month: '2-digit',
+                                day: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </p>
+                            {cellDetail.reg.reviewedBy && (
+                              <p className="text-[11px] text-slate-500">
+                                <span className="font-semibold">👤 {text.reviewedBy}:</span>{' '}
+                                {(() => {
+                                  const reviewer = employees.find(e => e.id === cellDetail.reg!.reviewedBy);
+                                  return reviewer?.name || cellDetail.reg.reviewedBy;
+                                })()}
+                              </p>
+                            )}
+                          </>
+                          ) : (
+                            <p className="text-[11px] text-slate-500">
+                              <span className="font-semibold">
+                                {cellDetail.reg.status === RequestStatus.APPROVED ? '✅' : '❌'} {text.reviewedAt}:
+                              </span>{' '}
+                              {text.reviewedAtUnknown}
+                            </p>
+                          )
+                        ) : null}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1415,6 +1849,255 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
                 className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700 text-sm font-medium"
               >
                 {text.confirmReject}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Modal lịch bật/tắt đăng ký ca */}
+      {showScheduleModal && createPortal(
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 overflow-hidden"
+          onClick={() => setShowScheduleModal(false)}
+          onWheel={e => e.stopPropagation()}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-sm w-full p-4 space-y-3"
+            onClick={e => e.stopPropagation()}
+          >
+            <div>
+              <h3 className="text-sm font-bold text-slate-800">⏱ {text.scheduleTitle}</h3>
+              <p className="mt-0.5 text-[11px] text-slate-500 leading-snug">{text.scheduleHelp}</p>
+            </div>
+            {scheduleError && (
+              <p className="text-[11px] text-red-600 bg-red-50 border border-red-100 rounded-lg px-2.5 py-1.5">{scheduleError}</p>
+            )}
+            <div className="grid grid-cols-3 gap-1 p-0.5 rounded-lg bg-slate-100" role="radiogroup" aria-label={text.scheduleTitle}>
+              {([
+                ['manual', text.scheduleModeManual],
+                ['window', text.scheduleModeWindow],
+                ['weekly', text.scheduleModeWeekly],
+              ] as const).map(([mode, label]) => (
+                <label
+                  key={mode}
+                  className={`flex items-center justify-center px-1.5 py-1.5 rounded-md text-[11px] font-semibold cursor-pointer text-center ${
+                    scheduleForm.mode === mode
+                      ? 'bg-white text-sky-800 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-800'
+                  }`}
+                  onClick={() => setScheduleForm(prev => ({ ...prev, mode }))}
+                >
+                  <input
+                    type="radio"
+                    name="shift-reg-schedule-mode"
+                    value={mode}
+                    checked={scheduleForm.mode === mode}
+                    onChange={() => setScheduleForm(prev => ({ ...prev, mode }))}
+                    className="sr-only"
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+
+            {scheduleForm.mode === 'window' && (
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-[11px] font-semibold text-slate-600 space-y-1">
+                  <span>{text.scheduleEnableAt}</span>
+                  <input
+                    type="datetime-local"
+                    value={scheduleForm.enableLocal}
+                    onChange={e => setScheduleForm(prev => ({ ...prev, enableLocal: e.target.value }))}
+                    className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-[12px] text-slate-800"
+                  />
+                </label>
+                <label className="text-[11px] font-semibold text-slate-600 space-y-1">
+                  <span>{text.scheduleDisableAt}</span>
+                  <input
+                    type="datetime-local"
+                    value={scheduleForm.disableLocal}
+                    onChange={e => setScheduleForm(prev => ({ ...prev, disableLocal: e.target.value }))}
+                    className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-[12px] text-slate-800"
+                  />
+                </label>
+              </div>
+            )}
+
+            {scheduleForm.mode === 'weekly' && (
+              <>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <span className="text-[11px] font-semibold text-slate-600">{text.scheduleWeeklyStart}</span>
+                  <div className="flex gap-1">
+                    <select
+                      value={scheduleForm.weeklyStartDay}
+                      onChange={e => setScheduleForm(prev => ({ ...prev, weeklyStartDay: Number(e.target.value) }))}
+                      className="min-w-0 flex-1 px-1.5 py-1.5 rounded-lg border border-slate-200 text-[12px] text-slate-800"
+                    >
+                      {[1, 2, 3, 4, 5, 6, 7].map(d => (
+                        <option key={`start-${d}`} value={d}>{weekdayShort(d)}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={scheduleForm.weeklyStartTime}
+                      onChange={e => setScheduleForm(prev => ({ ...prev, weeklyStartTime: e.target.value }))}
+                      className="min-w-0 flex-1 px-1.5 py-1.5 rounded-lg border border-slate-200 text-[12px] text-slate-800"
+                    >
+                      {SCHEDULE_TIME_OPTIONS.map(t => (
+                        <option key={`st-${t}`} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-[11px] font-semibold text-slate-600">{text.scheduleWeeklyEnd}</span>
+                  <div className="flex gap-1">
+                    <select
+                      value={scheduleForm.weeklyEndDay}
+                      onChange={e => setScheduleForm(prev => ({ ...prev, weeklyEndDay: Number(e.target.value) }))}
+                      className="min-w-0 flex-1 px-1.5 py-1.5 rounded-lg border border-slate-200 text-[12px] text-slate-800"
+                    >
+                      {[1, 2, 3, 4, 5, 6, 7].map(d => (
+                        <option key={`end-${d}`} value={d}>{weekdayShort(d)}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={scheduleForm.weeklyEndTime}
+                      onChange={e => setScheduleForm(prev => ({ ...prev, weeklyEndTime: e.target.value }))}
+                      className="min-w-0 flex-1 px-1.5 py-1.5 rounded-lg border border-slate-200 text-[12px] text-slate-800"
+                    >
+                      {SCHEDULE_TIME_OPTIONS.map(t => (
+                        <option key={`et-${t}`} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+              </>
+            )}
+
+            <div className="space-y-1.5">
+              <p className="text-[10px] text-slate-500 leading-snug">{text.schedulePushHint}</p>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  disabled={scheduleSaving || schedulePushTesting !== null}
+                  onClick={() => void handleTestSchedulePush('open')}
+                  className="flex-1 px-2 py-1.5 rounded-lg border border-sky-200 bg-sky-50 text-sky-800 text-[11px] font-semibold hover:bg-sky-100 disabled:opacity-50"
+                >
+                  {schedulePushTesting === 'open' ? text.saving : text.schedulePushTestOpen}
+                </button>
+                <button
+                  type="button"
+                  disabled={scheduleSaving || schedulePushTesting !== null}
+                  onClick={() => void handleTestSchedulePush('close_warn')}
+                  className="flex-1 px-2 py-1.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-[11px] font-semibold hover:bg-amber-100 disabled:opacity-50"
+                >
+                  {schedulePushTesting === 'close_warn' ? text.saving : text.schedulePushTestClose}
+                </button>
+              </div>
+              {schedulePushFeedback && (
+                <p className={`text-[10px] leading-snug ${schedulePushFeedback.type === 'success' ? 'text-emerald-600' : 'text-red-600'}`}>
+                  {schedulePushFeedback.text}
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={scheduleSaving}
+                onClick={() => void handleSaveSchedule()}
+                className="flex-1 px-3 py-1.5 rounded-lg bg-sky-600 text-white text-[12px] font-semibold hover:bg-sky-700 disabled:opacity-50"
+              >
+                {scheduleSaving ? text.saving : text.scheduleSave}
+              </button>
+              <button
+                type="button"
+                disabled={scheduleSaving}
+                onClick={() => setShowScheduleModal(false)}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 text-[12px] font-medium"
+              >
+                {text.close}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Modal lịch sử bật/tắt đăng ký ca */}
+      {showConfigHistory && createPortal(
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 overflow-hidden"
+          onClick={() => setShowConfigHistory(false)}
+          onWheel={e => e.stopPropagation()}
+        >
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="shrink-0 p-6 border-b border-slate-200">
+              <h3 className="text-lg font-bold text-slate-800">📋 {text.configHistory}</h3>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-scroll overscroll-contain p-6 max-h-[52vh]">
+              {loadingHistory ? (
+                <div className="text-center py-8 text-slate-500">{text.loading}</div>
+              ) : configHistory.length === 0 ? (
+                <div className="text-center py-8 text-slate-500">{text.noHistory}</div>
+              ) : (
+                <div className="space-y-3">
+                  {configHistory.map((record, index) => (
+                    <div key={record.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-slate-100/50 transition-colors">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold ${
+                              record.enabled 
+                                ? 'bg-emerald-100 text-emerald-700' 
+                                : 'bg-slate-200 text-slate-700'
+                            }`}>
+                              {record.enabled ? `✅ ${text.enabled}` : `🔒 ${text.disabled}`}
+                            </span>
+                            {index === 0 && (
+                              <span className="px-2 py-0.5 rounded-md bg-blue-100 text-blue-700 text-[10px] font-bold">
+                                {language === 'vi' ? 'Hiện tại' : 'Current'}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-slate-700">
+                            <span className="font-semibold">👤 {text.changedBy}:</span>{' '}
+                            {record.changedByUser?.name || record.changedBy}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            <span className="font-semibold">🕒 {text.changedAt}:</span>{' '}
+                            {new Date(record.changedAt).toLocaleString(language === 'vi' ? 'vi-VN' : 'en-US', {
+                              year: 'numeric',
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit'
+                            })}
+                          </p>
+                          {record.reason && (
+                            <p className="text-xs text-slate-600 italic mt-2 pl-3 border-l-2 border-slate-300">
+                              {record.reason}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="shrink-0 p-4 border-t border-slate-200">
+              <button
+                type="button"
+                onClick={() => setShowConfigHistory(false)}
+                className="w-full px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium"
+              >
+                {text.close}
               </button>
             </div>
           </div>

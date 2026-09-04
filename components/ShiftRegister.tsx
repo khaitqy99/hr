@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, ShiftRegistration, ShiftTime, RequestStatus, OffType, OFF_TYPE_LABELS, Holiday } from '../types';
-import { registerShift, getShiftRegistrations, getHolidays, updateShiftRegistration, getShiftRegistrationEnabled } from '../services/db';
+import { registerShift, getShiftRegistrations, getHolidays, updateShiftRegistration, getShiftRegistrationState } from '../services/db';
 import { dataEvents } from '../services/events';
 import { sendShiftChangeNotification } from '../services/email';
 import CustomSelect from './CustomSelect';
@@ -69,6 +69,8 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
     return new Date(today.getFullYear(), today.getMonth(), 1);
   });
   const [registrationEnabled, setRegistrationEnabled] = useState(true);
+  const [registrationNextChangeAt, setRegistrationNextChangeAt] = useState<number | null>(null);
+  const [registrationNextChangeEnabled, setRegistrationNextChangeEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
     loadShifts();
@@ -77,9 +79,11 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
 
   useEffect(() => {
     const loadReg = async () => {
-      const en = await getShiftRegistrationEnabled();
-      setRegistrationEnabled(en);
-      if (!en) {
+      const state = await getShiftRegistrationState();
+      setRegistrationEnabled(state.enabled);
+      setRegistrationNextChangeAt(state.nextChangeAt);
+      setRegistrationNextChangeEnabled(state.nextChangeEnabled);
+      if (!state.enabled) {
         setSelectedDates([]);
         setExpandedDate(null);
         setEditingShiftId(null);
@@ -90,8 +94,34 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
     const off = dataEvents.on('config:updated', () => {
       void loadReg();
     });
-    return () => off();
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void loadReg();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      off();
+      document.removeEventListener('visibilitychange', onVis);
+    };
   }, []);
+
+  useEffect(() => {
+    if (registrationNextChangeAt == null) return;
+    const delay = Math.min(Math.max(registrationNextChangeAt - Date.now() + 300, 800), 2147483647);
+    const id = window.setTimeout(() => {
+      void getShiftRegistrationState().then(state => {
+        setRegistrationEnabled(state.enabled);
+        setRegistrationNextChangeAt(state.nextChangeAt);
+        setRegistrationNextChangeEnabled(state.nextChangeEnabled);
+        if (!state.enabled) {
+          setSelectedDates([]);
+          setExpandedDate(null);
+          setEditingShiftId(null);
+          setMultiSelectMode(false);
+        }
+      });
+    }, delay);
+    return () => window.clearTimeout(id);
+  }, [registrationNextChangeAt]);
 
   useEffect(() => {
     const handleClickOutside = (event: PointerEvent) => {
@@ -763,7 +793,33 @@ const ShiftRegister: React.FC<ShiftRegisterProps> = ({ user }) => {
         >
           <p className="font-semibold">Đăng ký ca đang tạm khóa</p>
           <p className="mt-1 text-xs text-amber-800/90">
-            Quản trị viên đã tắt đăng ký ca làm. Bạn vẫn xem được lịch đã đăng ký; không thể đăng ký mới hay đổi lịch cho đến khi được mở lại.
+            {registrationNextChangeAt && registrationNextChangeEnabled
+              ? `Đăng ký ca sẽ mở lúc ${new Date(registrationNextChangeAt).toLocaleString('vi-VN', {
+                  year: 'numeric',
+                  month: '2-digit',
+                  day: '2-digit',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}. Bạn vẫn xem được lịch đã đăng ký.`
+              : 'Quản trị viên đã tắt đăng ký ca làm. Bạn vẫn xem được lịch đã đăng ký; không thể đăng ký mới hay đổi lịch cho đến khi được mở lại.'}
+          </p>
+        </div>
+      )}
+      {registrationEnabled && registrationNextChangeAt && registrationNextChangeEnabled === false && (
+        <div
+          className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900 shadow-sm"
+          role="status"
+        >
+          <p className="text-xs">
+            Đăng ký ca sẽ khóa lúc{' '}
+            {new Date(registrationNextChangeAt).toLocaleString('vi-VN', {
+              year: 'numeric',
+              month: '2-digit',
+              day: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+            .
           </p>
         </div>
       )}

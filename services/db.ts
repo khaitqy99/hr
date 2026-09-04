@@ -1,6 +1,25 @@
 import { User, UserRole, AttendanceRecord, LeaveRequest, Notification, RequestStatus, LeaveType, ShiftRegistration, PayrollRecord, ContractType, EmployeeStatus, AttendanceType, Department, Holiday, SystemConfig, OffType, ShiftTime, Branch, AllowedLocation, AnnualLeaveSummary } from '../types';
 import { supabase } from './supabase';
 import { emitUserEvent, emitAttendanceEvent, emitShiftEvent, emitPayrollEvent, emitDepartmentEvent, emitHolidayEvent, emitConfigEvent, emitNotificationEvent } from './events';
+import {
+  isShiftRegistrationEffectivelyEnabled,
+  getShiftRegistrationNextChange,
+  parseShiftRegistrationSchedule,
+  validateShiftRegistrationSchedule,
+  MANUAL_SCHEDULE,
+  shiftRegPushCopy,
+  type ShiftRegistrationSchedule,
+  type ShiftRegistrationState,
+} from './shiftRegistrationSchedule';
+
+export type { ShiftRegistrationSchedule, ShiftRegistrationState } from './shiftRegistrationSchedule';
+export {
+  parseShiftRegistrationSchedule,
+  validateShiftRegistrationSchedule,
+  toDatetimeLocalValue,
+  fromDatetimeLocalValue,
+  MANUAL_SCHEDULE,
+} from './shiftRegistrationSchedule';
 
 // Helper để check Supabase connection
 export const isSupabaseAvailable = (): boolean => {
@@ -17,6 +36,19 @@ const SHIFTS_KEY = 'hr_connect_shifts';
 const NOTIFICATIONS_KEY = 'hr_connect_notifications';
 const PAYROLL_KEY = 'hr_connect_payroll';
 const OTP_CODES_KEY = 'hr_connect_otp_codes';
+const CURRENT_USER_STORAGE_KEY = 'current_user';
+
+/** ID user đang đăng nhập (bảng users), không phải auth.uid() — app dùng OTP + localStorage */
+export const getLoggedInAppUserId = (): string | undefined => {
+  try {
+    const raw = localStorage.getItem(CURRENT_USER_STORAGE_KEY);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw);
+    return typeof parsed?.id === 'string' && parsed.id ? parsed.id : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 const parseNoLunchBreakDatesFromDb = (raw: unknown): number[] => {
   if (raw == null) return [];
@@ -1147,6 +1179,9 @@ export const getShiftRegistrations = async (userId?: string, role?: UserRole): P
         rejectionReason: shift.rejection_reason || undefined,
         note: shift.note || undefined,
         createdAt: shift.created_at,
+        updatedAt: shift.updated_at || undefined,
+        reviewedAt: shift.reviewed_at || undefined,
+        reviewedBy: shift.reviewed_by || undefined,
       }));
     } catch (error) {
       console.error('Error getting shift registrations from Supabase:', error);
@@ -1177,6 +1212,8 @@ export const registerShift = async (
   }
   if (isSupabaseAvailable()) {
     try {
+      const now = Date.now();
+      const actorId = getLoggedInAppUserId() || null;
       const { error } = await supabase
         .from('shift_registrations')
         .insert({
@@ -1189,6 +1226,9 @@ export const registerShift = async (
           reason: shift.reason || null,
           status,
           created_at: shift.createdAt,
+          updated_at: now,
+          reviewed_at: status === RequestStatus.APPROVED ? now : null,
+          reviewed_by: status === RequestStatus.APPROVED ? actorId : null,
         });
 
       if (error) throw new Error(`Lỗi đăng ký ca: ${error.message}`);
@@ -1213,7 +1253,18 @@ export const registerShift = async (
 export const updateShiftStatus = async (id: string, status: RequestStatus, rejectionReason?: string): Promise<void> => {
   if (isSupabaseAvailable()) {
     try {
-      const payload: { status: RequestStatus; rejection_reason?: string | null } = { status };
+      const payload: { 
+        status: RequestStatus; 
+        rejection_reason?: string | null;
+        updated_at: number;
+        reviewed_at: number;
+        reviewed_by: string | null;
+      } = { 
+        status,
+        updated_at: Date.now(),
+        reviewed_at: Date.now(),
+        reviewed_by: getLoggedInAppUserId() || null,
+      };
       if (status === RequestStatus.REJECTED) {
         payload.rejection_reason = rejectionReason?.trim() || null;
       } else {
@@ -1242,6 +1293,8 @@ export const updateShiftStatus = async (id: string, status: RequestStatus, rejec
   const idx = all.findIndex((r: ShiftRegistration) => r.id === id);
   if (idx !== -1) {
     all[idx].status = status;
+    all[idx].updatedAt = Date.now();
+    all[idx].reviewedAt = Date.now();
     if (status === RequestStatus.REJECTED) {
       all[idx].rejectionReason = rejectionReason?.trim() || undefined;
     } else {
@@ -1277,6 +1330,7 @@ export const updateShiftRegistration = async (
         off_type: data.offType || null,
         reason: data.reason || null,
         rejection_reason: null,
+        updated_at: Date.now(),
       };
       
       // Only update note if it's provided (admin can update note)
@@ -1787,6 +1841,62 @@ export const createNotification = async (notification: Omit<Notification, 'id'>)
   return newNotification;
 };
 
+export type ShiftRegSchedulePushTestKind = 'open' | 'close_warn';
+
+const isShiftRegPushTarget = (user: User): boolean =>
+  (user.status ?? EmployeeStatus.ACTIVE) === EmployeeStatus.ACTIVE &&
+  (user.role === UserRole.EMPLOYEE || user.role === UserRole.MANAGER);
+
+async function insertShiftRegPushNotifications(
+  userIds: string[],
+  kind: ShiftRegSchedulePushTestKind,
+  closeLabel?: string | null
+): Promise<Notification[]> {
+  if (userIds.length === 0) return [];
+  const copy = shiftRegPushCopy(kind, closeLabel);
+  const timestamp = Date.now();
+  const created: Notification[] = [];
+
+  for (const userId of userIds) {
+    created.push(await createNotification({
+      userId,
+      title: copy.title,
+      message: copy.message,
+      read: false,
+      timestamp,
+      type: copy.type,
+    }));
+  }
+  emitNotificationEvent('created', created[0]?.id);
+  return created;
+}
+
+/** Gửi thông báo đăng ký ca tới NV/QL đang làm (cùng nội dung push thật). */
+export const sendShiftRegistrationSchedulePush = async (
+  kind: ShiftRegSchedulePushTestKind,
+  closeLabel?: string | null
+): Promise<number> => {
+  const users = await getAllUsers();
+  const created = await insertShiftRegPushNotifications(
+    users.filter(isShiftRegPushTarget).map(u => u.id),
+    kind,
+    closeLabel
+  );
+  return created.length;
+};
+
+/** Gửi thử — chỉ tới user đang đăng nhập, nội dung giống thông báo thật. */
+export const sendShiftRegistrationScheduleTestPush = async (
+  kind: ShiftRegSchedulePushTestKind,
+  closeLabel?: string | null
+): Promise<Notification> => {
+  const userId = getLoggedInAppUserId();
+  if (!userId) throw new Error('not-logged-in');
+  const [created] = await insertShiftRegPushNotifications([userId], kind, closeLabel);
+  if (!created) throw new Error('not-logged-in');
+  return created;
+};
+
 export const markNotificationAsRead = async (id: string): Promise<void> => {
   if (isSupabaseAvailable()) {
     try {
@@ -1813,25 +1923,34 @@ export const markNotificationAsRead = async (id: string): Promise<void> => {
 };
 
 export const deleteNotification = async (id: string): Promise<void> => {
+  await deleteNotifications([id]);
+};
+
+export const deleteNotifications = async (ids: string[]): Promise<void> => {
+  const uniqueIds = [...new Set(ids.filter(Boolean))];
+  if (uniqueIds.length === 0) return;
+
   if (isSupabaseAvailable()) {
     try {
-      const { error } = await supabase
-        .from('notifications')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw new Error(`Lỗi xóa notification: ${error.message}`);
+      const chunkSize = 100;
+      for (let i = 0; i < uniqueIds.length; i += chunkSize) {
+        const chunk = uniqueIds.slice(i, i + chunkSize);
+        const { error } = await supabase
+          .from('notifications')
+          .delete()
+          .in('id', chunk);
+        if (error) throw new Error(`Lỗi xóa notification: ${error.message}`);
+      }
       return;
     } catch (error) {
-      console.error('Error deleting notification in Supabase:', error);
+      console.error('Error deleting notifications in Supabase:', error);
       throw error;
     }
   }
 
-  // Fallback to localStorage
+  const idSet = new Set(uniqueIds);
   const all: Notification[] = JSON.parse(localStorage.getItem(NOTIFICATIONS_KEY) || '[]');
-  const filtered = all.filter((n: Notification) => n.id !== id);
-  localStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify(filtered));
+  localStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify(all.filter((n: Notification) => !idSet.has(n.id))));
 };
 
 export const getAllNotifications = async (): Promise<Notification[]> => {
@@ -2631,11 +2750,112 @@ export const getConfigNumber = async (key: string, defaultValue: number): Promis
 };
 
 const SHIFT_REGISTRATION_ENABLED_KEY = 'shift_registration_enabled';
+const SHIFT_REGISTRATION_SCHEDULE_KEY = 'shift_registration_schedule';
+
+const parseShiftRegEnabledFlag = (raw: string | undefined): boolean => {
+  const v = (raw ?? 'true').toLowerCase().trim();
+  return v === 'true' || v === '1' || v === 'yes';
+};
+
+/** Trạng thái hiệu lực (kể cả lịch tự động) + lịch đã lưu. */
+export const getShiftRegistrationState = async (): Promise<ShiftRegistrationState> => {
+  const [rawEnabled, rawSchedule] = await Promise.all([
+    getConfigValue(SHIFT_REGISTRATION_ENABLED_KEY, 'true'),
+    getConfigValue(SHIFT_REGISTRATION_SCHEDULE_KEY, '{"mode":"manual"}'),
+  ]);
+  const now = Date.now();
+  const manualEnabled = parseShiftRegEnabledFlag(rawEnabled);
+  const schedule = parseShiftRegistrationSchedule(rawSchedule);
+  const enabled = isShiftRegistrationEffectivelyEnabled(manualEnabled, schedule, now);
+  const next = getShiftRegistrationNextChange(schedule, now);
+  return {
+    enabled,
+    manualEnabled,
+    schedule,
+    nextChangeAt: next?.at ?? null,
+    nextChangeEnabled: next?.enabled ?? null,
+  };
+};
 
 /** Admin có thể tắt để nhân viên không đăng ký/sửa ca (admin vẫn thao tác được). */
 export const getShiftRegistrationEnabled = async (): Promise<boolean> => {
-  const raw = (await getConfigValue(SHIFT_REGISTRATION_ENABLED_KEY, 'true')).toLowerCase().trim();
-  return raw === 'true' || raw === '1' || raw === 'yes';
+  const state = await getShiftRegistrationState();
+  return state.enabled;
+};
+
+const upsertSystemConfigByKey = async (
+  key: string,
+  value: string,
+  description: string,
+  category: string,
+  updatedBy?: string
+): Promise<void> => {
+  invalidateConfigCache();
+  const configs = await getSystemConfigs();
+  const row = configs.find(c => c.key === key);
+  if (row?.id && !row.id.startsWith('temp_')) {
+    await updateSystemConfig(row.id, value, updatedBy);
+    return;
+  }
+  await createSystemConfig(key, value, description, category);
+};
+
+/** Lưu lịch bật/tắt. Nếu không truyền enabled, đồng bộ cờ theo trạng thái hiệu lực. */
+export const saveShiftRegistrationSchedule = async (
+  schedule: ShiftRegistrationSchedule,
+  options?: { enabled?: boolean; reason?: string }
+): Promise<ShiftRegistrationState> => {
+  const errorCode = validateShiftRegistrationSchedule(schedule);
+  if (errorCode) {
+    throw new Error(errorCode);
+  }
+  const actorId = getLoggedInAppUserId() || undefined;
+  const normalized: ShiftRegistrationSchedule =
+    schedule.mode === 'manual'
+      ? { ...MANUAL_SCHEDULE }
+      : schedule.mode === 'window'
+        ? {
+            mode: 'window',
+            enableAt: schedule.enableAt ?? null,
+            disableAt: schedule.disableAt ?? null,
+            weekly: null,
+          }
+        : {
+            mode: 'weekly',
+            weekly: schedule.weekly ?? null,
+            enableAt: null,
+            disableAt: null,
+          };
+
+  await upsertSystemConfigByKey(
+    SHIFT_REGISTRATION_SCHEDULE_KEY,
+    JSON.stringify(normalized),
+    'Lịch tự động bật/tắt đăng ký ca cho nhân viên',
+    'ATTENDANCE',
+    actorId
+  );
+
+  invalidateConfigCache();
+  const previewManual =
+    options?.enabled !== undefined
+      ? options.enabled
+      : parseShiftRegEnabledFlag(await getConfigValue(SHIFT_REGISTRATION_ENABLED_KEY, 'true'));
+  const enabled =
+    options?.enabled !== undefined
+      ? options.enabled
+      : isShiftRegistrationEffectivelyEnabled(previewManual, normalized, Date.now());
+
+  await upsertSystemConfigByKey(
+    SHIFT_REGISTRATION_ENABLED_KEY,
+    enabled ? 'true' : 'false',
+    'Cho phép nhân viên đăng ký và đổi lịch ca (true/false)',
+    'ATTENDANCE',
+    actorId
+  );
+
+  await logShiftRegistrationConfigChange(enabled, actorId, options?.reason);
+  invalidateConfigCache();
+  return getShiftRegistrationState();
 };
 
 /** Lấy office location từ config */
@@ -3045,4 +3265,119 @@ export const createSystemConfig = async (
   invalidateConfigCache();
   await emitConfigEvent();
   return newConfig;
+};
+
+// ============ SHIFT REGISTRATION CONFIG HISTORY ============
+
+/** Lưu lịch sử thay đổi cấu hình đăng ký ca */
+export const logShiftRegistrationConfigChange = async (
+  enabled: boolean,
+  changedBy?: string,
+  reason?: string
+): Promise<void> => {
+  const actorId = changedBy || getLoggedInAppUserId();
+  if (!actorId) {
+    console.warn('[WARN] Cannot log shift config history: missing app user id');
+    return;
+  }
+
+  if (isSupabaseAvailable()) {
+    try {
+      const { data, error } = await supabase
+        .from('shift_registration_config_history')
+        .insert({
+          enabled,
+          changed_by: actorId,
+          changed_at: Date.now(),
+          reason: reason || null,
+        })
+        .select();
+
+      if (error) {
+        console.error('[ERROR] Failed to log shift config history:', error);
+        throw new Error(`Lỗi lưu lịch sử: ${error.message}`);
+      }
+
+      console.log('[SUCCESS] Shift config history logged:', data);
+    } catch (error) {
+      console.error('Error logging shift config history:', error);
+      // Không throw error để không block việc update config chính
+    }
+  } else {
+    console.warn('[WARN] Supabase not available, cannot log shift config history');
+  }
+};
+
+/** Lấy lịch sử thay đổi cấu hình đăng ký ca */
+export const getShiftRegistrationConfigHistory = async (limit: number = 50): Promise<any[]> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { data, error } = await supabase
+        .from('shift_registration_config_history')
+        .select(`
+          *,
+          changed_by_user:users!shift_registration_config_history_changed_by_fkey(
+            id,
+            name,
+            email
+          )
+        `)
+        .order('changed_at', { ascending: false })
+        .limit(limit);
+
+      if (error) throw new Error(`Lỗi lấy lịch sử: ${error.message}`);
+      
+      return (data || []).map((row: any) => ({
+        id: row.id,
+        enabled: row.enabled,
+        changedBy: row.changed_by,
+        changedByUser: row.changed_by_user,
+        changedAt: row.changed_at,
+        reason: row.reason || undefined,
+        createdAt: row.created_at,
+      }));
+    } catch (error) {
+      console.error('Error fetching shift config history:', error);
+      return [];
+    }
+  }
+  
+  return [];
+};
+
+/** Wrapper cho updateSystemConfig với logging lịch sử khi update shift_registration_enabled */
+export const updateSystemConfigWithHistory = async (
+  id: string,
+  value: string,
+  updatedBy?: string,
+  key?: string,
+  reason?: string
+): Promise<SystemConfig> => {
+  const config = await updateSystemConfig(id, value, updatedBy);
+
+  if (key === 'shift_registration_enabled') {
+    const enabled = value.toLowerCase().trim() === 'true' || value === '1';
+    await logShiftRegistrationConfigChange(enabled, updatedBy || getLoggedInAppUserId(), reason);
+  }
+  
+  return config;
+};
+
+/** Wrapper cho createSystemConfig với logging lịch sử khi tạo shift_registration_enabled */
+export const createSystemConfigWithHistory = async (
+  key: string,
+  value: string,
+  description?: string,
+  category: string = 'GENERAL',
+  createdBy?: string,
+  reason?: string
+): Promise<SystemConfig> => {
+  const config = await createSystemConfig(key, value, description, category);
+
+  if (key === 'shift_registration_enabled') {
+    const enabled = value.toLowerCase().trim() === 'true' || value === '1';
+    await logShiftRegistrationConfigChange(enabled, createdBy || getLoggedInAppUserId(), reason);
+  }
+  
+  return config;
 };
