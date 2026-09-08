@@ -51,34 +51,137 @@ export const getNotificationPermission = (): NotificationPermission => {
 };
 
 /**
- * Yêu cầu quyền notification
+ * Yêu cầu quyền notification.
+ * Luôn gọi requestPermission() khi chưa granted — nếu user mới dismiss (default)
+ * trình duyệt sẽ hiện hộp xin quyền native. Nếu đã Block (denied), hầu hết
+ * trình duyệt trả về denied ngay, không hiện UI (hạn chế bảo mật của browser).
  */
-export const requestNotificationPermission = async (): Promise<NotificationPermission> => {
+export const requestNotificationPermission = (): Promise<NotificationPermission> => {
   if (!('Notification' in window)) {
-    throw new Error('Trình duyệt này không hỗ trợ thông báo');
+    return Promise.reject(new Error('Trình duyệt này không hỗ trợ thông báo'));
   }
 
   if (Notification.permission === 'granted') {
-    return 'granted';
+    return Promise.resolve('granted');
   }
 
-  if (Notification.permission === 'denied') {
-    throw new Error('Quyền thông báo đã bị từ chối. Vui lòng bật trong cài đặt trình duyệt');
-  }
-
-  const permission = await Notification.requestPermission();
-  return permission;
+  // Trả về thẳng Promise của browser để iOS không mất user gesture.
+  return Notification.requestPermission();
 };
 
-const isMobileDevice = (): boolean => {
-  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-};
+const isIOSDevice = (): boolean =>
+  /iPad|iPhone|iPod/i.test(navigator.userAgent) && !(window as any).MSStream;
 
 const isPWAInstalled = (): boolean => {
   return (
     window.matchMedia('(display-mode: standalone)').matches ||
     (window.navigator as any).standalone === true
   );
+};
+
+/** Web Push trên iOS chỉ có từ 16.4 (Home Screen PWA). */
+const isIOSPushVersionSupported = (): boolean => {
+  const match = navigator.userAgent.match(/OS (\d+)[._](\d+)/);
+  if (!match) return true;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return major > 16 || (major === 16 && minor >= 4);
+};
+
+/**
+ * Chặn sớm trên iPhone khi chưa đủ điều kiện để hiện hộp xin quyền native.
+ * Trả về null nếu có thể gọi requestPermission().
+ */
+export const getNotificationSetupHelp = (): string | null => {
+  if (!isIOSDevice()) return null;
+
+  if (!isIOSPushVersionSupported()) {
+    return [
+      'iPhone cần iOS 16.4 trở lên mới nhận được thông báo.',
+      '',
+      'Vào Cài đặt → Cài đặt chung → Cập nhật phần mềm, rồi mở lại app từ màn hình chính.',
+    ].join('\n');
+  }
+
+  if (!isPWAInstalled()) {
+    return [
+      'Trên iPhone, thông báo không chạy trong Safari.',
+      'Cần mở app từ icon trên Màn hình chính mới xin được quyền.',
+      '',
+      'Cài đặt Y99 HR:',
+      '1. Mở trang này bằng Safari',
+      '2. Chạm nút Chia sẻ (ô vuông có mũi tên lên)',
+      '3. Chọn Thêm vào Màn hình chính',
+      '4. Mở icon Y99 HR rồi nhấn Test Notification',
+    ].join('\n');
+  }
+
+  return null;
+};
+
+/**
+ * Hướng dẫn bật lại quyền khi trình duyệt đã Block (không thể hiện lại prompt native).
+ */
+export const getNotificationDeniedHelp = (): string => {
+  const isAndroid = /Android/i.test(navigator.userAgent);
+  const isStandalone = isPWAInstalled();
+
+  if (isIOSDevice()) {
+    if (!isPWAInstalled()) {
+      return getNotificationSetupHelp() || '';
+    }
+    return [
+      'Gỡ icon chưa đủ — iPhone vẫn nhớ lần Từ chối trong Safari.',
+      'App cũng không hiện trong Cài đặt → Thông báo.',
+      '',
+      'Làm đủ các bước này:',
+      '1. Nhấn giữ icon Y99 HR → Xóa app',
+      '2. Cài đặt → Safari → Nâng cao → Dữ liệu website',
+      '   (iOS mới: Cài đặt → Ứng dụng → Safari → Nâng cao)',
+      '3. Tìm y99 → Xóa',
+      '4. Tắt hẳn Safari (vuốt lên khỏi đa nhiệm)',
+      '5. Mở Safari, vào lại trang',
+      '6. Chia sẻ → Thêm vào Màn hình chính',
+      '7. Mở icon mới → nhấn Test Notification',
+    ].join('\n');
+  }
+
+  if (isAndroid && isStandalone) {
+    return [
+      'Trình duyệt không cho hiện lại hộp xin quyền sau khi đã từ chối.',
+      '',
+      'Bật lại trên Android (app đã cài):',
+      '1. Nhấn giữ icon ứng dụng trên màn hình',
+      '2. Chọn Cài đặt trang / Site settings',
+      '3. Notifications → Cho phép',
+      '4. Quay lại app và nhấn Test Notification',
+    ].join('\n');
+  }
+
+  if (isAndroid) {
+    return [
+      'Trình duyệt không cho hiện lại hộp xin quyền sau khi đã từ chối.',
+      '',
+      'Bật lại trên Chrome Android:',
+      '1. Nhấn biểu tượng ổ khóa cạnh thanh địa chỉ',
+      '2. Quyền / Permissions',
+      '3. Thông báo → Cho phép',
+      '4. Nhấn lại Test Notification',
+    ].join('\n');
+  }
+
+  return [
+    'Trình duyệt không cho hiện lại hộp xin quyền sau khi đã từ chối.',
+    '',
+    'Bật lại trên máy tính:',
+    '1. Nhấn biểu tượng ổ khóa trên thanh địa chỉ',
+    '2. Notifications / Thông báo → Allow',
+    '3. Tải lại trang rồi nhấn Test Notification',
+  ].join('\n');
+};
+
+const isMobileDevice = (): boolean => {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 };
 
 const urlBase64ToUint8Array = (base64String: string): Uint8Array => {

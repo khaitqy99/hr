@@ -1,5 +1,6 @@
 import { User, UserRole, AttendanceRecord, LeaveRequest, Notification, RequestStatus, LeaveType, ShiftRegistration, PayrollRecord, ContractType, EmployeeStatus, AttendanceType, Department, Holiday, SystemConfig, OffType, ShiftTime, Branch, AllowedLocation, AnnualLeaveSummary } from '../types';
 import { supabase } from './supabase';
+import { calculateRegularAndOTHoursWithNoLunchBreak, payrollDateSetHas } from '../utils/payrollHours';
 import { emitUserEvent, emitAttendanceEvent, emitShiftEvent, emitPayrollEvent, emitDepartmentEvent, emitHolidayEvent, emitConfigEvent, emitNotificationEvent } from './events';
 import {
   isShiftRegistrationEffectivelyEnabled,
@@ -56,6 +57,8 @@ const parseNoLunchBreakDatesFromDb = (raw: unknown): number[] => {
   return [];
 };
 
+const parseNoOtRateDatesFromDb = parseNoLunchBreakDatesFromDb;
+
 const mapUserFromDb = (data: any): User => ({
   id: data.id,
   name: data.name,
@@ -96,6 +99,7 @@ const mapPayrollFromDb = (record: any): PayrollRecord => ({
   status: record.status as 'PAID' | 'PENDING',
   calcMethod: (record.calc_method as 'SHIFT' | 'ATTENDANCE' | 'MANUAL') ?? 'SHIFT',
   noLunchBreakDates: parseNoLunchBreakDatesFromDb(record.no_lunch_break_dates),
+  noOtRateDates: parseNoOtRateDatesFromDb(record.no_ot_rate_dates),
 });
 
 // Initial Admin User Only
@@ -763,10 +767,12 @@ const calculateTotalWorkHours = async (
   month: string,
   shiftRegistrations: ShiftRegistration[],
   holidays: Holiday[],
-  noLunchBreakDates: number[] = []
+  noLunchBreakDates: number[] = [],
+  noOtRateDates: number[] = []
 ): Promise<number> => {
   const workHoursPerDay = await getConfigNumber('work_hours_per_day', 8);
   const noLunchSet = new Set(noLunchBreakDates);
+  const noOtRateSet = new Set(noOtRateDates);
   
   const [monthStr, yearStr] = month.split('-');
   const targetMonth = parseInt(monthStr, 10);
@@ -795,7 +801,11 @@ const calculateTotalWorkHours = async (
           hours -= 1;
         }
         if (hours > 0) {
-          totalHours += Math.min(hours, workHoursPerDay);
+          if (payrollDateSetHas(noOtRateSet, shift.date)) {
+            totalHours += hours;
+          } else {
+            totalHours += Math.min(hours, workHoursPerDay);
+          }
         }
       } else if (shift.shift === 'OFF') {
         // OFF có lương: Tính đủ workHoursPerDay giờ
@@ -882,7 +892,8 @@ export const calculateShiftTotalHours = async (userId: string, month: string): P
     getPayroll(userId, month),
   ]);
   const noLunchBreakDates = payrollRows[0]?.noLunchBreakDates ?? [];
-  return calculateTotalWorkHours(userId, month, shiftRegistrations, holidays, noLunchBreakDates);
+  const noOtRateDates = payrollRows[0]?.noOtRateDates ?? [];
+  return calculateTotalWorkHours(userId, month, shiftRegistrations, holidays, noLunchBreakDates, noOtRateDates);
 };
 
 // Tương đương công (hiển thị): tổng giờ / giờ chuẩn/ngày — không làm tròn 0.5 (khớp UI theo giờ).
@@ -896,40 +907,33 @@ export const calculateShiftWorkDays = async (userId: string, month: string): Pro
 };
 
 // Helper: Tính số giờ OT từ shift registrations trong tháng
-// OT = tổng số giờ làm việc vượt quá 9 tiếng/ca (chỉ tính ca CUSTOM)
+// OT = giờ vượt workHoursPerDay sau khi trừ trưa; ngày trong no_ot_rate_dates không tính hệ số (gộp vào giờ thường)
 export const calculateShiftOTHours = async (userId: string, month: string): Promise<number> => {
-  const shiftRegistrations = await getShiftRegistrations(userId);
+  const [shiftRegistrations, workHoursPerDay, payrollRows] = await Promise.all([
+    getShiftRegistrations(userId),
+    getConfigNumber('work_hours_per_day', 8),
+    getPayroll(userId, month),
+  ]);
+  const noLunchSet = new Set(payrollRows[0]?.noLunchBreakDates ?? []);
+  const noOtRateSet = new Set(payrollRows[0]?.noOtRateDates ?? []);
+  const wh = workHoursPerDay > 0 ? workHoursPerDay : 8;
 
-  let totalOT = 0;
+  const inCycle = shiftRegistrations.filter(
+    shift =>
+      shift.status === RequestStatus.APPROVED &&
+      isTimestampInPayrollCycle(shift.date, month)
+  );
 
-  shiftRegistrations
-    .filter(shift => {
-      if (shift.status !== RequestStatus.APPROVED ||
-        !isTimestampInPayrollCycle(shift.date, month)) {
-        return false;
-      }
-      // Chỉ tính OT cho ca CUSTOM có startTime và endTime
-      return shift.shift === ShiftTime.CUSTOM && shift.startTime && shift.endTime;
-    })
-    .forEach(shift => {
-      if (!shift.startTime || !shift.endTime) return;
-
-      // Tính số giờ của ca
-      const [startHour, startMin] = shift.startTime.split(':').map(Number);
-      const [endHour, endMin] = shift.endTime.split(':').map(Number);
-      const shiftHours = (endHour * 60 + endMin - startHour * 60 - startMin) / 60;
-
-      // Nếu ca > 9 tiếng thì phần thừa là OT
-      if (shiftHours > 9) {
-        totalOT += shiftHours - 9;
-      }
-    });
-
-  return parseFloat(totalOT.toFixed(1));
+  const { otHours } = calculateRegularAndOTHoursWithNoLunchBreak(inCycle, wh, noLunchSet, noOtRateSet);
+  return parseFloat(otHours.toFixed(1));
 };
 
 export const calculateAttendanceStats = async (userId: string, month: string): Promise<{ actualWorkDays: number; otHours: number }> => {
-  const records = await getAttendance(userId);
+  const [records, payrollRows] = await Promise.all([
+    getAttendance(userId),
+    getPayroll(userId, month),
+  ]);
+  const noOtRateSet = new Set(payrollRows[0]?.noOtRateDates ?? []);
 
   // Filter records for payroll cycle [02/MM, 02/MM+1)
   const monthRecords = records.filter(record => {
@@ -969,13 +973,19 @@ export const calculateAttendanceStats = async (userId: string, month: string): P
       const checkInTime = dayRecords.checkIn.timestamp;
       const checkOutTime = dayRecords.checkOut.timestamp;
       const workHours = (checkOutTime - checkInTime) / (1000 * 60 * 60); // Convert to hours
+      const skipOtRate = payrollDateSetHas(noOtRateSet, checkInTime);
 
       // Cải thiện: Tính OT khi làm việc > 9 tiếng (8h làm + 1h nghỉ trưa)
       // Hoặc khi có status OVERTIME từ check-out
       const workHoursWithBreak = standardWorkHours + 1;
       if (workHours > workHoursWithBreak) {
-        totalOtHours += workHours - workHoursWithBreak;
-      } else if (dayRecords.checkOut.status === 'OVERTIME') {
+        const extra = workHours - workHoursWithBreak;
+        if (skipOtRate) {
+          actualWorkDays += extra / standardWorkHours;
+        } else {
+          totalOtHours += extra;
+        }
+      } else if (!skipOtRate && dayRecords.checkOut.status === 'OVERTIME') {
         // Nếu được đánh dấu OVERTIME nhưng chưa đủ 9 tiếng, vẫn tính là OT tối thiểu 0.5h
         // (Trường hợp checkout muộn hơn shift nhưng chưa đủ 9 tiếng)
         const minOT = 0.5;
@@ -1485,6 +1495,7 @@ export const createOrUpdatePayroll = async (record: PayrollRecord): Promise<Payr
   if (isSupabaseAvailable()) {
     try {
       const noLunch = record.noLunchBreakDates ?? [];
+      const noOtRate = record.noOtRateDates ?? [];
       const { data, error } = await supabase
         .from('payroll_records')
         .upsert({
@@ -1505,6 +1516,7 @@ export const createOrUpdatePayroll = async (record: PayrollRecord): Promise<Payr
           net_salary: record.netSalary,
           status: record.status,
           no_lunch_break_dates: noLunch,
+          no_ot_rate_dates: noOtRate,
           calc_method: record.calcMethod ?? 'SHIFT',
         }, {
           onConflict: 'user_id,month'
@@ -1573,6 +1585,38 @@ export const setPayrollNoLunchBreakDates = async (
     throw new Error('Chưa có bản ghi payroll cho nhân viên/tháng này. Hãy tính lại lương trước.');
   }
   all[idx] = { ...all[idx], noLunchBreakDates: dates };
+  localStorage.setItem(PAYROLL_KEY, JSON.stringify(all));
+  invalidatePayrollCache(month);
+};
+
+/** Cập nhật danh sách ngày tăng ca không hệ số OT (timestamp ngày) trên bản ghi payroll. */
+export const setPayrollNoOtRateDates = async (
+  userId: string,
+  month: string,
+  dates: number[]
+): Promise<void> => {
+  if (isSupabaseAvailable()) {
+    const { error, data } = await supabase
+      .from('payroll_records')
+      .update({ no_ot_rate_dates: dates })
+      .eq('user_id', userId)
+      .eq('month', month)
+      .select('id');
+
+    if (error) throw new Error(error.message);
+    if (!data?.length) {
+      throw new Error('Chưa có bản ghi payroll cho nhân viên/tháng này. Hãy tính lại lương trước.');
+    }
+    invalidatePayrollCache(month);
+    return;
+  }
+
+  const all: PayrollRecord[] = JSON.parse(localStorage.getItem(PAYROLL_KEY) || '[]');
+  const idx = all.findIndex(r => r.userId === userId && r.month === month);
+  if (idx === -1) {
+    throw new Error('Chưa có bản ghi payroll cho nhân viên/tháng này. Hãy tính lại lương trước.');
+  }
+  all[idx] = { ...all[idx], noOtRateDates: dates };
   localStorage.setItem(PAYROLL_KEY, JSON.stringify(all));
   invalidatePayrollCache(month);
 };
@@ -1760,6 +1804,7 @@ export const calculatePayroll = async (
     netSalary: calculatedNetSalary, // Sử dụng giá trị đã tính lại để đảm bảo chính xác
     status: 'PENDING',
     noLunchBreakDates: [],
+    noOtRateDates: [],
     calcMethod: resolvedCalcMethod,
   };
 };

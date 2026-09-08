@@ -170,6 +170,8 @@ export interface PayrollRecord {
   calcMethod?: 'SHIFT' | 'ATTENDANCE' | 'MANUAL';
   /** Timestamp (shift.date) các ngày không trừ 1h nghỉ trưa khi tính giờ ca CUSTOM */
   noLunchBreakDates?: number[];
+  /** Timestamp các ngày tăng ca trả theo đơn giá giờ thường (không nhân hệ số OT) */
+  noOtRateDates?: number[];
 }
 
 export interface AnnualLeaveSummary {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { Notification, User } from '../types';
 import { getNotifications, markNotificationAsRead } from '../services/db';
-import { sendLocalNotification, getNotificationPermission, requestNotificationPermission, ensurePushSubscription } from '../services/push';
+import { sendLocalNotification, getNotificationPermission, requestNotificationPermission, ensurePushSubscription, getNotificationDeniedHelp, getNotificationSetupHelp } from '../services/push';
 import { supabase } from '../services/supabase';
 import { isSupabaseAvailable } from '../services/db';
 
@@ -60,6 +60,13 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user, setView }
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // iOS: sẵn Service Worker trước khi user nhấn Test, để xin quyền không bị trễ mất gesture.
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      void navigator.serviceWorker.ready;
+    }
+  }, []);
 
   // Load khi mount và khi tab trở lại visible (không polling)
   useEffect(() => {
@@ -213,27 +220,31 @@ const NotificationsPanel: React.FC<NotificationsPanelProps> = ({ user, setView }
 
   const handleTestNotification = async () => {
     try {
-      const currentPermission = getNotificationPermission();
-
-      // If permission is denied, show alert
-      if (currentPermission === 'denied') {
-        alert('❌ Quyền thông báo đã bị từ chối.\n\nVui lòng:\n1. Mở Settings trình duyệt\n2. Tìm Notifications/Thông báo\n3. Cho phép thông báo cho trang này');
+      // iPhone: không xin quyền được nếu đang mở Safari hoặc iOS < 16.4.
+      const setupHelp = getNotificationSetupHelp();
+      if (setupHelp) {
+        alert(setupHelp);
         return;
       }
 
-      // If permission is not granted, request it
-      if (currentPermission !== 'granted') {
+      let permission = getNotificationPermission();
+
+      // Luôn xin quyền native khi chưa granted (kể cả lần từ chối trước).
+      // Nếu user chỉ dismiss, browser sẽ hiện lại prompt. Nếu đã Block thì
+      // requestPermission() trả về denied ngay — không thể ép hiện UI.
+      if (permission !== 'granted') {
         console.log('🔔 Đang yêu cầu quyền thông báo...');
         try {
-          const permission = await requestNotificationPermission();
-          if (permission !== 'granted') {
-            alert('⚠️ Bạn cần cấp quyền thông báo để nhận push notifications.\n\nVui lòng cho phép khi trình duyệt hỏi.');
-            return;
-          }
+          permission = await requestNotificationPermission();
         } catch (err) {
           alert('❌ Lỗi khi yêu cầu quyền thông báo:\n' + (err as Error).message);
           return;
         }
+      }
+
+      if (permission !== 'granted') {
+        alert(getNotificationDeniedHelp());
+        return;
       }
 
       // Đăng ký Web Push để nhận khi app đóng

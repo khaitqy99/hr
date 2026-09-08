@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, PayrollRecord, ShiftRegistration, OffType, AttendanceRecord, AttendanceType } from '../types';
 import { getPayroll, calculateLeaveDays, getShiftRegistrations, getConfigNumber, getAttendance } from '../services/db';
-import { calculateRegularAndOTHoursWithNoLunchBreak, calculateTotalWorkedHoursWithNoLunchBreak } from '../utils/payrollHours';
+import { payrollDateSetHas } from '../utils/payrollHours';
 
 interface PayrollProps {
   user: User;
@@ -259,6 +259,7 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
     const dr = data.baseSalary / data.standardWorkDays;
     // noLunchBreakDates (employee xem → đọc từ record lương)
     const noLunchDates = new Set<number>(data.noLunchBreakDates ?? []);
+    const noOtRateDates = new Set<number>(data.noOtRateDates ?? []);
 
     let totalRegularHours = 0;
     let totalOTHours = 0;
@@ -277,6 +278,7 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
         let money = 0;
         let otHours = 0;
         let otMoney = 0;
+        let otRateMultiplier = 1.5;
 
         if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
           shiftLabel = `${shift.startTime} - ${shift.endTime}`;
@@ -290,7 +292,8 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
           money = hr * regularHours;
           if (hours > workHoursPerDay) {
             otHours = hours - workHoursPerDay;
-            otMoney = hr * 1.5 * otHours;
+            otRateMultiplier = payrollDateSetHas(noOtRateDates, shift.date) ? 1 : 1.5;
+            otMoney = hr * otRateMultiplier * otHours;
           }
         } else if (shift.shift === 'OFF') {
           if (shift.offType === OffType.OFF_PN) {
@@ -326,8 +329,12 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
           totalRegularHours += Math.min(hours, workHoursPerDay);
         }
         if (otHours > 0) {
-          totalOTHours += otHours;
-          totalOTMoney += otMoney;
+          if (otRateMultiplier === 1) {
+            totalRegularHours += otHours;
+          } else {
+            totalOTHours += otHours;
+            totalOTMoney += otMoney;
+          }
         }
 
         return (
@@ -340,7 +347,9 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                     {typeLabel}
                   </span>
                   {otHours > 0 && (
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">OT</span>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${otRateMultiplier === 1 ? 'bg-amber-100 text-amber-700' : 'bg-purple-100 text-purple-700'}`}>
+                      {otRateMultiplier === 1 ? 'OT ×1' : 'OT'}
+                    </span>
                   )}
                 </div>
                 <p className="text-xs text-slate-500 truncate">{shiftLabel}</p>
@@ -367,8 +376,8 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                     <p className="text-[10px] text-slate-500">
                       {Math.min(hours, workHoursPerDay).toFixed(1)}h thường + {otHours.toFixed(1)}h OT
                     </p>
-                    <p className="text-[10px] font-bold text-purple-600">
-                      OT ×1.5: +{formatCurrency(Math.round(otMoney))}
+                    <p className={`text-[10px] font-bold ${otRateMultiplier === 1 ? 'text-amber-600' : 'text-purple-600'}`}>
+                      OT ×{otRateMultiplier === 1 ? '1' : '1.5'}: +{formatCurrency(Math.round(otMoney))}
                     </p>
                   </>
                 )}
@@ -438,6 +447,7 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
 
     const hr = (data.baseSalary / data.standardWorkDays) / workHoursPerDay;
     const stdHours = workHoursPerDay;
+    const noOtRateDates = new Set<number>(data.noOtRateDates ?? []);
 
     let totalHours = 0;
     let totalOtHours = 0;
@@ -469,18 +479,28 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
         workHours = raw >= 6 ? raw - 1 : raw;
         const regularHours = Math.min(workHours, stdHours);
         otHours = Math.max(0, workHours - stdHours);
-        money = hr * regularHours + hr * 1.5 * otHours;
-        totalHours += regularHours;
-        totalOtHours += otHours;
+        const dayTs = new Date(Number(y), Number(m) - 1, Number(dd)).getTime();
+        const skipOtRate = payrollDateSetHas(noOtRateDates, dayTs);
+        const extraRate = skipOtRate ? 1 : 1.5;
+        money = hr * regularHours + hr * extraRate * otHours;
+        if (skipOtRate) {
+          totalHours += regularHours + otHours;
+        } else {
+          totalHours += regularHours;
+          totalOtHours += otHours;
+        }
         totalMoney += money;
       }
 
+      const skipOtRate = payrollDateSetHas(noOtRateDates, new Date(Number(y), Number(m) - 1, Number(dd)).getTime());
       const statusColor = !hasCheckIn || !hasCheckOut
         ? 'text-red-500 bg-red-50'
+        : otHours > 0 && skipOtRate
+        ? 'text-amber-600 bg-amber-50'
         : otHours > 0
         ? 'text-purple-600 bg-purple-50'
         : 'text-green-600 bg-green-50';
-      const statusLabel = !hasCheckIn ? 'Thiếu vào' : !hasCheckOut ? 'Thiếu ra' : otHours > 0 ? 'OT' : 'Đủ công';
+      const statusLabel = !hasCheckIn ? 'Thiếu vào' : !hasCheckOut ? 'Thiếu ra' : otHours > 0 ? (skipOtRate ? 'OT ×1' : 'OT') : 'Đủ công';
 
       return (
         <div key={dateKey} className="p-4 hover:bg-slate-50 transition-colors">
@@ -503,7 +523,9 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
                 <>
                   <p className="text-sm font-bold text-slate-800">{workHours.toFixed(1)}h</p>
                   {otHours > 0 && (
-                    <p className="text-[10px] text-purple-600">{(workHours - otHours).toFixed(1)}h + OT {otHours.toFixed(1)}h</p>
+                    <p className={`text-[10px] ${skipOtRate ? 'text-amber-600' : 'text-purple-600'}`}>
+                      {(workHours - otHours).toFixed(1)}h + OT {otHours.toFixed(1)}h ×{skipOtRate ? '1' : '1.5'}
+                    </p>
                   )}
                   <p className="text-base font-bold text-blue-600">{formatCurrency(Math.round(money))}</p>
                 </>

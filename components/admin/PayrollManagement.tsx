@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { PayrollRecord, User, UserRole, AttendanceRecord, AttendanceType, ShiftRegistration, OffType, Branch, EmployeeStatus, ContractType, Holiday } from '../../types';
-import { getAllPayrolls, getPayrollMonths, getAllUsers, calculatePayroll, createOrUpdatePayroll, getShiftRegistrations, getAttendance, getAllAttendance, getHolidays, getConfigNumber, updateShiftRegistration, setPayrollNoLunchBreakDates, getBranches, calculateAttendanceStats, calculateShiftWorkDays } from '../../services/db';
+import { getAllPayrolls, getPayrollMonths, getAllUsers, calculatePayroll, createOrUpdatePayroll, getShiftRegistrations, getAttendance, getAllAttendance, getHolidays, getConfigNumber, updateShiftRegistration, setPayrollNoLunchBreakDates, setPayrollNoOtRateDates, getBranches, calculateAttendanceStats, calculateShiftWorkDays } from '../../services/db';
 import {
-  calculateRegularAndOTHoursWithNoLunchBreak,
   calculateTotalWorkedHoursWithNoLunchBreak,
   payrollNoLunchKey,
+  payrollDateSetHas,
+  togglePayrollDateList,
 } from '../../utils/payrollHours';
 
 /** Kỳ lương: [02/MM, 02/MM+1) theo local time (từ ngày 02 tháng này đến hết ngày 01 tháng sau). */
@@ -241,6 +242,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
   const [allShiftsInMonth, setAllShiftsInMonth] = useState<ShiftRegistration[]>([]);
   /** Mỗi khóa `tháng::userId` → danh sách shift.date được đánh dấu “không nghỉ trưa”. */
   const [noLunchBreakByKey, setNoLunchBreakByKey] = useState<Record<string, number[]>>({});
+  /** Mỗi khóa `tháng::userId` → ngày tăng ca trả theo đơn giá thường (không hệ số OT). */
+  const [noOtRateByKey, setNoOtRateByKey] = useState<Record<string, number[]>>({});
   const [isRecalculatingDetail, setIsRecalculatingDetail] = useState(false);
   const [editingNoteShiftId, setEditingNoteShiftId] = useState<string | null>(null);
   const [noteInputValue, setNoteInputValue] = useState<string>('');
@@ -332,6 +335,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       saveNote: 'Lưu',
       cancelNote: 'Hủy',
       offNoSalary: 'OFF không lương',
+      noOtRate: 'OT không hệ số',
+      noOtRateHint: 'Giờ thêm trả theo lương thường, không ×1.5',
       totalActualHours: 'Tổng giờ thực tế',
       standardWorkDays: 'Ngày công chuẩn',
       actualWorkDays: 'Ngày công thực tế',
@@ -411,6 +416,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       saveNote: 'Save',
       cancelNote: 'Cancel',
       offNoSalary: 'OFF No Salary',
+      noOtRate: 'OT at regular rate',
+      noOtRateHint: 'Extra hours paid at regular rate, not ×1.5',
       totalActualHours: 'Total Actual Hours',
       standardWorkDays: 'Standard Work Days',
       actualWorkDays: 'Actual Work Days',
@@ -438,6 +445,14 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
         ? new Set(noLunchBreakByKey[payrollNoLunchKey(selectedMonth, selectedPayrollDetail.employee.id)] ?? [])
         : new Set<number>(),
     [noLunchBreakByKey, selectedMonth, selectedPayrollDetail]
+  );
+
+  const detailNoOtRateDates = useMemo(
+    () =>
+      selectedPayrollDetail
+        ? new Set(noOtRateByKey[payrollNoLunchKey(selectedMonth, selectedPayrollDetail.employee.id)] ?? [])
+        : new Set<number>(),
+    [noOtRateByKey, selectedMonth, selectedPayrollDetail]
   );
 
   const selectedMonthIsLocked = isHistoricalPayrollCycle(selectedMonth);
@@ -580,10 +595,13 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       setMonthOptions(prev => buildMonthOptions(savedMonths, month, prev));
 
       const lunchMap: Record<string, number[]> = {};
+      const otRateMap: Record<string, number[]> = {};
       records.forEach(r => {
         lunchMap[payrollNoLunchKey(month, r.userId)] = r.noLunchBreakDates ?? [];
+        otRateMap[payrollNoLunchKey(month, r.userId)] = r.noOtRateDates ?? [];
       });
       setNoLunchBreakByKey(lunchMap);
+      setNoOtRateByKey(otRateMap);
       
       // Lọc shifts theo kỳ lương [02/MM, 02/MM+1), rồi normalize giống /admin/shift
       const shiftsInMonth = normalizeShiftsLikeAdminShift(
@@ -598,6 +616,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       console.error('Error loading payroll data:', err);
       setPayrollRecords([]);
       setNoLunchBreakByKey({});
+      setNoOtRateByKey({});
       setAllShiftsInMonth([]);
       throw err; // Re-throw để caller có thể handle
     }
@@ -610,6 +629,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
     setSelectedPayrollDetail(null);
     setPayrollRecords([]);
     setNoLunchBreakByKey({});
+    setNoOtRateByKey({});
     setAllShiftsInMonth([]);
     setLoading(true);
 
@@ -840,6 +860,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
             payroll.noLunchBreakDates = [
               ...(existingPayroll.noLunchBreakDates ?? payroll.noLunchBreakDates ?? []),
             ];
+            payroll.noOtRateDates = [
+              ...(existingPayroll.noOtRateDates ?? payroll.noOtRateDates ?? []),
+            ];
           }
 
           await createOrUpdatePayroll(payroll);
@@ -901,13 +924,14 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
           useShift
         );
 
-        // Giữ lại allowance, bonus, status và noLunchBreakDates cũ
+        // Giữ lại allowance, bonus, status, noLunchBreakDates và noOtRateDates cũ
         const existingPayroll = payrollRecords.find(p => p.userId === employee.id);
         if (existingPayroll) {
           payroll.allowance = existingPayroll.allowance;
           payroll.bonus = existingPayroll.bonus;
           payroll.status = existingPayroll.status;
           payroll.noLunchBreakDates = [...(existingPayroll.noLunchBreakDates ?? payroll.noLunchBreakDates ?? [])];
+          payroll.noOtRateDates = [...(existingPayroll.noOtRateDates ?? payroll.noOtRateDates ?? [])];
         }
         // Lưu phương thức tính lương
         payroll.calcMethod = method;
@@ -1032,6 +1056,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       // Preserve payment status and lunch break settings
       newPayroll.status = existingPayroll.status;
       newPayroll.noLunchBreakDates = existingPayroll.noLunchBreakDates;
+      newPayroll.noOtRateDates = existingPayroll.noOtRateDates;
 
       const savedPayroll = await createOrUpdatePayroll(newPayroll);
 
@@ -1078,6 +1103,65 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
           ? `Không lưu được cài đặt nghỉ trưa: ${msg}`
           : `Could not save lunch-break setting: ${msg}`
       );
+    }
+  };
+
+  const toggleNoOtRate = async (shiftDate: number) => {
+    if (!selectedPayrollDetail) return;
+    if (selectedMonthIsLocked) {
+      alert(lockedCycleMessage);
+      return;
+    }
+    const userId = selectedPayrollDetail.employee.id;
+    const key = payrollNoLunchKey(selectedMonth, userId);
+    const prevArr = noOtRateByKey[key] ?? selectedPayrollDetail.payroll.noOtRateDates ?? [];
+    const nextArr = togglePayrollDateList(prevArr, shiftDate);
+    try {
+      await setPayrollNoOtRateDates(userId, selectedMonth, nextArr);
+      setNoOtRateByKey(prev => ({ ...prev, [key]: nextArr }));
+      setSelectedPayrollDetail(prev =>
+        prev ? { ...prev, payroll: { ...prev.payroll, noOtRateDates: nextArr } } : null
+      );
+      setPayrollRecords(prev =>
+        prev.map(p =>
+          p.userId === userId && p.month === selectedMonth ? { ...p, noOtRateDates: nextArr } : p
+        )
+      );
+
+      const method = selectedPayrollDetail.payroll.calcMethod ?? 'SHIFT';
+      if (method === 'MANUAL') return;
+
+      setIsRecalculatingDetail(true);
+      const { employee, payroll: existingPayroll } = selectedPayrollDetail;
+      const newPayroll = await calculatePayroll(
+        employee,
+        selectedMonth,
+        undefined,
+        undefined,
+        existingPayroll.allowance,
+        existingPayroll.bonus,
+        method === 'ATTENDANCE',
+        true,
+        method === 'SHIFT'
+      );
+      newPayroll.status = existingPayroll.status;
+      newPayroll.noLunchBreakDates = existingPayroll.noLunchBreakDates;
+      newPayroll.noOtRateDates = nextArr;
+      newPayroll.calcMethod = method;
+      const saved = await createOrUpdatePayroll(newPayroll);
+      setSelectedPayrollDetail({ employee, payroll: saved });
+      setPayrollRecords(prev =>
+        prev.map(p => (p.userId === userId && p.month === selectedMonth ? saved : p))
+      );
+    } catch (e: any) {
+      const msg = e?.message || '';
+      alert(
+        language === 'vi'
+          ? `Không lưu được ngày OT không hệ số: ${msg}`
+          : `Could not save regular-rate OT date: ${msg}`
+      );
+    } finally {
+      setIsRecalculatingDetail(false);
     }
   };
 
@@ -1568,6 +1652,13 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                         <p className="text-xs font-bold text-purple-600 mb-1">{language === 'vi' ? 'Giờ làm thêm (OT)' : 'OT hours'}</p>
                         <p className="text-lg font-bold text-purple-700">{otHoursCount.toFixed(1)}h</p>
                         <p className="text-xs text-purple-600">+{formatCurrency(Math.round(shiftOtPay))}</p>
+                        {(selectedPayrollDetail.payroll.noOtRateDates?.length ?? 0) > 0 && (
+                          <p className="text-[11px] text-amber-700 mt-1">
+                            {language === 'vi'
+                              ? `${selectedPayrollDetail.payroll.noOtRateDates!.length} ngày OT không hệ số (trả giờ thường)`
+                              : `${selectedPayrollDetail.payroll.noOtRateDates!.length} OT days at regular rate`}
+                          </p>
+                        )}
                       </div>
                       <div className="bg-orange-50 rounded-xl p-4">
                         <p className="text-xs font-bold text-orange-600 mb-1">{text.netSalary}</p>
@@ -1680,11 +1771,11 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden flex flex-col flex-1 min-h-0 lg:min-h-0 lg:max-h-full">
                       <div className="shrink-0 bg-slate-50 px-6 py-3 border-b border-slate-200">
                         <h4 className="text-sm font-bold text-slate-700">
-                          {text.shiftDetails} ({calculateTotalWorkedHoursWithNoLunchBreak(shiftDetails, workHoursPerDay, detailNoLunchDates).toFixed(1)}h)
+                          {text.shiftDetails} ({calculateTotalWorkedHoursWithNoLunchBreak(shiftDetails, workHoursPerDay, detailNoLunchDates, detailNoOtRateDates).toFixed(1)}h)
                         </h4>
                         {(() => {
-                          // Đếm số ngày có OT
                           let otDaysCount = 0;
+                          let noOtRateDaysCount = 0;
                           shiftDetails.forEach(shift => {
                             if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
                               const [startHour, startMin] = shift.startTime.split(':').map(Number);
@@ -1694,15 +1785,31 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                 hours = hours - 1;
                               }
                               if (hours > workHoursPerDay) {
-                                otDaysCount++;
+                                if (payrollDateSetHas(detailNoOtRateDates, shift.date)) {
+                                  noOtRateDaysCount++;
+                                } else {
+                                  otDaysCount++;
+                                }
                               }
                             }
                           });
                           
-                          if (otDaysCount > 0) {
+                          if (otDaysCount > 0 || noOtRateDaysCount > 0) {
                             return (
-                              <p className="text-xs text-purple-600 mt-1">
-                                {otDaysCount} ngày có OT
+                              <p className="text-xs mt-1">
+                                {otDaysCount > 0 && (
+                                  <span className="text-purple-600">
+                                    {otDaysCount} {language === 'vi' ? 'ngày OT ×1.5' : 'OT days ×1.5'}
+                                  </span>
+                                )}
+                                {otDaysCount > 0 && noOtRateDaysCount > 0 && (
+                                  <span className="text-slate-400"> · </span>
+                                )}
+                                {noOtRateDaysCount > 0 && (
+                                  <span className="text-amber-600">
+                                    {noOtRateDaysCount} {language === 'vi' ? 'ngày OT không hệ số' : 'OT days at regular rate'}
+                                  </span>
+                                )}
                               </p>
                             );
                           }
@@ -1742,6 +1849,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                   let isCustomShift = false;
                                   let otHours = 0;
                                   let otMoney = 0;
+                                  let otRateMultiplier = 1.5;
+                                  const skipOtRate = payrollDateSetHas(detailNoOtRateDates, shift.date);
 
                                   if (shift.shift === 'CUSTOM' && shift.startTime && shift.endTime) {
                                     isCustomShift = true;
@@ -1761,8 +1870,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                     // Nếu làm việc vượt quá workHoursPerDay thì tính OT
                                     if (hours > workHoursPerDay) {
                                       otHours = hours - workHoursPerDay;
-                                      const otHourlyRate = hourlyRate * 1.5; // OT rate x1.5
-                                      otMoney = otHourlyRate * otHours;
+                                      otRateMultiplier = skipOtRate ? 1 : 1.5;
+                                      otMoney = hourlyRate * otRateMultiplier * otHours;
                                     }
                                   } else if (shift.shift === 'OFF') {
                                     if (shift.offType === OffType.OFF_PN) {
@@ -1799,10 +1908,14 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                     totalActualHours += Math.min(hours, workHoursPerDay);
                                   }
                                   
-                                  // Cộng dồn OT
+                                  // Cộng dồn OT: ngày không hệ số gộp giờ thêm vào giờ thường
                                   if (otHours > 0) {
-                                    totalOTHours += otHours;
-                                    totalOTMoney += otMoney;
+                                    if (otRateMultiplier === 1) {
+                                      totalActualHours += otHours;
+                                    } else {
+                                      totalOTHours += otHours;
+                                      totalOTMoney += otMoney;
+                                    }
                                   }
 
                                   return (
@@ -1812,8 +1925,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                           <div className="flex items-center gap-2">
                                             <p className="text-sm font-bold text-slate-700">{dateStr}</p>
                                             {otHours > 0 && (
-                                              <span className="inline-block text-xs font-bold px-2 py-0.5 rounded bg-purple-100 text-purple-700">
-                                                OT
+                                              <span className={`inline-block text-xs font-bold px-2 py-0.5 rounded ${otRateMultiplier === 1 ? 'bg-amber-100 text-amber-700' : 'bg-purple-100 text-purple-700'}`}>
+                                                {otRateMultiplier === 1 ? 'OT ×1' : 'OT'}
                                               </span>
                                             )}
                                           </div>
@@ -1822,7 +1935,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                             {typeLabel}
                                           </span>
                                           {isCustomShift && hours >= 5 && (
-                                            <div className="mt-2">
+                                            <div className="mt-2 space-y-1.5">
                                               <label className={`flex items-center gap-2 ${selectedMonthIsLocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
                                                 <input
                                                   type="checkbox"
@@ -1833,6 +1946,18 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                                 />
                                                 <span className="text-xs text-slate-600">{language === 'vi' ? 'Không nghỉ trưa' : 'No lunch break'}</span>
                                               </label>
+                                              {hours > workHoursPerDay && (
+                                                <label className={`flex items-center gap-2 ${selectedMonthIsLocked || isRecalculatingDetail ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`} title={text.noOtRateHint}>
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={skipOtRate}
+                                                    onChange={() => void toggleNoOtRate(shift.date)}
+                                                    disabled={selectedMonthIsLocked || isRecalculatingDetail}
+                                                    className="w-4 h-4 text-amber-600 rounded focus:ring-2 focus:ring-amber-500"
+                                                  />
+                                                  <span className="text-xs text-slate-600">{text.noOtRate}</span>
+                                                </label>
+                                              )}
                                             </div>
                                           )}
                                           
@@ -1901,8 +2026,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                                   ? `${Math.min(hours, workHoursPerDay).toFixed(1)}h thường + ${otHours.toFixed(1)}h OT`
                                                   : `${Math.min(hours, workHoursPerDay).toFixed(1)}h reg + ${otHours.toFixed(1)}h OT`}
                                               </p>
-                                              <p className="text-xs font-bold text-purple-600">
-                                                OT ×1.5: +{formatCurrency(Math.round(otMoney))}
+                                              <p className={`text-xs font-bold ${otRateMultiplier === 1 ? 'text-amber-600' : 'text-purple-600'}`}>
+                                                OT ×{otRateMultiplier === 1 ? '1' : '1.5'}: +{formatCurrency(Math.round(otMoney))}
                                               </p>
                                             </>
                                           )}
@@ -1984,6 +2109,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                       let money = 0;
                       let inTime = '-';
                       let outTime = '-';
+                      const dayTs = new Date(Number(y), Number(m) - 1, Number(dd)).getTime();
+                      const skipOtRate = payrollDateSetHas(detailNoOtRateDates, dayTs);
 
                       if (hasCheckIn) {
                         const d = new Date(day.checkIn!.timestamp);
@@ -2000,18 +2127,25 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                         workHours = raw >= 6 ? raw - 1 : raw;
                         const regularHours = Math.min(workHours, standardWorkHours);
                         otHours = Math.max(0, workHours - standardWorkHours);
-                        money = hourlyRate * regularHours + hourlyRate * 1.5 * otHours;
-                        totalHours += regularHours;
-                        totalOtHours += otHours;
+                        const extraRate = skipOtRate ? 1 : 1.5;
+                        money = hourlyRate * regularHours + hourlyRate * extraRate * otHours;
+                        if (skipOtRate) {
+                          totalHours += regularHours + otHours;
+                        } else {
+                          totalHours += regularHours;
+                          totalOtHours += otHours;
+                        }
                         totalMoney += money;
                       }
 
                       const statusColor = !hasCheckIn || !hasCheckOut
                         ? 'text-red-500 bg-red-50'
+                        : otHours > 0 && skipOtRate
+                        ? 'text-amber-600 bg-amber-50'
                         : otHours > 0
                         ? 'text-purple-600 bg-purple-50'
                         : 'text-green-600 bg-green-50';
-                      const statusLabel = !hasCheckIn ? 'Thiếu vào' : !hasCheckOut ? 'Thiếu ra' : otHours > 0 ? 'OT' : 'Đủ công';
+                      const statusLabel = !hasCheckIn ? 'Thiếu vào' : !hasCheckOut ? 'Thiếu ra' : otHours > 0 ? (skipOtRate ? 'OT ×1' : 'OT') : 'Đủ công';
 
                       return (
                         <tr key={dateKey} className="hover:bg-slate-50">
@@ -2026,6 +2160,18 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                               <span className={`inline-block text-xs font-bold px-2 py-0.5 rounded mt-1 ${statusColor}`}>
                                 {statusLabel}
                               </span>
+                              {otHours > 0 && (
+                                <label className={`mt-1.5 flex items-center gap-2 ${selectedMonthIsLocked || isRecalculatingDetail ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`} title={text.noOtRateHint}>
+                                  <input
+                                    type="checkbox"
+                                    checked={skipOtRate}
+                                    onChange={() => void toggleNoOtRate(dayTs)}
+                                    disabled={selectedMonthIsLocked || isRecalculatingDetail}
+                                    className="w-4 h-4 text-amber-600 rounded focus:ring-2 focus:ring-amber-500"
+                                  />
+                                  <span className="text-xs text-slate-600">{text.noOtRate}</span>
+                                </label>
+                              )}
                             </div>
                           </td>
                           <td className="px-4 py-3 text-right">
@@ -2034,7 +2180,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                 <>
                                   <p className="text-sm font-bold text-slate-800">{workHours.toFixed(1)}h</p>
                                   {otHours > 0 && (
-                                    <p className="text-xs text-purple-600">{(workHours - otHours).toFixed(1)}h + OT {otHours.toFixed(1)}h</p>
+                                    <p className={`text-xs ${skipOtRate ? 'text-amber-600' : 'text-purple-600'}`}>
+                                      {(workHours - otHours).toFixed(1)}h + OT {otHours.toFixed(1)}h ×{skipOtRate ? '1' : '1.5'}
+                                    </p>
                                   )}
                                   <p className="text-base font-bold text-blue-600">{formatCurrency(Math.round(money))}</p>
                                 </>

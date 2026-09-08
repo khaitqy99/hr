@@ -217,6 +217,7 @@ export interface Database {
           net_salary: number
           status: string
           no_lunch_break_dates: number[]
+          no_ot_rate_dates: number[]
           created_at: string
           updated_at: string
         }
@@ -238,6 +239,7 @@ export interface Database {
           net_salary: number
           status?: string
           no_lunch_break_dates?: number[]
+          no_ot_rate_dates?: number[]
           created_at?: string
           updated_at?: string
         }
@@ -259,6 +261,7 @@ export interface Database {
           net_salary?: number
           status?: string
           no_lunch_break_dates?: number[]
+          no_ot_rate_dates?: number[]
           created_at?: string
           updated_at?: string
         }
