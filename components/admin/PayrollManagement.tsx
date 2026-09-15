@@ -261,6 +261,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
   const [bulkSelectedUsers, setBulkSelectedUsers] = useState<Set<string>>(new Set());
   const [bulkRecalcProgress, setBulkRecalcProgress] = useState<{ done: number; total: number } | null>(null);
   const loadGenerationRef = useRef(0);
+  const isRecalculatingRef = useRef(false);
 
   // ── Inline Salary Calculator state ──
   type CalcMethod = 'SHIFT' | 'ATTENDANCE' | 'MANUAL';
@@ -550,14 +551,18 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
     initData();
   }, []);
 
+  isRecalculatingRef.current = isRecalculating;
+
   useEffect(() => {
     if (onRegisterReload && selectedMonth) {
       onRegisterReload(async () => {
+        // Tính lại lương tự reload cuối hàm — bỏ qua event realtime để khỏi kẹt "Loading..."
+        if (isRecalculatingRef.current) return;
+        const requestId = loadGenerationRef.current;
         try {
           setError(null);
-          const requestId = ++loadGenerationRef.current;
-          setLoading(true);
           await loadData(selectedMonth, requestId);
+          if (requestId !== loadGenerationRef.current) return;
           const [users, branchesData] = await Promise.all([
             getAllUsers(),
             getBranches(),
@@ -567,12 +572,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
             setBranches(branchesData.filter(b => b.isActive));
           }
         } catch (err: any) {
+          if (requestId !== loadGenerationRef.current) return;
           setError(text.loadError.replace('{error}', err?.message || 'Vui lòng thử lại'));
           console.error('Error reloading data:', err);
-        } finally {
-          if (requestId === loadGenerationRef.current) {
-            setLoading(false);
-          }
         }
       });
     }
@@ -945,10 +947,16 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
       setBulkRecalcProgress({ done: i + 1, total: activeEmployees.length });
     }
 
-    await loadData(selectedMonth);
-    setIsRecalculating(false);
-    setShowBulkRecalcModal(false);
-    setBulkRecalcProgress(null);
+    try {
+      await loadData(selectedMonth);
+    } catch (err: any) {
+      setError(text.recalculateError.replace('{error}', err?.message || 'Vui lòng thử lại'));
+      console.error('Error reloading payroll after recalculate:', err);
+    } finally {
+      setIsRecalculating(false);
+      setShowBulkRecalcModal(false);
+      setBulkRecalcProgress(null);
+    }
 
     if (errorCount > 0) {
       alert(text.recalculateComplete.replace('{success}', String(successCount)).replace('{error}', String(errorCount)));
@@ -1877,6 +1885,10 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onRegisterReload,
                                     if (shift.offType === OffType.OFF_PN) {
                                       typeLabel = 'Phép năm';
                                       typeColor = 'text-blue-600 bg-blue-50';
+                                      money = dailyRate;
+                                    } else if (shift.offType === OffType.CT) {
+                                      typeLabel = 'Công tác';
+                                      typeColor = 'text-teal-600 bg-teal-50';
                                       money = dailyRate;
                                     } else if (shift.offType === OffType.LE) {
                                       typeLabel = 'Nghỉ lễ';

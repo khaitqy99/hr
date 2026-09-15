@@ -1,4 +1,4 @@
-import { ShiftRegistration, OffType } from '../types';
+import { ShiftRegistration, isPaidOffType } from '../types';
 
 /** Khóa UI: tháng + nhân viên (khớp 1 payroll record). */
 export const payrollNoLunchKey = (month: string, userId: string) => `${month}::${userId}`;
@@ -59,8 +59,8 @@ export const calculateRegularAndOTHoursWithNoLunchBreak = (
           otHours += Math.max(0, hours - workHoursPerDay);
         }
       }
-    } else if (shift.shift === 'OFF' && shift.offType !== OffType.OFF_PN && shift.offType !== OffType.LE) {
-      // OFF không lương
+    } else if (shift.shift === 'OFF' && !isPaidOffType(shift.offType)) {
+      // OFF không lương (OFF_DK, OFF_KL)
     } else {
       regularHours += workHoursPerDay;
     }

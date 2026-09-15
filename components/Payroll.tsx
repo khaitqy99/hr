@@ -300,6 +300,10 @@ const Payroll: React.FC<PayrollProps> = ({ user, setView }) => {
             typeLabel = 'Phép năm';
             typeColor = 'text-blue-600 bg-blue-50';
             money = dr;
+          } else if (shift.offType === OffType.CT) {
+            typeLabel = 'Công tác';
+            typeColor = 'text-teal-600 bg-teal-50';
+            money = dr;
           } else if (shift.offType === OffType.LE) {
             typeLabel = 'Nghỉ lễ';
             typeColor = 'text-purple-600 bg-purple-50';

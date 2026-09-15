@@ -131,6 +131,10 @@ export const OFF_TYPE_LABELS: Record<OffType, string> = {
   [OffType.LE]: 'LỄ - Nghỉ lễ (Có lương)'
 }
 
+/** OFF được tính 1 ngày công: phép năm, công tác, nghỉ lễ. */
+export const isPaidOffType = (offType?: OffType | null): boolean =>
+  offType === OffType.OFF_PN || offType === OffType.CT || offType === OffType.LE;
+
 export interface ShiftRegistration {
   id: string;
   userId: string;

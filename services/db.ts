@@ -1,4 +1,4 @@
-import { User, UserRole, AttendanceRecord, LeaveRequest, Notification, RequestStatus, LeaveType, ShiftRegistration, PayrollRecord, ContractType, EmployeeStatus, AttendanceType, Department, Holiday, SystemConfig, OffType, ShiftTime, Branch, AllowedLocation, AnnualLeaveSummary } from '../types';
+import { User, UserRole, AttendanceRecord, LeaveRequest, Notification, RequestStatus, LeaveType, ShiftRegistration, PayrollRecord, ContractType, EmployeeStatus, AttendanceType, Department, Holiday, SystemConfig, OffType, ShiftTime, Branch, AllowedLocation, AnnualLeaveSummary, isPaidOffType } from '../types';
 import { supabase } from './supabase';
 import { calculateRegularAndOTHoursWithNoLunchBreak, payrollDateSetHas } from '../utils/payrollHours';
 import { emitUserEvent, emitAttendanceEvent, emitShiftEvent, emitPayrollEvent, emitDepartmentEvent, emitHolidayEvent, emitConfigEvent, emitNotificationEvent } from './events';
@@ -808,8 +808,8 @@ const calculateTotalWorkHours = async (
           }
         }
       } else if (shift.shift === 'OFF') {
-        // OFF có lương: Tính đủ workHoursPerDay giờ
-        if (shift.offType === OffType.OFF_PN || shift.offType === OffType.LE) {
+        // OFF có lương (PN, CT công tác, lễ): tính đủ 1 ngày
+        if (isPaidOffType(shift.offType)) {
           totalHours += workHoursPerDay;
         }
         // OFF không lương: Không tính (OFF_DK, OFF_KL)
@@ -877,9 +877,8 @@ const calculateTotalWorkHours = async (
   return totalHours;
 };
 
-// ✅ Các ca làm việc (MORNING, AFTERNOON, NIGHT, CUSTOM): Được tính công
-// ✅ OFF_PN (Phép năm): Được hưởng lương, tính công
-// ✅ OFF_LE (Nghỉ lễ): Được hưởng lương, tính công
+// ✅ Các ca làm việc (CUSTOM): Được tính công
+// ✅ OFF_PN (Phép năm), CT (Công tác), LE (Nghỉ lễ): Được hưởng lương, tính 1 ngày công
 // ❌ OFF_DK (Định kỳ): Không lương, không tính công
 // ❌ OFF_KL (Không lương): Không lương, không tính công
 // Cải thiện: Tự động tính công cho ngày lễ trong hệ thống (không cần đăng ký ca)
