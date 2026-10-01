@@ -90,6 +90,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       allBranches: 'Tất cả chi nhánh',
       loading: 'Đang tải dữ liệu...',
       noData: 'Chưa có dữ liệu chấm công',
+      noMatch: 'Không có bản ghi nào khớp với bộ lọc',
       type: 'Loại',
       employee: 'Nhân viên',
       time: 'Thời gian',
@@ -153,6 +154,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       allBranches: 'All Branches',
       loading: 'Loading data...',
       noData: 'No attendance records yet',
+      noMatch: 'No records match the current filters',
       type: 'Type',
       employee: 'Employee',
       time: 'Time',
@@ -257,33 +259,21 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
     return new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
   };
 
-  const getFilteredData = () => {
+  /** Lọc theo phạm vi (nhân viên / phòng ban / chi nhánh / thời gian), giữ nguyên mọi loại chấm công trong ngày. */
+  const getScopedRecords = () => {
     let filtered = attendanceRecords;
+    const employeeById = new Map(employees.map(e => [e.id, e]));
 
     if (selectedEmployeeForAttendance !== 'ALL') {
       filtered = filtered.filter(r => r.userId === selectedEmployeeForAttendance);
     }
 
     if (filterDepartment !== 'ALL') {
-      filtered = filtered.filter(r => {
-        const emp = employees.find(e => e.id === r.userId);
-        return emp?.department === filterDepartment;
-      });
+      filtered = filtered.filter(r => employeeById.get(r.userId)?.department?.trim() === filterDepartment);
     }
 
     if (filterBranch !== 'ALL') {
-      filtered = filtered.filter(r => {
-        const emp = employees.find(e => e.id === r.userId);
-        return emp?.branchId === filterBranch;
-      });
-    }
-
-    if (filterType !== 'ALL') {
-      filtered = filtered.filter(r => r.type === filterType);
-    }
-
-    if (filterStatus !== 'ALL') {
-      filtered = filtered.filter(r => r.status === filterStatus);
+      filtered = filtered.filter(r => employeeById.get(r.userId)?.branchId === filterBranch);
     }
 
     const hasCustomRange = Boolean(dateFrom.trim() || dateTo.trim());
@@ -301,24 +291,32 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
       }
       filtered = filtered.filter(r => r.timestamp >= rangeStart && r.timestamp <= rangeEnd);
     } else {
-      const now = Date.now();
+      const now = new Date();
       if (attendanceFilter === 'TODAY') {
-        const todayStart = new Date().setHours(0, 0, 0, 0);
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
         filtered = filtered.filter(r => r.timestamp >= todayStart);
       } else if (attendanceFilter === 'WEEK') {
-        const weekAgo = now - (7 * 24 * 60 * 60 * 1000);
-        filtered = filtered.filter(r => r.timestamp >= weekAgo);
+        const daysSinceMonday = (now.getDay() + 6) % 7;
+        const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysSinceMonday).getTime();
+        filtered = filtered.filter(r => r.timestamp >= weekStart);
       } else if (attendanceFilter === 'MONTH') {
-        const monthAgo = now - (30 * 24 * 60 * 60 * 1000);
-        filtered = filtered.filter(r => r.timestamp >= monthAgo);
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+        filtered = filtered.filter(r => r.timestamp >= monthStart);
       }
     }
 
     return filtered;
   };
 
-  const filteredData = getFilteredData();
-  const groupedByDay = useMemo(() => buildAttendanceDayGroups(filteredData), [filteredData]);
+  const recordMatchesDetail = (r: AttendanceRecord) =>
+    (filterType === 'ALL' || r.type === filterType) &&
+    (filterStatus === 'ALL' || r.status === filterStatus);
+
+  const scopedRecords = getScopedRecords();
+  /** Bản ghi khớp cả loại + trạng thái (dùng cho đếm và xuất CSV). */
+  const filteredData = scopedRecords.filter(recordMatchesDetail);
+  /** Hiển thị đủ cả ngày cho những ngày có ít nhất một bản ghi khớp. */
+  const groupedByDay = buildAttendanceDayGroups(scopedRecords).filter(g => g.records.some(recordMatchesDetail));
   const totalPages = Math.max(1, Math.ceil(groupedByDay.length / PAGE_SIZE));
   const safeCurrentPage = Math.min(currentPage, totalPages);
   const paginatedGroups = useMemo(() => {
@@ -349,6 +347,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
   }, [currentPage, safeCurrentPage]);
 
   const clearDetailFilters = () => {
+    setSelectedEmployeeForAttendance('ALL');
     setDateFrom('');
     setDateTo('');
     setFilterType('ALL');
@@ -578,9 +577,11 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
         <div className="text-center py-12 bg-white rounded-2xl border border-sky-50">
           <p className="text-slate-400 font-medium">{text.loading}</p>
         </div>
-      ) : filteredData.length === 0 ? (
+      ) : groupedByDay.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-2xl border border-sky-50">
-          <p className="text-slate-400 font-medium">{text.noData}</p>
+          <p className="text-slate-400 font-medium">
+            {attendanceRecords.length === 0 ? text.noData : text.noMatch}
+          </p>
         </div>
       ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-sky-50 overflow-hidden">

@@ -510,19 +510,27 @@ export const getAttendance = async (userId: string): Promise<AttendanceRecord[]>
 export const getAllAttendance = async (limit?: number): Promise<AttendanceRecord[]> => {
   if (isSupabaseAvailable()) {
     try {
-      let query = supabase
-        .from('attendance_records')
-        .select('*')
-        .order('timestamp', { ascending: false });
-
-      // Thêm limit nếu được chỉ định để tối ưu performance
-      if (limit && limit > 0) {
-        query = query.limit(limit);
+      // Supabase trả tối đa 1000 dòng/request nên phải tải theo từng trang.
+      const PAGE = 1000;
+      const target = limit && limit > 0 ? limit : Number.POSITIVE_INFINITY;
+      const data: any[] = [];
+      while (data.length < target) {
+        const from = data.length;
+        const to = Math.min(from + PAGE, target) - 1;
+        const { data: page, error } = await supabase
+          .from('attendance_records')
+          .select('*')
+          .order('timestamp', { ascending: false })
+          .order('id', { ascending: true })
+          .range(from, to);
+        if (error) {
+          if (data.length === 0) return [];
+          break;
+        }
+        if (!page || page.length === 0) break;
+        data.push(...page);
+        if (page.length < to - from + 1) break;
       }
-
-      const { data, error } = await query;
-
-      if (error || !data) return [];
 
       return data.map(record => {
         const photoUrl = record.photo_url || undefined;
