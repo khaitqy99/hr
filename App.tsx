@@ -19,6 +19,7 @@ const NotificationsPanel = lazy(() => import('./components/NotificationsPanel'))
 import { getCurrentUser, syncAllOfflineData, getNotifications, isSupabaseAvailable } from './services/db';
 import { supabase } from './services/supabase';
 import { sendOTP, verifyOTP, signOut } from './services/auth';
+import { ensureDeviceSession, registerDeviceSession, revokeCurrentSession, SESSION_ID_KEY } from './services/sessions';
 import { ensurePushSubscription } from './services/push';
 import { useDataEvents } from './utils/useDataEvents';
 
@@ -76,6 +77,14 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
   const [lastOTPRequestTime, setLastOTPRequestTime] = useState<number | null>(null);
   const [rateLimitUntil, setRateLimitUntil] = useState<number | null>(null);
   const [rateLimitCountdown, setRateLimitCountdown] = useState<number>(0);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    const message = sessionStorage.getItem('auth_notice');
+    if (!message) return;
+    sessionStorage.removeItem('auth_notice');
+    setNotice(message);
+  }, []);
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -306,6 +315,12 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
             <h1 className="text-3xl font-extrabold text-white tracking-tight">Y99 HR</h1>
             <p className="text-blue-200 text-sm mt-2 font-medium">Hệ thống quản lý nhân sự 4.0</p>
           </div>
+
+          {notice && (
+            <p className="mb-4 text-xs text-amber-50 bg-amber-500/20 border border-amber-200/30 rounded-2xl px-4 py-3 text-center">
+              {notice}
+            </p>
+          )}
 
           {step === 'email' ? (
             <form onSubmit={handleEmailSubmit} className="space-y-4">
@@ -597,6 +612,7 @@ const App: React.FC = () => {
   }, []);
 
   const handleLogin = async (foundUser: User) => {
+    await registerDeviceSession(foundUser.id);
     setUser(foundUser);
     localStorage.setItem('current_user', JSON.stringify(foundUser));
     // Đăng ký Web Push (không chặn login nếu thất bại)
@@ -611,6 +627,7 @@ const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
+    await revokeCurrentSession();
     await signOut();
     setUser(null);
     localStorage.removeItem('current_user');
@@ -618,6 +635,56 @@ const App: React.FC = () => {
     window.history.replaceState({}, '', '/');
     setCurrentView('dashboard');
   };
+
+  useEffect(() => {
+    if (!user) return;
+    let stopped = false;
+
+    const forceRemoteLogout = () => {
+      if (stopped) return;
+      stopped = true;
+      sessionStorage.setItem('auth_notice', 'Tài khoản đã được đăng xuất khỏi thiết bị này.');
+      localStorage.removeItem(SESSION_ID_KEY);
+      localStorage.removeItem('current_user');
+      setUser(null);
+      window.history.replaceState({}, '', '/');
+      setCurrentView('dashboard');
+    };
+
+    const checkSession = async () => {
+      const status = await ensureDeviceSession(user.id);
+      if (status === 'revoked') forceRemoteLogout();
+    };
+
+    void checkSession();
+    const timer = window.setInterval(() => {
+      void checkSession();
+    }, 20000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void checkSession();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    const channel = supabase
+      .channel(`user-sessions:${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'user_sessions', filter: `user_id=eq.${user.id}` },
+        (payload) => {
+          const current = localStorage.getItem(SESSION_ID_KEY);
+          const removedId = (payload.old as { id?: string } | null)?.id;
+          if (current && removedId === current) forceRemoteLogout();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      void supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
 
   // Đảm bảo user đã login không thể ở /
   useEffect(() => {

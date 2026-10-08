@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, UserRole, ContractType, EmployeeStatus, CONTRACT_TYPE_LABELS, EMPLOYEE_STATUS_LABELS, Department, Branch, AnnualLeaveSummary } from '../types';
 import { getAllUsers, updateUser, getDepartments, getBranches, getAnnualLeaveSummary } from '../services/db';
+import DeviceSessions from './DeviceSessions';
 
 interface EmployeeProfileProps {
   employeeId: string;
@@ -348,6 +349,8 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
             </div>
           </div>
         </div>
+
+        <DeviceSessions userId={employee.id} />
 
         {/* Note */}
         <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
@@ -816,6 +819,8 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                   </div>
                 </div>
               )}
+
+              {employee.id === currentUser.id && <DeviceSessions userId={currentUser.id} />}
             </div>
           </div>
         </div>
