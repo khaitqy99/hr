@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, UserRole, ContractType, EmployeeStatus, CONTRACT_TYPE_LABELS, EMPLOYEE_STATUS_LABELS, Department, Branch, AnnualLeaveSummary } from '../types';
 import { getAllUsers, updateUser, getDepartments, getBranches, getAnnualLeaveSummary } from '../services/db';
+import { can } from '../services/permissions';
 import DeviceSessions from './DeviceSessions';
 
 interface EmployeeProfileProps {
@@ -140,11 +141,16 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
         contractType: editForm.contractType,
         startDate,
         status: editForm.status,
-        grossSalary: gross,
-        socialInsuranceSalary: bhxh,
-        traineeSalary: trainee,
-        personalIncomeTax: pit,
-        otherDeductions: otherDed,
+        ...(canEditPayroll ? {
+          grossSalary: gross,
+          socialInsuranceSalary: bhxh,
+          traineeSalary: trainee,
+          personalIncomeTax: pit,
+          otherDeductions: otherDed,
+        } : {}),
+        ...(editForm.role !== employee.role ? {
+          adminPermissions: editForm.role === UserRole.ADMIN ? (employee.adminPermissions ?? []) : [],
+        } : {}),
       });
       // Reload employee data
       const employees = await getAllUsers();
@@ -173,6 +179,9 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
 
   const isViewingOwnProfile = currentUser.role === UserRole.EMPLOYEE && employeeId === currentUser.id;
   const isAdmin = currentUser.role === UserRole.ADMIN;
+  const canEditUsers = can(currentUser, 'users', 'edit');
+  const canEditPayroll = can(currentUser, 'payroll', 'edit');
+  const canSeePayroll = can(currentUser, 'payroll', 'view');
 
   // Mobile layout for employees viewing their own profile
   if (isViewingOwnProfile) {
@@ -385,6 +394,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
             <span className="text-lg">📋</span>
             <span>Quản lý</span>
           </button>
+          {canSeePayroll && (
           <button
             onClick={() => setView && setView('salary-management')}
             className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-100 transition-all"
@@ -392,6 +402,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
             <span className="text-lg">💰</span>
             <span>Tính lương</span>
           </button>
+          )}
         </nav>
         <div className="p-4 border-t border-slate-200">
           <div className="flex items-center space-x-3 px-4 py-2 mb-2">
@@ -468,7 +479,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                     <p className="text-xs text-slate-400 mt-1">{employee.department}{employee.jobTitle ? ` · ${employee.jobTitle}` : ''}{employee.employeeCode ? ` · ${employee.employeeCode}` : ''}</p>
                   </div>
                 </div>
-                {!isEditing && isAdmin && (
+                {!isEditing && isAdmin && canEditUsers && (
                   <button 
                     onClick={() => setIsEditing(true)} 
                     className="w-full py-3 rounded-xl text-sm font-bold bg-blue-600 text-white shadow-md active:scale-[0.98]"
@@ -547,6 +558,8 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                     </div>
                   </div>
                   
+                  {canEditPayroll && (
+                  <>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-bold text-slate-500 mb-1">Lương thỏa thuận (gross)</label>
@@ -573,6 +586,8 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                       <input type="number" min={0} value={editForm.otherDeductions === '' ? '' : editForm.otherDeductions} onChange={e => setEditForm(f => ({ ...f, otherDeductions: e.target.value === '' ? '' : Number(e.target.value) }))} placeholder="VNĐ" className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm" />
                     </div>
                   </div>
+                  </>
+                  )}
                   
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -601,6 +616,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                         className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm"
                       />
                     </div>
+                    {can(currentUser, 'permissions', 'edit') && (
                     <div>
                       <label className="block text-xs font-bold text-slate-500 mb-1">Vai trò</label>
                       <select value={editForm.role} onChange={e => setEditForm(f => ({ ...f, role: e.target.value as UserRole }))} className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm">
@@ -608,6 +624,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                         <option value={UserRole.ADMIN}>Admin</option>
                       </select>
                     </div>
+                    )}
                   </div>
                   
                   <div className="grid grid-cols-2 gap-3">
@@ -650,10 +667,10 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                 <div className="bg-white p-5 rounded-3xl shadow-sm border border-sky-50">
                   <h3 className="text-sm font-bold text-slate-700 mb-3">Thao tác nhanh</h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {can(currentUser, 'attendance', 'view') && (
                     <button
                       onClick={() => {
                         setView('admin', { adminPath: 'attendance' });
-                        // Có thể filter theo employeeId sau này
                       }}
                       className="px-4 py-3 rounded-xl text-sm font-medium bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"
                     >
@@ -662,10 +679,11 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                       </svg>
                       Xem chấm công
                     </button>
+                    )}
+                    {can(currentUser, 'shift', 'view') && (
                     <button
                       onClick={() => {
                         setView('admin', { adminPath: 'shift' });
-                        // Có thể filter theo employeeId sau này
                       }}
                       className="px-4 py-3 rounded-xl text-sm font-medium bg-purple-50 text-purple-600 hover:bg-purple-100 transition-colors flex items-center justify-center gap-2"
                     >
@@ -674,10 +692,11 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                       </svg>
                       Xem đăng ký ca
                     </button>
+                    )}
+                    {canSeePayroll && (
                     <button
                       onClick={() => {
                         setView('admin', { adminPath: 'payroll' });
-                        // Có thể filter theo employeeId sau này
                       }}
                       className="px-4 py-3 rounded-xl text-sm font-medium bg-green-50 text-green-600 hover:bg-green-100 transition-colors flex items-center justify-center gap-2"
                     >
@@ -686,6 +705,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                       </svg>
                       Xem bảng lương
                     </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -729,7 +749,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                       </div>
                     </div>
 
-                    {/* Thông tin lương */}
+                    {canSeePayroll && (
                     <div className="pb-3 border-b border-slate-100">
                       <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Thông tin lương</h4>
                       <div className="space-y-2">
@@ -765,6 +785,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, currentUs
                         </div>
                       </div>
                     </div>
+                    )}
 
                     {annualLeave && employee.contractType !== ContractType.TRIAL && (
                       <div className="pb-3 border-b border-slate-100">

@@ -20,11 +20,13 @@ import { getCurrentUser, syncAllOfflineData, getNotifications, isSupabaseAvailab
 import { supabase } from './services/supabase';
 import { sendOTP, verifyOTP, signOut } from './services/auth';
 import { ensureDeviceSession, registerDeviceSession, revokeCurrentSession, SESSION_ID_KEY } from './services/sessions';
+import { can, firstAllowedAdminPath } from './services/permissions';
+import ViewOnlyGuard from './components/admin/ViewOnlyGuard';
 import { ensurePushSubscription } from './services/push';
 import { useDataEvents } from './utils/useDataEvents';
 
 // Admin sub-routes: path segment cho từng trang admin (đồng bộ với AdminPanel)
-const ADMIN_TAB_SEGMENTS = ['users', 'attendance', 'shift', 'payroll', 'reports', 'departments', 'branches', 'locations', 'holidays', 'config', 'export', 'notifications', 'settings'];
+const ADMIN_TAB_SEGMENTS = ['users', 'attendance', 'shift', 'payroll', 'reports', 'departments', 'branches', 'locations', 'holidays', 'config', 'export', 'notifications', 'settings', 'permissions'];
 const DEFAULT_ADMIN_TAB = 'users';
 
 // Employee sub-routes: path segment cho từng trang nhân viên (đồng bộ với Layout nav)
@@ -558,6 +560,12 @@ const App: React.FC = () => {
     if (savedUser) {
       const parsedUser = JSON.parse(savedUser);
       setUser(parsedUser);
+      void getCurrentUser(parsedUser.email).then((fresh) => {
+        if (!fresh) return;
+        const next = { ...parsedUser, ...fresh };
+        localStorage.setItem('current_user', JSON.stringify(next));
+        setUser(next);
+      });
       // Session cũ: đăng ký / làm mới Web Push subscription
       void ensurePushSubscription(parsedUser.id);
 
@@ -827,6 +835,11 @@ const App: React.FC = () => {
               setView={setView}
               setSelectedEmployeeId={setSelectedEmployeeId}
               onLogout={handleLogout}
+              onUserUpdated={(next) => {
+                if (next.id !== user.id) return;
+                localStorage.setItem('current_user', JSON.stringify(next));
+                setUser(next);
+              }}
               initialTab={adminTab}
               onTabChange={(seg) => {
                 setAdminTab(seg);
@@ -835,11 +848,20 @@ const App: React.FC = () => {
             />
           );
         case 'salary-management':
-          if (user.role !== UserRole.ADMIN) {
+          if (user.role !== UserRole.ADMIN || !can(user, 'payroll', 'view')) {
+            const fallback = user.role === UserRole.ADMIN ? firstAllowedAdminPath(user) : null;
+            if (fallback) {
+              updateViewAndURL('admin', true, undefined, fallback);
+              return null;
+            }
             updateViewAndURL('dashboard', true);
             return <Dashboard user={user} />;
           }
-          return <SalaryManagement user={user} setView={setView} />;
+          return (
+            <ViewOnlyGuard active={!can(user, 'payroll', 'edit')}>
+              <SalaryManagement user={user} setView={setView} />
+            </ViewOnlyGuard>
+          );
         case 'employee-profile':
           if (!selectedEmployeeId) {
             return <div className="p-10 text-center text-slate-400">Không tìm thấy nhân viên</div>;

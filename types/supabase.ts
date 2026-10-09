@@ -31,6 +31,7 @@ export interface Database {
           trainee_salary: number | null
           personal_income_tax: number | null
           other_deductions: number | null
+          admin_permissions: string[] | null
           created_at: string
           updated_at: string
         }
@@ -51,6 +52,7 @@ export interface Database {
           trainee_salary?: number | null
           personal_income_tax?: number | null
           other_deductions?: number | null
+          admin_permissions?: string[] | null
           created_at?: string
           updated_at?: string
         }
@@ -71,6 +73,7 @@ export interface Database {
           trainee_salary?: number | null
           personal_income_tax?: number | null
           other_deductions?: number | null
+          admin_permissions?: string[] | null
           created_at?: string
           updated_at?: string
         }

@@ -7,6 +7,8 @@ interface UsersManagementProps {
   onEditUser: (user: User) => void;
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
   language: 'vi' | 'en';
+  showSalary?: boolean;
+  canEdit?: boolean;
 }
 
 type EmployeeStatusTab = 'UNSET' | EmployeeStatus;
@@ -19,7 +21,7 @@ const defaultUserForm = {
   branchId: '',
 };
 
-const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegisterReload, language }) => {
+const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegisterReload, language, showSalary = true, canEdit = true }) => {
   const [employees, setEmployees] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -310,6 +312,7 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3 shrink-0">
+          {canEdit && (
           <button
             type="button"
             onClick={() => { 
@@ -322,6 +325,7 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
           >
             {showUserForm ? text.closeForm : text.addEmployee}
           </button>
+          )}
           <button
             onClick={handleExport}
             disabled={filteredEmployees.length === 0}
@@ -449,7 +453,7 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.branch}</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.role}</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.empCode}</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.salary}</th>
+                  {showSalary && <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.salary}</th>}
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.status}</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-slate-600 uppercase">{text.actions}</th>
                 </tr>
@@ -506,6 +510,7 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
                     <td className="px-6 py-4">
                       <p className="text-sm text-slate-700">{emp.employeeCode || '-'}</p>
                     </td>
+                    {showSalary && (
                     <td className="px-6 py-4">
                       {emp.grossSalary != null ? (
                         <p className="text-sm font-bold text-blue-600">{formatCurrency(emp.grossSalary)}</p>
@@ -513,6 +518,7 @@ const UsersManagement: React.FC<UsersManagementProps> = ({ onEditUser, onRegiste
                         <p className="text-sm text-slate-400">-</p>
                       )}
                     </td>
+                    )}
                     <td className="px-6 py-4">
                       {emp.status ? (
                         <span className={`text-xs font-bold px-2 py-1 rounded ${emp.status === EmployeeStatus.ACTIVE ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-500'}`}>

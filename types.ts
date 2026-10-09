@@ -48,6 +48,8 @@ export interface User {
   personalIncomeTax?: number;     // Khấu trừ thuế TNCN / tháng
   otherDeductions?: number;       // Khấu trừ khác / tháng
   branchId?: string;              // Chi nhánh
+  /** null/undefined với role ADMIN = toàn quyền (tài khoản cũ). Mảng rỗng = không có mục nào. */
+  adminPermissions?: string[] | null;
 }
 
 export enum AttendanceType {

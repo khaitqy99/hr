@@ -1,4 +1,5 @@
 import { User, UserRole, AttendanceRecord, LeaveRequest, Notification, RequestStatus, LeaveType, ShiftRegistration, PayrollRecord, ContractType, EmployeeStatus, AttendanceType, Department, Holiday, SystemConfig, OffType, ShiftTime, Branch, AllowedLocation, AnnualLeaveSummary, isPaidOffType } from '../types';
+import { parseAdminPermissions } from './permissions';
 import { supabase } from './supabase';
 import { calculateRegularAndOTHoursWithNoLunchBreak, payrollDateSetHas } from '../utils/payrollHours';
 import { emitUserEvent, emitAttendanceEvent, emitShiftEvent, emitPayrollEvent, emitDepartmentEvent, emitHolidayEvent, emitConfigEvent, emitNotificationEvent } from './events';
@@ -77,6 +78,7 @@ const mapUserFromDb = (data: any): User => ({
   personalIncomeTax: data.personal_income_tax != null ? Number(data.personal_income_tax) : undefined,
   otherDeductions: data.other_deductions != null ? Number(data.other_deductions) : undefined,
   branchId: data.branch_id || undefined,
+  adminPermissions: parseAdminPermissions(data.admin_permissions),
 });
 
 const mapPayrollFromDb = (record: any): PayrollRecord => ({
@@ -289,6 +291,7 @@ export const createUser = async (data: Omit<User, 'id'> & { id?: string }): Prom
           trainee_salary: data.traineeSalary || null,
           personal_income_tax: data.personalIncomeTax ?? null,
           other_deductions: data.otherDeductions ?? null,
+          admin_permissions: data.adminPermissions === undefined ? null : data.adminPermissions,
         })
         .select()
         .single();
@@ -368,6 +371,7 @@ export const createUser = async (data: Omit<User, 'id'> & { id?: string }): Prom
     traineeSalary: data.traineeSalary,
     personalIncomeTax: data.personalIncomeTax,
     otherDeductions: data.otherDeductions,
+    adminPermissions: data.adminPermissions === undefined ? null : data.adminPermissions,
   };
   users.push(user);
   localStorage.setItem(USERS_KEY, JSON.stringify(users));
@@ -405,6 +409,7 @@ export const updateUser = async (id: string, data: Partial<User>): Promise<User>
       if (data.personalIncomeTax !== undefined) updateData.personal_income_tax = data.personalIncomeTax || null;
       if (data.otherDeductions !== undefined) updateData.other_deductions = data.otherDeductions || null;
       if (data.branchId !== undefined) updateData.branch_id = data.branchId || null;
+      if (data.adminPermissions !== undefined) updateData.admin_permissions = data.adminPermissions;
 
       const { data: updatedUser, error } = await supabase
         .from('users')
