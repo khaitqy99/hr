@@ -51,6 +51,16 @@ const copy = {
     confirmBody: 'Các ô đã xóa giờ sẽ xóa hẳn bản ghi tương ứng.',
     cancel: 'Hủy',
     confirmDelete: 'Xóa và lưu',
+    useLocation: 'Lấy vị trí',
+    locating: 'Đang lấy vị trí...',
+    locationReady: 'Vị trí hiện tại',
+    needLocation: 'Hãy lấy vị trí trước khi tạo mốc mới.',
+    gpsUnsupported: 'Trình duyệt không hỗ trợ GPS.',
+    gpsInsecure: 'Trình duyệt chỉ cho phép xin vị trí trên HTTPS hoặc localhost.',
+    gpsDenied: 'Bạn đã từ chối quyền vị trí. Hãy bật lại trong cài đặt trình duyệt.',
+    gpsUnavailable: 'Không lấy được vị trí. Hãy bật GPS rồi thử lại.',
+    gpsTimeout: 'Định vị quá lâu. Hãy thử lại.',
+    gpsFailed: 'Không thể lấy vị trí. Hãy thử lại.',
     days: ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'],
   },
   en: {
@@ -76,6 +86,16 @@ const copy = {
     confirmBody: 'Cleared times will delete those punch records.',
     cancel: 'Cancel',
     confirmDelete: 'Delete and save',
+    useLocation: 'Use current location',
+    locating: 'Getting location...',
+    locationReady: 'Current location',
+    needLocation: 'Get the current location before creating a new punch.',
+    gpsUnsupported: 'This browser does not support GPS.',
+    gpsInsecure: 'Location is only available on HTTPS or localhost.',
+    gpsDenied: 'Location permission was denied. Turn it back on in the browser settings.',
+    gpsUnavailable: 'Location is unavailable. Turn on GPS and try again.',
+    gpsTimeout: 'Location took too long. Try again.',
+    gpsFailed: 'Could not get the location. Try again.',
     days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
   },
 };
@@ -166,13 +186,17 @@ function rowError(day: DayDraft, label: string, text: (typeof copy)['vi']): stri
   return null;
 }
 
+type DraftChange =
+  | Exclude<AdminWeeklyAttendanceChange, { op: 'create' }>
+  | { op: 'create'; userId: string; timestamp: number; type: AttendanceType };
+
 function slotChange(
   base: SlotDraft,
   next: SlotDraft,
   userId: string,
   dayKey: string,
   type: AttendanceType,
-): AdminWeeklyAttendanceChange | null {
+): DraftChange | null {
   if (base.recordId && !next.time) return { op: 'delete', id: base.recordId };
   if (!base.recordId && next.time) {
     return { op: 'create', userId, timestamp: timestampOnDay(dayKey, next.time), type };
@@ -183,7 +207,11 @@ function slotChange(
   return null;
 }
 
-function collectChanges(baseline: DayDraft[], draft: DayDraft[], userId: string): AdminWeeklyAttendanceChange[] {
+function withLocation(changes: DraftChange[], location: { lat: number; lng: number }): AdminWeeklyAttendanceChange[] {
+  return changes.map(change => (change.op === 'create' ? { ...change, location } : change));
+}
+
+function collectChanges(baseline: DayDraft[], draft: DayDraft[], userId: string): DraftChange[] {
   const changes: AdminWeeklyAttendanceChange[] = [];
   draft.forEach((day, index) => {
     const base = baseline[index];
@@ -217,7 +245,9 @@ const AttendanceWeekEditor: React.FC<AttendanceWeekEditorProps> = ({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [savedMessage, setSavedMessage] = useState('');
-  const [pendingChanges, setPendingChanges] = useState<AdminWeeklyAttendanceChange[] | null>(null);
+  const [pendingChanges, setPendingChanges] = useState<DraftChange[] | null>(null);
+  const [gps, setGps] = useState<{ lat: number; lng: number } | null>(null);
+  const [locating, setLocating] = useState(false);
 
   useEffect(() => {
     const next = buildWeek(records, employeeId, weekStart);
@@ -245,11 +275,44 @@ const AttendanceWeekEditor: React.FC<AttendanceWeekEditorProps> = ({
     )));
   };
 
-  const persist = async (nextChanges: AdminWeeklyAttendanceChange[]) => {
+  const requestLocation = () => {
+    if (!window.isSecureContext) {
+      setError(text.gpsInsecure);
+      return;
+    }
+    if (!navigator.geolocation) {
+      setError(text.gpsUnsupported);
+      return;
+    }
+    setLocating(true);
+    setError('');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setGps({ lat: position.coords.latitude, lng: position.coords.longitude });
+        setLocating(false);
+      },
+      (gpsError) => {
+        if (gpsError.code === 1) setError(text.gpsDenied);
+        else if (gpsError.code === 2) setError(text.gpsUnavailable);
+        else if (gpsError.code === 3) setError(text.gpsTimeout);
+        else setError(text.gpsFailed);
+        setLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 },
+    );
+  };
+
+  const persist = async (nextChanges: DraftChange[]) => {
+    const needsLocation = nextChanges.some(change => change.op === 'create');
+    if (needsLocation && !gps) {
+      setError(text.needLocation);
+      setPendingChanges(null);
+      return;
+    }
     setSaving(true);
     setError('');
     try {
-      await applyAdminWeeklyAttendance(actor, nextChanges);
+      await applyAdminWeeklyAttendance(actor, needsLocation && gps ? withLocation(nextChanges, gps) : nextChanges as AdminWeeklyAttendanceChange[]);
       setPendingChanges(null);
       setSavedMessage(text.saved);
       await onSaved();
@@ -270,6 +333,10 @@ const AttendanceWeekEditor: React.FC<AttendanceWeekEditorProps> = ({
     }
     if (changes.length === 0) {
       setError(text.noChanges);
+      return;
+    }
+    if (changes.some(change => change.op === 'create') && !gps) {
+      setError(text.needLocation);
       return;
     }
     if (changes.some(change => change.op === 'delete')) {
@@ -353,6 +420,22 @@ const AttendanceWeekEditor: React.FC<AttendanceWeekEditorProps> = ({
           </div>
           <p className="text-[11px] text-slate-500 mt-2">{formatShort(weekStart)} – {formatShort(weekEnd)}</p>
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={requestLocation}
+          disabled={saving || locating}
+          className="px-4 py-2 rounded-xl text-xs font-bold border border-sky-200 text-sky-700 hover:bg-sky-50 disabled:opacity-50"
+        >
+          {locating ? text.locating : text.useLocation}
+        </button>
+        {gps && (
+          <span className="text-xs text-slate-600">
+            {text.locationReady}: {gps.lat.toFixed(5)}, {gps.lng.toFixed(5)}
+          </span>
+        )}
       </div>
 
       <div className="overflow-x-auto">

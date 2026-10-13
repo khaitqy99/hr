@@ -603,8 +603,6 @@ export const deleteAttendance = async (id: string): Promise<void> => {
   await emitAttendanceEvent('deleted', id);
 };
 
-const ADMIN_ADJUSTED_LOCATION = { lat: 0, lng: 0, address: 'Điều chỉnh bởi admin' };
-
 export function appendAdminAttendanceNote(existing: string | undefined, adminName: string, at = Date.now()): string {
   const when = new Date(at).toLocaleString('vi-VN', { hour12: false });
   const line = `Admin ${adminName} điều chỉnh (${when})`;
@@ -649,7 +647,7 @@ export const updateAttendance = async (
 
 export type AdminWeeklyAttendanceChange =
   | { op: 'update'; id: string; timestamp: number; notes?: string }
-  | { op: 'create'; userId: string; timestamp: number; type: AttendanceType }
+  | { op: 'create'; userId: string; timestamp: number; type: AttendanceType; location: { lat: number; lng: number } }
   | { op: 'delete'; id: string };
 
 /** Sửa, tạo hoặc xóa mốc vào/ra. Chỉ admin có attendance:edit. Ghi chú cũ được giữ và nối thêm dòng admin. */
@@ -674,7 +672,7 @@ export async function applyAdminWeeklyAttendance(
         userId: change.userId,
         timestamp: change.timestamp,
         type: change.type,
-        location: ADMIN_ADJUSTED_LOCATION,
+        location: change.location,
         status: AttendanceStatus.ON_TIME,
         synced: true,
         notes: appendAdminAttendanceNote(undefined, actor.name, stampedAt),
