@@ -54,6 +54,7 @@ const copy = {
     useLocation: 'Lấy vị trí',
     locating: 'Đang lấy vị trí...',
     locationReady: 'Vị trí hiện tại',
+    locationApplies: 'Vị trí này được ghi cho mọi giờ vào và giờ ra trong tuần.',
     needLocation: 'Hãy lấy vị trí trước khi lưu giờ vào/ra.',
     gpsUnsupported: 'Trình duyệt không hỗ trợ GPS.',
     gpsInsecure: 'Trình duyệt chỉ cho phép xin vị trí trên HTTPS hoặc localhost.',
@@ -89,6 +90,7 @@ const copy = {
     useLocation: 'Use current location',
     locating: 'Getting location...',
     locationReady: 'Current location',
+    locationApplies: 'This location is saved on every check-in and check-out in the week.',
     needLocation: 'Get the current location before saving check-in or check-out times.',
     gpsUnsupported: 'This browser does not support GPS.',
     gpsInsecure: 'Location is only available on HTTPS or localhost.',
@@ -214,7 +216,7 @@ function withLocation(changes: DraftChange[], location: { lat: number; lng: numb
 }
 
 function collectChanges(baseline: DayDraft[], draft: DayDraft[], userId: string): DraftChange[] {
-  const changes: AdminWeeklyAttendanceChange[] = [];
+  const changes: DraftChange[] = [];
   draft.forEach((day, index) => {
     const base = baseline[index];
     const checkIn = slotChange(base.checkIn, day.checkIn, userId, day.dayKey, AttendanceType.CHECK_IN);
@@ -223,6 +225,31 @@ function collectChanges(baseline: DayDraft[], draft: DayDraft[], userId: string)
     if (checkOut) changes.push(checkOut);
   });
   return changes;
+}
+
+/** Khi đã có GPS, mọi mốc vào/ra còn lại trong tuần cũng được cập nhật vị trí, kể cả ô không đổi giờ. */
+function changesForWeek(baseline: DayDraft[], draft: DayDraft[], userId: string, location: { lat: number; lng: number } | null): DraftChange[] {
+  const timeChanges = collectChanges(baseline, draft, userId);
+  if (!location) return timeChanges;
+  const covered = new Set(
+    timeChanges.flatMap(change => (change.op === 'update' || change.op === 'delete' ? [change.id] : [])),
+  );
+  const locationUpdates: DraftChange[] = [];
+  draft.forEach((day, index) => {
+    const base = baseline[index];
+    (['checkIn', 'checkOut'] as const).forEach(field => {
+      const current = day[field];
+      const original = base[field];
+      if (!current.time || !original.recordId || covered.has(original.recordId)) return;
+      locationUpdates.push({
+        op: 'update',
+        id: original.recordId,
+        timestamp: timestampOnDay(day.dayKey, current.time),
+        notes: original.notes,
+      });
+    });
+  });
+  return [...timeChanges, ...locationUpdates];
 }
 
 const AttendanceWeekEditor: React.FC<AttendanceWeekEditorProps> = ({
@@ -263,7 +290,7 @@ const AttendanceWeekEditor: React.FC<AttendanceWeekEditorProps> = ({
     setSavedMessage('');
   }, [employeeId, weekStart]);
 
-  const changes = employeeId ? collectChanges(baseline, draft, employeeId) : [];
+  const changes = employeeId ? changesForWeek(baseline, draft, employeeId, gps) : [];
   const errors = draft.flatMap((day, index) => {
     const problem = rowError(day, dayLabel(day, index, text.days), text);
     return problem ? [problem] : [];
@@ -436,7 +463,7 @@ const AttendanceWeekEditor: React.FC<AttendanceWeekEditorProps> = ({
         </button>
         {gps && (
           <span className="text-xs text-slate-600">
-            {text.locationReady}: {gps.lat.toFixed(5)}, {gps.lng.toFixed(5)}
+            {text.locationReady}: {gps.lat.toFixed(5)}, {gps.lng.toFixed(5)}. {text.locationApplies}
           </span>
         )}
       </div>
