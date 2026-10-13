@@ -674,10 +674,13 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ user, onReg
                     [group.checkIn?.id, group.lunchOut?.id, group.lunchIn?.id, group.checkOut?.id].filter(Boolean) as string[]
                   );
                   const extra = group.records.filter(r => !anchored.has(r.id)).length;
-                  const fmtLoc = (r?: AttendanceRecord) =>
-                    r?.location
-                      ? r.location.address || `${r.location.lat.toFixed(5)}, ${r.location.lng.toFixed(5)}`
-                      : null;
+                  const fmtLoc = (r?: AttendanceRecord) => {
+                    if (!r?.location) return null;
+                    const coords = `${r.location.lat.toFixed(5)}, ${r.location.lng.toFixed(5)}`;
+                    const address = r.location.address?.trim();
+                    if (!address || address === 'Điều chỉnh bởi admin') return coords;
+                    return address;
+                  };
                   return (
                     <tr key={`${group.userId}-${group.dayKey}`} className="hover:bg-sky-50/50 transition-colors align-top">
                       <td className="px-6 py-4">

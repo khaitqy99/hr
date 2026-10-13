@@ -612,7 +612,7 @@ export function appendAdminAttendanceNote(existing: string | undefined, adminNam
 
 export const updateAttendance = async (
   id: string,
-  patch: { timestamp: number; notes?: string },
+  patch: { timestamp: number; notes?: string; location?: { lat: number; lng: number } },
 ): Promise<void> => {
   if (isSupabaseAvailable()) {
     try {
@@ -621,6 +621,7 @@ export const updateAttendance = async (
         .update({
           timestamp: patch.timestamp,
           notes: patch.notes ?? null,
+          ...(patch.location ? { location: patch.location } : {}),
         })
         .eq('id', id);
 
@@ -638,7 +639,12 @@ export const updateAttendance = async (
   const all: AttendanceRecord[] = JSON.parse(localStorage.getItem(ATTENDANCE_KEY) || '[]');
   const index = all.findIndex(record => record.id === id);
   if (index < 0) throw new Error('Không tìm thấy bản ghi chấm công');
-  all[index] = { ...all[index], timestamp: patch.timestamp, notes: patch.notes };
+  all[index] = {
+    ...all[index],
+    timestamp: patch.timestamp,
+    notes: patch.notes,
+    ...(patch.location ? { location: patch.location } : {}),
+  };
   localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(all));
 
   invalidateAttendanceCache();
@@ -646,7 +652,7 @@ export const updateAttendance = async (
 };
 
 export type AdminWeeklyAttendanceChange =
-  | { op: 'update'; id: string; timestamp: number; notes?: string }
+  | { op: 'update'; id: string; timestamp: number; notes?: string; location?: { lat: number; lng: number } }
   | { op: 'create'; userId: string; timestamp: number; type: AttendanceType; location: { lat: number; lng: number } }
   | { op: 'delete'; id: string };
 
@@ -665,6 +671,7 @@ export async function applyAdminWeeklyAttendance(
       await updateAttendance(change.id, {
         timestamp: change.timestamp,
         notes: appendAdminAttendanceNote(change.notes, actor.name, stampedAt),
+        location: change.location,
       });
     } else if (change.op === 'create') {
       await saveAttendance({

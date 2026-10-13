@@ -54,7 +54,7 @@ const copy = {
     useLocation: 'Lấy vị trí',
     locating: 'Đang lấy vị trí...',
     locationReady: 'Vị trí hiện tại',
-    needLocation: 'Hãy lấy vị trí trước khi tạo mốc mới.',
+    needLocation: 'Hãy lấy vị trí trước khi lưu giờ vào/ra.',
     gpsUnsupported: 'Trình duyệt không hỗ trợ GPS.',
     gpsInsecure: 'Trình duyệt chỉ cho phép xin vị trí trên HTTPS hoặc localhost.',
     gpsDenied: 'Bạn đã từ chối quyền vị trí. Hãy bật lại trong cài đặt trình duyệt.',
@@ -89,7 +89,7 @@ const copy = {
     useLocation: 'Use current location',
     locating: 'Getting location...',
     locationReady: 'Current location',
-    needLocation: 'Get the current location before creating a new punch.',
+    needLocation: 'Get the current location before saving check-in or check-out times.',
     gpsUnsupported: 'This browser does not support GPS.',
     gpsInsecure: 'Location is only available on HTTPS or localhost.',
     gpsDenied: 'Location permission was denied. Turn it back on in the browser settings.',
@@ -208,7 +208,9 @@ function slotChange(
 }
 
 function withLocation(changes: DraftChange[], location: { lat: number; lng: number }): AdminWeeklyAttendanceChange[] {
-  return changes.map(change => (change.op === 'create' ? { ...change, location } : change));
+  return changes.map(change => (
+    change.op === 'create' || change.op === 'update' ? { ...change, location } : change
+  ));
 }
 
 function collectChanges(baseline: DayDraft[], draft: DayDraft[], userId: string): DraftChange[] {
@@ -303,8 +305,8 @@ const AttendanceWeekEditor: React.FC<AttendanceWeekEditorProps> = ({
   };
 
   const persist = async (nextChanges: DraftChange[]) => {
-    const needsLocation = nextChanges.some(change => change.op === 'create');
-    if (needsLocation && !gps) {
+    const writesPunch = nextChanges.some(change => change.op === 'create' || change.op === 'update');
+    if (writesPunch && !gps) {
       setError(text.needLocation);
       setPendingChanges(null);
       return;
@@ -312,7 +314,8 @@ const AttendanceWeekEditor: React.FC<AttendanceWeekEditorProps> = ({
     setSaving(true);
     setError('');
     try {
-      await applyAdminWeeklyAttendance(actor, needsLocation && gps ? withLocation(nextChanges, gps) : nextChanges as AdminWeeklyAttendanceChange[]);
+      const located = gps ? withLocation(nextChanges, gps) : nextChanges as AdminWeeklyAttendanceChange[];
+      await applyAdminWeeklyAttendance(actor, located);
       setPendingChanges(null);
       setSavedMessage(text.saved);
       await onSaved();
@@ -335,7 +338,7 @@ const AttendanceWeekEditor: React.FC<AttendanceWeekEditorProps> = ({
       setError(text.noChanges);
       return;
     }
-    if (changes.some(change => change.op === 'create') && !gps) {
+    if (changes.some(change => change.op === 'create' || change.op === 'update') && !gps) {
       setError(text.needLocation);
       return;
     }
