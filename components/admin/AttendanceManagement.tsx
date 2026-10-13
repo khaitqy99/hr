@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AttendanceRecord, AttendanceType, AttendanceStatus, User, UserRole, Branch } from '../../types';
 import { getAllAttendance, getAllUsers, getBranches } from '../../services/db';
+import { can } from '../../services/permissions';
 import { exportToCSV } from '../../utils/export';
 import { pickDayAnchors } from '../../utils/attendanceDay';
+import AttendanceWeekEditor from './AttendanceWeekEditor';
 
 /** yyyy-mm-dd theo giờ local */
 const localDayKey = (timestamp: number) => {
@@ -54,12 +56,13 @@ function buildAttendanceDayGroups(records: AttendanceRecord[]): AttendanceDayGro
 }
 
 interface AttendanceManagementProps {
+  user: User;
   onRegisterReload?: (handler: () => void | Promise<void>) => void;
   setView?: (view: string, options?: { replace?: boolean; adminPath?: string; employeeId?: string }) => void;
   language: 'vi' | 'en';
 }
 
-const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterReload, setView, language }) => {
+const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ user, onRegisterReload, setView, language }) => {
   const PAGE_SIZE = 25;
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
@@ -74,9 +77,12 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
   const [filterBranch, setFilterBranch] = useState<string>('ALL');
   const [currentPage, setCurrentPage] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
+  const [weekEditorOpen, setWeekEditorOpen] = useState(false);
+  const canEditAttendance = can(user, 'attendance', 'edit');
   const t = {
     vi: {
       filters: 'Bộ lọc',
+      adjustWeek: 'Điều chỉnh tuần',
       goToPayroll: 'Tính lương',
       exportCSV: 'Xuất CSV',
       filterByTime: 'Lọc theo thời gian',
@@ -141,6 +147,7 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
     },
     en: {
       filters: 'Filters',
+      adjustWeek: 'Adjust week',
       goToPayroll: 'Go to Payroll',
       exportCSV: 'Export CSV',
       filterByTime: 'Filter by Time',
@@ -428,6 +435,17 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <h3 className="text-sm font-bold text-slate-700">{text.filters}</h3>
           <div className="flex flex-wrap items-center gap-2">
+            {canEditAttendance && (
+              <button
+                type="button"
+                onClick={() => setWeekEditorOpen(open => !open)}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors ${
+                  weekEditorOpen ? 'bg-amber-700 text-white' : 'bg-amber-600 text-white hover:bg-amber-700'
+                }`}
+              >
+                {text.adjustWeek}
+              </button>
+            )}
             {setView && (
               <button
                 onClick={() => setView('admin', { adminPath: 'payroll' })}
@@ -571,6 +589,18 @@ const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ onRegisterR
           </div>
         </div>
       </div>
+
+      {canEditAttendance && weekEditorOpen && (
+        <AttendanceWeekEditor
+          actor={user}
+          employees={employees}
+          records={attendanceRecords}
+          language={language}
+          initialEmployeeId={selectedEmployeeForAttendance}
+          onClose={() => setWeekEditorOpen(false)}
+          onSaved={loadData}
+        />
+      )}
 
       {/* Loading State */}
       {isLoading ? (

@@ -1,5 +1,5 @@
-import { User, UserRole, AttendanceRecord, LeaveRequest, Notification, RequestStatus, LeaveType, ShiftRegistration, PayrollRecord, ContractType, EmployeeStatus, AttendanceType, Department, Holiday, SystemConfig, OffType, ShiftTime, Branch, AllowedLocation, AnnualLeaveSummary, isPaidOffType } from '../types';
-import { parseAdminPermissions } from './permissions';
+import { User, UserRole, AttendanceRecord, LeaveRequest, Notification, RequestStatus, LeaveType, ShiftRegistration, PayrollRecord, ContractType, EmployeeStatus, AttendanceType, AttendanceStatus, Department, Holiday, SystemConfig, OffType, ShiftTime, Branch, AllowedLocation, AnnualLeaveSummary, isPaidOffType } from '../types';
+import { can, parseAdminPermissions } from './permissions';
 import { supabase } from './supabase';
 import { calculateRegularAndOTHoursWithNoLunchBreak, payrollDateSetHas } from '../utils/payrollHours';
 import { emitUserEvent, emitAttendanceEvent, emitShiftEvent, emitPayrollEvent, emitDepartmentEvent, emitHolidayEvent, emitConfigEvent, emitNotificationEvent } from './events';
@@ -602,6 +602,88 @@ export const deleteAttendance = async (id: string): Promise<void> => {
   invalidateAttendanceCache();
   await emitAttendanceEvent('deleted', id);
 };
+
+const ADMIN_ADJUSTED_LOCATION = { lat: 0, lng: 0, address: 'Điều chỉnh bởi admin' };
+
+export function appendAdminAttendanceNote(existing: string | undefined, adminName: string, at = Date.now()): string {
+  const when = new Date(at).toLocaleString('vi-VN', { hour12: false });
+  const line = `Admin ${adminName} điều chỉnh (${when})`;
+  const prev = existing?.trim();
+  return prev ? `${prev}\n${line}` : line;
+}
+
+export const updateAttendance = async (
+  id: string,
+  patch: { timestamp: number; notes?: string },
+): Promise<void> => {
+  if (isSupabaseAvailable()) {
+    try {
+      const { error } = await supabase
+        .from('attendance_records')
+        .update({
+          timestamp: patch.timestamp,
+          notes: patch.notes ?? null,
+        })
+        .eq('id', id);
+
+      if (error) throw new Error(`Lỗi cập nhật attendance: ${error.message}`);
+
+      invalidateAttendanceCache();
+      await emitAttendanceEvent('updated', id);
+      return;
+    } catch (error) {
+      console.error('Error updating attendance in Supabase:', error);
+      throw error;
+    }
+  }
+
+  const all: AttendanceRecord[] = JSON.parse(localStorage.getItem(ATTENDANCE_KEY) || '[]');
+  const index = all.findIndex(record => record.id === id);
+  if (index < 0) throw new Error('Không tìm thấy bản ghi chấm công');
+  all[index] = { ...all[index], timestamp: patch.timestamp, notes: patch.notes };
+  localStorage.setItem(ATTENDANCE_KEY, JSON.stringify(all));
+
+  invalidateAttendanceCache();
+  await emitAttendanceEvent('updated', id);
+};
+
+export type AdminWeeklyAttendanceChange =
+  | { op: 'update'; id: string; timestamp: number; notes?: string }
+  | { op: 'create'; userId: string; timestamp: number; type: AttendanceType }
+  | { op: 'delete'; id: string };
+
+/** Sửa, tạo hoặc xóa mốc vào/ra. Chỉ admin có attendance:edit. Ghi chú cũ được giữ và nối thêm dòng admin. */
+export async function applyAdminWeeklyAttendance(
+  actor: Pick<User, 'role' | 'adminPermissions' | 'name'>,
+  changes: AdminWeeklyAttendanceChange[],
+): Promise<void> {
+  if (!can(actor, 'attendance', 'edit')) {
+    throw new Error('Chỉ admin có quyền sửa chấm công mới được điều chỉnh lịch.');
+  }
+
+  const stampedAt = Date.now();
+  for (const change of changes) {
+    if (change.op === 'update') {
+      await updateAttendance(change.id, {
+        timestamp: change.timestamp,
+        notes: appendAdminAttendanceNote(change.notes, actor.name, stampedAt),
+      });
+    } else if (change.op === 'create') {
+      await saveAttendance({
+        id: crypto.randomUUID(),
+        userId: change.userId,
+        timestamp: change.timestamp,
+        type: change.type,
+        location: ADMIN_ADJUSTED_LOCATION,
+        status: AttendanceStatus.ON_TIME,
+        synced: true,
+        notes: appendAdminAttendanceNote(undefined, actor.name, stampedAt),
+      });
+    } else {
+      await deleteAttendance(change.id);
+    }
+  }
+}
 
 // Helper: Kỳ lương [02/MM, 02/MM+1) theo local time (từ ngày 02 tháng này đến hết ngày 01 tháng sau)
 const getPayrollCycleRange = (month: string): { start: number; endExclusive: number } => {

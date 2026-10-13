@@ -238,7 +238,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, setView, setSelectedEmplo
           />
         );
       case 'ATTENDANCE':
-        return <AttendanceManagement onRegisterReload={registerReloadHandler} setView={setView} language={language} />;
+        return <AttendanceManagement user={user} onRegisterReload={registerReloadHandler} setView={setView} language={language} />;
       case 'SHIFT':
         return <ShiftManagement onRegisterReload={registerReloadHandler} setView={setView} language={language} />;
       case 'PAYROLL':
