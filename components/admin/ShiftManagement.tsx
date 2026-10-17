@@ -861,15 +861,19 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
   };
 
   const prevWeek = () => {
-    const next = new Date(weekStart);
-    next.setDate(next.getDate() - 7);
-    setWeekStart(getWeekStart(next));
+    setWeekStart(current => {
+      const next = new Date(current);
+      next.setDate(next.getDate() - 7);
+      return getWeekStart(next);
+    });
   };
 
   const nextWeek = () => {
-    const next = new Date(weekStart);
-    next.setDate(next.getDate() + 7);
-    setWeekStart(getWeekStart(next));
+    setWeekStart(current => {
+      const next = new Date(current);
+      next.setDate(next.getDate() + 7);
+      return getWeekStart(next);
+    });
   };
 
   const goToToday = () => {
@@ -1101,6 +1105,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
             <span className="text-sm font-semibold text-slate-800">{weekRangeLabel}</span>
             <button
               type="button"
+              data-readonly-allow="true"
               onClick={prevWeek}
               className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 text-sm font-medium"
             >
@@ -1108,6 +1113,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
             </button>
             <button
               type="button"
+              data-readonly-allow="true"
               onClick={goToToday}
               className="px-3 py-2 rounded-xl border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100 text-sm font-medium"
             >
@@ -1115,6 +1121,7 @@ const ShiftManagement: React.FC<ShiftManagementProps> = ({ onRegisterReload, set
             </button>
             <button
               type="button"
+              data-readonly-allow="true"
               onClick={nextWeek}
               className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 text-sm font-medium"
             >

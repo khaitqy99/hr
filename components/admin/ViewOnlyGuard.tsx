@@ -5,7 +5,7 @@ interface ViewOnlyGuardProps {
   children: React.ReactNode;
 }
 
-const VIEW_LABEL = /^(xem(\s|$)|chi tiết|đóng|close|hủy|huỷ|cancel|trước|sau|previous|next|tuần này|this week|hôm nay|today|tải lại|làm mới|reload|lọc|filter)/i;
+const VIEW_LABEL = /^(xem(\s|$)|chi tiết|đóng|close|hủy|huỷ|cancel|trước|sau|previous|prev|next|tuần này|this week|hôm nay|today|tải lại|làm mới|reload|lọc|filter)/i;
 
 function controlLabel(el: Element): string {
   return `${el.getAttribute('title') || ''} ${el.getAttribute('aria-label') || ''} ${el.textContent || ''}`
